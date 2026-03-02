@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "osint-core"
+version = "0.1.0"
+description = "Self-hosted OSINT monitoring platform"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "celery[redis]>=5.4.0",
+  "sqlalchemy[asyncio]>=2.0.0",
+  "asyncpg>=0.29.0",
+  "alembic>=1.13.0",
+  "pydantic>=2.0.0",
+  "pydantic-settings>=2.0.0",
+  "httpx>=0.27.0",
+  "pyyaml>=6.0",
+  "jsonschema>=4.20.0",
+  "apprise>=1.8.0",
+  "qdrant-client>=1.9.0",
+  "sentence-transformers>=3.0.0",
+  "structlog>=24.0.0",
+  "prometheus-fastapi-instrumentator>=7.0.0",
+  "jinja2>=3.1.0",
+  "python-jose[cryptography]>=3.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+  "pytest-cov>=5.0.0",
+  "factory-boy>=3.3.0",
+  "ruff>=0.5.0",
+  "mypy>=1.10.0",
+  "httpx>=0.27.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
