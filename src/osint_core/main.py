@@ -9,6 +9,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from osint_core.api.routes import health, plan
 from osint_core.config import settings
+import osint_core.metrics as metrics  # noqa: F401 — register custom Prometheus metrics
 
 logger = structlog.get_logger()
 
