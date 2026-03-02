@@ -2,8 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
+
+np = pytest.importorskip("numpy", reason="numpy required (install with .[ml])")
 
 
 @pytest.fixture(autouse=True)
