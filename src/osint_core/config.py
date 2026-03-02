@@ -46,6 +46,9 @@ class Settings(BaseSettings):
   keycloak_realm: str = "cortech"
   keycloak_client_id: str = "osint-core"
 
+  # --- Auth ---
+  auth_disabled: bool = True
+
   # --- Application ---
   plan_dir: str = "/app/plans"
   log_level: str = "INFO"
