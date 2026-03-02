@@ -12,6 +12,7 @@ COPY pyproject.toml .
 COPY src/ src/
 RUN pip install --no-cache-dir ".[ml]"
 
+COPY alembic.ini .
 COPY plans/ plans/
 COPY schemas/ schemas/
 COPY migrations/ migrations/
