@@ -1,0 +1,38 @@
+"""Pydantic schemas for event resources."""
+
+import uuid
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel
+
+from osint_core.schemas.common import PaginatedResponse, SeverityEnum
+
+
+class EventResponse(BaseModel):
+    """Serialized event for API responses."""
+
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    event_type: str
+    source_id: str
+
+    title: str | None = None
+    summary: str | None = None
+    raw_excerpt: str | None = None
+
+    occurred_at: datetime | None = None
+    ingested_at: datetime
+
+    score: float | None = None
+    severity: SeverityEnum | None = None
+
+    dedupe_fingerprint: str
+    plan_version_id: uuid.UUID | None = None
+
+    metadata: dict[str, Any] = {}
+
+
+class EventList(PaginatedResponse[EventResponse]):
+    """Paginated list of events."""
