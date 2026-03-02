@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 import jsonschema
 import yaml
+from celery.schedules import crontab
 
 
 def _load_schema() -> dict:
@@ -73,3 +74,46 @@ class PlanEngine:
     def content_hash(self, yaml_str: str) -> str:
         """Compute a deterministic SHA-256 hex digest for the plan content."""
         return hashlib.sha256(yaml_str.encode()).hexdigest()
+
+    def build_beat_schedule(self, plan: dict) -> dict:
+        """Convert a plan's sources list into a Celery Beat schedule.
+
+        Only sources with a ``schedule_cron`` field are included.  Each entry
+        dispatches the ``osint.ingest_source`` task to the ``ingest`` queue.
+
+        Args:
+            plan: Parsed plan dict (must contain a ``sources`` key).
+
+        Returns:
+            Dict suitable for ``celery_app.conf.beat_schedule``.
+        """
+        schedule: dict = {}
+        for source in plan.get("sources", []):
+            cron_expr = source.get("schedule_cron")
+            if not cron_expr:
+                continue
+            source_id = source["id"]
+            schedule[f"ingest-{source_id}"] = {
+                "task": "osint.ingest_source",
+                "schedule": _parse_cron(cron_expr),
+                "args": [source_id],
+                "options": {"queue": "ingest"},
+            }
+        return schedule
+
+
+def _parse_cron(expr: str) -> crontab:
+    """Parse a standard 5-field cron expression into a Celery crontab.
+
+    Format: ``minute hour day_of_month month_of_year day_of_week``
+    """
+    parts = expr.strip().split()
+    if len(parts) != 5:
+        raise ValueError(f"Invalid cron expression (expected 5 fields): {expr!r}")
+    return crontab(
+        minute=parts[0],
+        hour=parts[1],
+        day_of_month=parts[2],
+        month_of_year=parts[3],
+        day_of_week=parts[4],
+    )
