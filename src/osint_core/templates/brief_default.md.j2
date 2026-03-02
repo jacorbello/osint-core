@@ -1,0 +1,28 @@
+# Intel Brief: {{ title }}
+
+**Generated:** {{ generated_at }}
+**Source:** {{ generated_by }}
+
+## Key Events
+{% for event in events %}
+- **{{ event.title or 'Untitled' }}** ({{ event.severity or 'unknown' }}) — Score: {{ event.score or 'N/A' }}
+  Source: {{ event.source_id }}, Date: {{ event.occurred_at or 'unknown' }}
+{% endfor %}
+
+{% if indicators %}
+## Indicators of Compromise
+{% for ioc in indicators %}
+- `{{ ioc.value }}` ({{ ioc.type }})
+{% endfor %}
+{% endif %}
+
+{% if entities %}
+## Entities
+{% for entity in entities %}
+- **{{ entity.name }}** ({{ entity.entity_type }})
+{% endfor %}
+{% endif %}
+
+## Summary
+
+{{ summary_text }}
