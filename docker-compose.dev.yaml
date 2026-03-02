@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: osint
+      POSTGRES_USER: osint
+      POSTGRES_PASSWORD: osint
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations/init-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+
+  api:
+    build:
+      context: .
+      target: api
+    ports:
+      - "8000:8000"
+    environment:
+      OSINT_DATABASE_URL: postgresql+asyncpg://osint:osint@postgres:5432/osint
+      OSINT_REDIS_URL: redis://redis:6379/0
+      OSINT_CELERY_BROKER_URL: redis://redis:6379/1
+      OSINT_CELERY_RESULT_BACKEND: redis://redis:6379/2
+      OSINT_QDRANT_HOST: qdrant
+      OSINT_OLLAMA_URL: http://host.docker.internal:11434
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+
+  worker:
+    build:
+      context: .
+      target: worker
+    environment:
+      OSINT_DATABASE_URL: postgresql+asyncpg://osint:osint@postgres:5432/osint
+      OSINT_REDIS_URL: redis://redis:6379/0
+      OSINT_CELERY_BROKER_URL: redis://redis:6379/1
+      OSINT_CELERY_RESULT_BACKEND: redis://redis:6379/2
+      OSINT_QDRANT_HOST: qdrant
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+
+  beat:
+    build:
+      context: .
+      target: beat
+    environment:
+      OSINT_CELERY_BROKER_URL: redis://redis:6379/1
+      OSINT_CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      - redis
+
+volumes:
+  pgdata:
