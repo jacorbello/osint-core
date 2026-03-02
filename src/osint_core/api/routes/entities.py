@@ -57,4 +57,4 @@ async def get_entity(
     entity = result.scalar_one_or_none()
     if entity is None:
         raise HTTPException(status_code=404, detail="Entity not found")
-    return entity
+    return entity  # type: ignore[return-value]

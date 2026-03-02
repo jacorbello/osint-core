@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -61,7 +62,7 @@ def ensure_collection(client: QdrantClient) -> None:
         )
 
 
-def upsert_event(event_id: str, text: str, payload: dict) -> None:
+def upsert_event(event_id: str, text: str, payload: dict[str, Any]) -> None:
     """Embed text and upsert the event vector into Qdrant.
 
     Args:
@@ -93,7 +94,7 @@ def search_similar(
     text: str,
     limit: int = 10,
     score_threshold: float = 0.5,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Find events semantically similar to the given text.
 
     Args:

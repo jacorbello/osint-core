@@ -8,14 +8,15 @@ For heavy/batch workloads, a Kubernetes Job is dispatched to wrk-3
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, name="osint.enrich_entities", max_retries=3)
-def enrich_entities_task(self, event_id: str) -> dict:
+@celery_app.task(bind=True, name="osint.enrich_entities", max_retries=3)  # type: ignore[untyped-decorator]
+def enrich_entities_task(self: Any, event_id: str) -> dict[str, Any]:
     """Extract named entities from an event and persist them.
 
     Pipeline steps:

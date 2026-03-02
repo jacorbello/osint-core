@@ -1,6 +1,7 @@
 """Plan store — persists and retrieves versioned intelligence collection plans."""
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 import structlog
@@ -26,10 +27,10 @@ class PlanStore:
         plan_id: str,
         version: int,
         content_hash: str,
-        content: dict,
+        content: dict[str, Any],
         retention_class: str,
         git_commit_sha: str | None = None,
-        validation_result: dict | None = None,
+        validation_result: dict[str, Any] | None = None,
         created_by: str = "system",
     ) -> PlanVersion:
         """Store a new plan version in the database.

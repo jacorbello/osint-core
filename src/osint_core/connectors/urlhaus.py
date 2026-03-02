@@ -3,6 +3,7 @@
 import contextlib
 import hashlib
 from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -26,7 +27,7 @@ class UrlhausConnector(BaseConnector):
 
         return items
 
-    def _parse_entry(self, entry: dict) -> RawItem:
+    def _parse_entry(self, entry: dict[str, Any]) -> RawItem:
         mal_url = entry.get("url", "")
         host = entry.get("host", "")
         if not host:
@@ -42,7 +43,7 @@ class UrlhausConnector(BaseConnector):
                     date_added, "%Y-%m-%d %H:%M:%S %Z"
                 ).replace(tzinfo=UTC)
 
-        indicators: list[dict] = [{"type": "url", "value": mal_url}]
+        indicators: list[dict[str, Any]] = [{"type": "url", "value": mal_url}]
         if host:
             indicators.append({"type": "domain", "value": host})
 

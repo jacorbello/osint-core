@@ -52,7 +52,7 @@ async def get_brief(
     brief = result.scalar_one_or_none()
     if brief is None:
         raise HTTPException(status_code=404, detail="Brief not found")
-    return brief
+    return brief  # type: ignore[return-value]
 
 
 @router.post("/generate", response_model=BriefResponse)
@@ -85,4 +85,4 @@ async def generate_brief(
     db.add(brief)
     await db.flush()
     await db.commit()
-    return brief
+    return brief  # type: ignore[return-value]

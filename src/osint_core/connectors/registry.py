@@ -2,10 +2,10 @@ from osint_core.connectors.base import BaseConnector, SourceConfig
 
 
 class ConnectorRegistry:
-    def __init__(self):
+    def __init__(self) -> None:
         self._connectors: dict[str, type[BaseConnector]] = {}
 
-    def register(self, source_type: str, cls: type[BaseConnector]):
+    def register(self, source_type: str, cls: type[BaseConnector]) -> None:
         self._connectors[source_type] = cls
 
     def get(self, source_type: str, config: SourceConfig) -> BaseConnector:

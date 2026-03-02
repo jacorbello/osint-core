@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 import httpx
@@ -63,7 +64,8 @@ async def _fetch_jwks() -> dict[str, Any]:
 def _extract_roles(payload: dict[str, Any]) -> list[str]:
     """Extract realm roles from the JWT payload."""
     realm_access = payload.get("realm_access", {})
-    return realm_access.get("roles", [])
+    roles: list[str] = realm_access.get("roles", [])
+    return roles
 
 
 async def get_current_user(
@@ -140,7 +142,7 @@ async def get_current_user(
         ) from exc
 
 
-def require_role(role: str):
+def require_role(role: str) -> Callable[..., Coroutine[Any, Any, UserInfo]]:
     """Dependency factory that ensures the user has a specific role.
 
     Usage::

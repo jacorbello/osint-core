@@ -36,7 +36,7 @@ async def readyz(response: Response) -> dict[str, str]:
     try:
         import redis.asyncio as aioredis
 
-        r = aioredis.from_url(settings.redis_url, socket_connect_timeout=2)
+        r = aioredis.from_url(settings.redis_url, socket_connect_timeout=2)  # type: ignore[no-untyped-call]
         await r.ping()
         await r.aclose()
         checks["redis"] = "ok"

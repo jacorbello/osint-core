@@ -57,4 +57,4 @@ async def get_indicator(
     indicator = result.scalar_one_or_none()
     if indicator is None:
         raise HTTPException(status_code=404, detail="Indicator not found")
-    return indicator
+    return indicator  # type: ignore[return-value]

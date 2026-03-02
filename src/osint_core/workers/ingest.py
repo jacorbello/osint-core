@@ -5,20 +5,21 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from typing import Any
 
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 
-def _dedupe_fingerprint(source_id: str, item_data: dict) -> str:
+def _dedupe_fingerprint(source_id: str, item_data: dict[str, Any]) -> str:
     """Compute a deterministic SHA-256 fingerprint for deduplication."""
     payload = json.dumps({"source": source_id, **item_data}, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-@celery_app.task(bind=True, name="osint.ingest_source", max_retries=3)
-def ingest_source(self, source_id: str) -> dict:
+@celery_app.task(bind=True, name="osint.ingest_source", max_retries=3)  # type: ignore[untyped-decorator]
+def ingest_source(self: Any, source_id: str) -> dict[str, Any]:
     """Ingest items from a configured source.
 
     Pipeline steps:

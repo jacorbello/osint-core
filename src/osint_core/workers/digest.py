@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, name="osint.compile_digest", max_retries=3)
-def compile_digest(self, plan_id: str, period: str = "daily") -> dict:
+@celery_app.task(bind=True, name="osint.compile_digest", max_retries=3)  # type: ignore[untyped-decorator]
+def compile_digest(self: Any, plan_id: str, period: str = "daily") -> dict[str, Any]:
     """Compile accumulated alerts into a digest notification.
 
     This task is typically scheduled via Celery Beat to run at the end of

@@ -2,6 +2,7 @@
 
 import contextlib
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -27,7 +28,7 @@ class ThreatFoxConnector(BaseConnector):
 
         return items
 
-    def _parse_entry(self, entry: dict) -> RawItem:
+    def _parse_entry(self, entry: dict[str, Any]) -> RawItem:
         ioc_id = str(entry["id"])
         ioc_value = entry.get("ioc", "")
         ioc_type = entry.get("ioc_type", "")
@@ -43,7 +44,7 @@ class ThreatFoxConnector(BaseConnector):
                     first_seen, "%Y-%m-%d %H:%M:%S %Z"
                 ).replace(tzinfo=UTC)
 
-        indicators: list[dict] = [{"type": ioc_type, "value": ioc_value}]
+        indicators: list[dict[str, Any]] = [{"type": ioc_type, "value": ioc_value}]
 
         return RawItem(
             title=f"{malware} - {threat_type} ({ioc_type})",

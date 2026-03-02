@@ -67,7 +67,7 @@ async def get_alert(
     alert = result.scalar_one_or_none()
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
-    return alert
+    return alert  # type: ignore[return-value]
 
 
 @router.post("/{alert_id}/ack", response_model=AlertResponse)
@@ -88,7 +88,7 @@ async def ack_alert(
     alert.acked_by = body.acked_by
     await db.flush()
     await db.commit()
-    return alert
+    return alert  # type: ignore[return-value]
 
 
 @router.post("/{alert_id}/escalate", response_model=AlertResponse)
@@ -107,7 +107,7 @@ async def escalate_alert(
     alert.status = "escalated"
     await db.flush()
     await db.commit()
-    return alert
+    return alert  # type: ignore[return-value]
 
 
 @router.post("/{alert_id}/resolve", response_model=AlertResponse)
@@ -125,4 +125,4 @@ async def resolve_alert(
     alert.status = "resolved"
     await db.flush()
     await db.commit()
-    return alert
+    return alert  # type: ignore[return-value]

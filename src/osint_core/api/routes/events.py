@@ -70,4 +70,4 @@ async def get_event(
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
-    return event
+    return event  # type: ignore[return-value]

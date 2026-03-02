@@ -14,6 +14,7 @@ of correlated events.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,8 @@ DEFAULT_SEMANTIC_THRESHOLD = 0.85
 
 
 def correlate_exact(
-    event_indicators: list[dict],
-    existing_indicators: list[dict],
+    event_indicators: list[dict[str, Any]],
+    existing_indicators: list[dict[str, Any]],
 ) -> bool:
     """Check whether two indicator sets share at least one (type, value) pair.
 
@@ -64,10 +65,10 @@ def is_semantic_duplicate(
 
 
 def find_correlated_events(
-    event_indicators: list[dict],
-    existing_events: list[dict],
+    event_indicators: list[dict[str, Any]],
+    existing_events: list[dict[str, Any]],
     semantic_threshold: float = DEFAULT_SEMANTIC_THRESHOLD,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Find events correlated to the current event via exact or semantic match.
 
     Each entry in *existing_events* is expected to have:
@@ -88,7 +89,7 @@ def find_correlated_events(
         A list of dicts, each containing ``event_id``, ``match_type``
         (``"exact"``, ``"semantic"``, or ``"both"``), and ``score``.
     """
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
 
     for candidate in existing_events:
         exact = correlate_exact(event_indicators, candidate.get("indicators", []))

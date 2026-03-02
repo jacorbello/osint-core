@@ -54,6 +54,31 @@ python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 
+[[tool.mypy.overrides]]
+module = [
+    "celery",
+    "celery.*",
+    "spacy",
+    "spacy.*",
+    "apprise",
+    "apprise.*",
+    "feedparser",
+    "feedparser.*",
+    "prometheus_client",
+    "prometheus_client.*",
+    "prometheus_fastapi_instrumentator",
+    "prometheus_fastapi_instrumentator.*",
+    "sentence_transformers",
+    "sentence_transformers.*",
+    "qdrant_client",
+    "qdrant_client.*",
+    "respx",
+    "respx.*",
+    "redis",
+    "redis.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

@@ -7,6 +7,7 @@ severity thresholds, and formatting alert data into structured messages.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 # Severity ordering for comparisons: info=0, low=1, medium=2, high=3, critical=4
 SEVERITY_ORDER: dict[str, int] = {
@@ -33,7 +34,7 @@ class NotificationRoute:
 
     name: str
     severity_gte: str
-    channels: list[dict] = field(default_factory=list)
+    channels: list[dict[str, Any]] = field(default_factory=list)
 
 
 class NotificationService:

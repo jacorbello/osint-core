@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, name="osint.vectorize_event", max_retries=3)
-def vectorize_event_task(self, event_id: str) -> dict:
+@celery_app.task(bind=True, name="osint.vectorize_event", max_retries=3)  # type: ignore[untyped-decorator]
+def vectorize_event_task(self: Any, event_id: str) -> dict[str, Any]:
     """Embed event text and upsert to Qdrant.
 
     Pipeline steps:
@@ -42,8 +43,8 @@ def vectorize_event_task(self, event_id: str) -> dict:
     }
 
 
-@celery_app.task(bind=True, name="osint.correlate_event", max_retries=3)
-def correlate_event_task(self, event_id: str) -> dict:
+@celery_app.task(bind=True, name="osint.correlate_event", max_retries=3)  # type: ignore[untyped-decorator]
+def correlate_event_task(self: Any, event_id: str) -> dict[str, Any]:
     """Search Qdrant for events similar to this one and record correlations.
 
     Pipeline steps:

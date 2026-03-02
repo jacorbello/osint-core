@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, name="osint.score_event", max_retries=3)
-def score_event_task(self, event_id: str) -> dict:
+@celery_app.task(bind=True, name="osint.score_event", max_retries=3)  # type: ignore[untyped-decorator]
+def score_event_task(self: Any, event_id: str) -> dict[str, Any]:
     """Score a single event by its ID.
 
     Pipeline steps:

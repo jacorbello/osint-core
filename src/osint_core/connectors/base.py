@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 
 @dataclass
@@ -9,18 +10,18 @@ class SourceConfig:
     type: str
     url: str
     weight: float
-    extra: dict = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class RawItem:
     title: str
     url: str
-    raw_data: dict
+    raw_data: dict[str, Any]
     summary: str = ""
     occurred_at: datetime | None = None
     severity: str | None = None
-    indicators: list[dict] = field(default_factory=list)
+    indicators: list[dict[str, Any]] = field(default_factory=list)
 
 
 class BaseConnector(ABC):

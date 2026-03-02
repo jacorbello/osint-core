@@ -5,17 +5,19 @@ import importlib.resources
 import json
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 import jsonschema
 import yaml
 from celery.schedules import crontab
 
 
-def _load_schema() -> dict:
+def _load_schema() -> dict[str, Any]:
     """Load the plan JSON Schema from the osint_core.schemas package."""
     schema_files = importlib.resources.files("osint_core.schemas")
     schema_file = schema_files.joinpath("plan-v1.schema.json")
-    return json.loads(schema_file.read_text(encoding="utf-8"))
+    result: dict[str, Any] = json.loads(schema_file.read_text(encoding="utf-8"))
+    return result
 
 SECRET_PATTERNS = [
     re.compile(r"(?:api[_-]?key|secret|password|token)\s*[:=]\s*[\"']?\S{8,}", re.I),
@@ -32,7 +34,7 @@ class ValidationResult:
     is_valid: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    parsed: dict | None = None
+    parsed: dict[str, Any] | None = None
 
 
 class PlanEngine:
@@ -75,7 +77,7 @@ class PlanEngine:
         """Compute a deterministic SHA-256 hex digest for the plan content."""
         return hashlib.sha256(yaml_str.encode()).hexdigest()
 
-    def build_beat_schedule(self, plan: dict) -> dict:
+    def build_beat_schedule(self, plan: dict[str, Any]) -> dict[str, Any]:
         """Convert a plan's sources list into a Celery Beat schedule.
 
         Only sources with a ``schedule_cron`` field are included.  Each entry
@@ -87,7 +89,7 @@ class PlanEngine:
         Returns:
             Dict suitable for ``celery_app.conf.beat_schedule``.
         """
-        schedule: dict = {}
+        schedule: dict[str, Any] = {}
         for source in plan.get("sources", []):
             cron_expr = source.get("schedule_cron")
             if not cron_expr:

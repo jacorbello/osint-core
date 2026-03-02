@@ -4,6 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from time import struct_time
+from typing import Any
 
 import feedparser
 import httpx
@@ -27,7 +28,7 @@ class RssConnector(BaseConnector):
 
         return items
 
-    def _parse_entry(self, entry) -> RawItem:
+    def _parse_entry(self, entry: Any) -> RawItem:
         title = getattr(entry, "title", "")
         link = getattr(entry, "link", "")
         summary = getattr(entry, "summary", getattr(entry, "description", ""))
@@ -53,7 +54,7 @@ class RssConnector(BaseConnector):
         )
 
     @staticmethod
-    def _parse_date(entry) -> datetime | None:
+    def _parse_date(entry: Any) -> datetime | None:
         # Try published_parsed first, then updated_parsed
         for attr in ("published_parsed", "updated_parsed"):
             parsed: struct_time | None = getattr(entry, attr, None)
@@ -68,7 +69,7 @@ class RssConnector(BaseConnector):
             raw = getattr(entry, attr, None)
             if raw:
                 try:
-                    return parsedate_to_datetime(raw).replace(tzinfo=UTC)
+                    return parsedate_to_datetime(raw).replace(tzinfo=UTC)  # type: ignore[no-any-return]
                 except (ValueError, TypeError):
                     pass
 

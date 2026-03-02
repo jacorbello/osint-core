@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, name="osint.send_notification", max_retries=3)
-def send_notification(self, alert_id: str) -> dict:
+@celery_app.task(bind=True, name="osint.send_notification", max_retries=3)  # type: ignore[untyped-decorator]
+def send_notification(self: Any, alert_id: str) -> dict[str, Any]:
     """Send notifications for an alert through all matched routes.
 
     Pipeline steps:

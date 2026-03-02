@@ -10,16 +10,17 @@ installed can still import the module (tests mock it).
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "en_core_web_sm"
 ALLOWED_LABELS = frozenset({"PERSON", "ORG", "GPE", "PRODUCT", "LOC"})
 
-_nlp = None
+_nlp: Any = None
 
 
-def get_nlp():
+def get_nlp() -> Any:
     """Return the shared spaCy NLP pipeline (lazy-loaded)."""
     global _nlp
     if _nlp is None:
@@ -30,7 +31,7 @@ def get_nlp():
     return _nlp
 
 
-def extract_entities(text: str) -> list[dict]:
+def extract_entities(text: str) -> list[dict[str, Any]]:
     """Extract named entities from text using spaCy NER.
 
     Args:

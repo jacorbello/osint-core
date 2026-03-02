@@ -1,6 +1,7 @@
 """Plan management API routes — validate, sync, activate, rollback, and version listing."""
 
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import structlog
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.api.deps import get_db
 from osint_core.config import settings
+from osint_core.models.plan import PlanVersion
 from osint_core.schemas.plan import PlanValidationResult, PlanVersionResponse
 from osint_core.services.plan_engine import PlanEngine
 from osint_core.services.plan_store import PlanStore
@@ -22,7 +24,7 @@ store = PlanStore()
 
 
 @router.post("/validate", response_model=PlanValidationResult)
-async def validate_plan(request: Request):
+async def validate_plan(request: Request) -> dict[str, Any]:
     """Validate a plan YAML payload without persisting it."""
     body = await request.body()
     result = engine.validate_yaml(body.decode())
@@ -37,17 +39,17 @@ async def validate_plan(request: Request):
 async def get_active_plan(
     plan_id: str = "default",
     db: AsyncSession = Depends(get_db),
-):
+) -> PlanVersionResponse:
     """Return the currently active plan version."""
     # TODO: integration test — requires running Postgres
     active = await store.get_active(db, plan_id)
     if active is None:
         raise HTTPException(status_code=404, detail=f"No active plan found for '{plan_id}'")
-    return active
+    return active  # type: ignore[return-value]
 
 
 @router.post("/sync")
-async def sync_plans(db: AsyncSession = Depends(get_db)):
+async def sync_plans(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Reload plans from disk, validate, and store new versions in the database.
 
     Scans ``settings.plan_dir`` for ``*.yaml`` files, validates each, and stores
@@ -58,8 +60,8 @@ async def sync_plans(db: AsyncSession = Depends(get_db)):
     if not plan_dir.is_dir():
         raise HTTPException(status_code=400, detail=f"Plan directory not found: {plan_dir}")
 
-    synced: list[dict] = []
-    errors: list[dict] = []
+    synced: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
 
     for plan_file in sorted(plan_dir.glob("*.yaml")):
         raw = plan_file.read_text(encoding="utf-8")
@@ -70,6 +72,7 @@ async def sync_plans(db: AsyncSession = Depends(get_db)):
             continue
 
         parsed = result.parsed
+        assert parsed is not None  # validation passed, so parsed is set
         plan_id = parsed["plan_id"]
         content_hash = engine.content_hash(raw)
 
@@ -109,7 +112,7 @@ async def sync_plans(db: AsyncSession = Depends(get_db)):
 async def rollback_plan(
     plan_id: str = "default",
     db: AsyncSession = Depends(get_db),
-):
+) -> dict[str, Any]:
     """Activate the previous version of a plan."""
     rolled_back = await store.rollback(db, plan_id)
     if rolled_back is None:
@@ -128,7 +131,7 @@ async def rollback_plan(
 async def activate_plan(
     version_id: UUID,
     db: AsyncSession = Depends(get_db),
-):
+) -> dict[str, Any]:
     """Activate a specific plan version by its UUID."""
     activated = await store.activate(db, version_id)
     if activated is None:
@@ -146,7 +149,7 @@ async def list_plan_versions(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
-):
+) -> list[PlanVersion]:
     """List all stored versions for a plan, newest first."""
     # TODO: integration test — requires running Postgres
     return await store.get_versions(db, plan_id, limit=limit, offset=offset)

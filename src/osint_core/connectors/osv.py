@@ -1,6 +1,7 @@
 """OSV API feed connector."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -12,7 +13,7 @@ class OsvConnector(BaseConnector):
 
     async def fetch(self) -> list[RawItem]:
         ecosystem = self.config.extra.get("ecosystem", "")
-        body: dict = {"package": {"ecosystem": ecosystem}}
+        body: dict[str, Any] = {"package": {"ecosystem": ecosystem}}
 
         async with httpx.AsyncClient() as client:
             resp = await client.post(self.config.url, json=body)
@@ -26,7 +27,7 @@ class OsvConnector(BaseConnector):
 
         return items
 
-    def _parse_vuln(self, vuln: dict) -> RawItem:
+    def _parse_vuln(self, vuln: dict[str, Any]) -> RawItem:
         vuln_id = vuln["id"]
         summary = vuln.get("summary", "")
         published = vuln.get("published", "")
@@ -49,8 +50,8 @@ class OsvConnector(BaseConnector):
         )
 
     @staticmethod
-    def _build_indicators(vuln: dict) -> list[dict]:
-        indicators: list[dict] = []
+    def _build_indicators(vuln: dict[str, Any]) -> list[dict[str, Any]]:
+        indicators: list[dict[str, Any]] = []
 
         # Add CVE aliases as indicators
         for alias in vuln.get("aliases", []):

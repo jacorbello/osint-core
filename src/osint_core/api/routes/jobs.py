@@ -57,7 +57,7 @@ async def get_job(
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    return job  # type: ignore[return-value]
 
 
 @router.post("/{job_id}/retry", response_model=JobResponse)
@@ -83,4 +83,4 @@ async def retry_job(
     job.error = None
     await db.flush()
     await db.commit()
-    return job
+    return job  # type: ignore[return-value]

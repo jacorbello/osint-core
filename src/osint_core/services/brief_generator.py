@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.resources
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import structlog
@@ -54,9 +55,9 @@ class BriefGenerator:
         self,
         *,
         title: str,
-        events: list[dict],
-        indicators: list[dict],
-        entities: list[dict],
+        events: list[dict[str, Any]],
+        indicators: list[dict[str, Any]],
+        entities: list[dict[str, Any]],
     ) -> str:
         """Render a brief using the Jinja2 template.
 
@@ -123,7 +124,7 @@ class BriefGenerator:
             response.raise_for_status()
 
         data = response.json()
-        text = data.get("response", "")
+        text: str = data.get("response", "")
 
         logger.info(
             "brief_generated_from_ollama",
@@ -140,9 +141,9 @@ class BriefGenerator:
         self,
         *,
         query: str,
-        events: list[dict],
-        indicators: list[dict],
-        entities: list[dict],
+        events: list[dict[str, Any]],
+        indicators: list[dict[str, Any]],
+        entities: list[dict[str, Any]],
     ) -> str:
         """Generate a brief -- try Ollama first, fall back to template on failure.
 
@@ -180,9 +181,9 @@ class BriefGenerator:
 
     @staticmethod
     def _build_context(
-        events: list[dict],
-        indicators: list[dict],
-        entities: list[dict],
+        events: list[dict[str, Any]],
+        indicators: list[dict[str, Any]],
+        entities: list[dict[str, Any]],
     ) -> str:
         """Assemble a plain-text context block for the LLM prompt."""
         lines: list[str] = []

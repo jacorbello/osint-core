@@ -5,6 +5,7 @@ Normalization: lowercase domains/URLs, sort query params, uppercase CVEs.
 """
 
 import re
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 # ---------------------------------------------------------------------------
@@ -25,14 +26,14 @@ _DOMAIN_RE = re.compile(
 )
 
 
-def extract_indicators(text: str) -> list[dict]:
+def extract_indicators(text: str) -> list[dict[str, Any]]:
     """Extract IOC indicators from free text.
 
     Returns a list of dicts with keys ``type`` and ``value``.
     Deduplicates by (type, normalized_value).
     """
     seen: set[tuple[str, str]] = set()
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
 
     def _add(ind_type: str, raw_value: str) -> None:
         normalized = normalize_indicator(ind_type, raw_value)

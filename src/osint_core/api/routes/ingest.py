@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 
 from osint_core.api.deps import get_current_user
@@ -15,7 +17,7 @@ router = APIRouter(prefix="/api/v1/ingest", tags=["ingest"])
 async def run_ingest(
     source_id: str,
     current_user: UserInfo = Depends(get_current_user),
-) -> dict:
+) -> dict[str, Any]:
     """Dispatch a Celery task to ingest from the specified source.
 
     Returns the Celery task ID for tracking.
