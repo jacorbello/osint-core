@@ -6,7 +6,6 @@ build-backend = "hatchling.build"
 name = "osint-core"
 version = "0.1.0"
 description = "Self-hosted OSINT monitoring platform"
-readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
