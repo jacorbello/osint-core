@@ -47,6 +47,9 @@ dev = [
   "types-python-jose>=3.3.0",
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/osint_core"]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100
