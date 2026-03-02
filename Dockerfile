@@ -7,10 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libpq-dev && \
     rm -rf /var/lib/apt/lists/*
 
+# Copy source and install (hatchling needs src/osint_core to build the wheel)
 COPY pyproject.toml .
+COPY src/ src/
 RUN pip install --no-cache-dir ".[ml]"
 
-COPY src/ src/
 COPY plans/ plans/
 COPY schemas/ schemas/
 COPY migrations/ migrations/
