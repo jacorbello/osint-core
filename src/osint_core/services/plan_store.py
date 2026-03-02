@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.models.plan import PlanVersion
@@ -13,7 +13,11 @@ logger = structlog.get_logger()
 
 
 class PlanStore:
-    """Service layer for plan version CRUD via async SQLAlchemy sessions."""
+    """Service layer for plan version CRUD via async SQLAlchemy sessions.
+
+    Methods do NOT commit — callers are responsible for committing the session
+    after all operations in a logical unit of work are complete.
+    """
 
     async def store_version(
         self,
@@ -30,7 +34,7 @@ class PlanStore:
     ) -> PlanVersion:
         """Store a new plan version in the database.
 
-        Returns the newly created PlanVersion row.
+        Returns the newly created PlanVersion row.  Caller must commit.
         """
         plan = PlanVersion(
             plan_id=plan_id,
@@ -43,8 +47,7 @@ class PlanStore:
             activated_by=created_by,
         )
         db.add(plan)
-        await db.commit()
-        await db.refresh(plan)
+        await db.flush()
         logger.info(
             "plan_version_stored",
             plan_id=plan_id,
@@ -100,21 +103,18 @@ class PlanStore:
         if target is None:
             return None
 
-        # Deactivate all other versions of this plan
-        all_stmt = select(PlanVersion).where(
-            PlanVersion.plan_id == target.plan_id,
-            PlanVersion.is_active.is_(True),
+        # Bulk deactivate all active versions of this plan in a single UPDATE
+        await db.execute(
+            update(PlanVersion)
+            .where(PlanVersion.plan_id == target.plan_id, PlanVersion.is_active.is_(True))
+            .values(is_active=False)
         )
-        all_result = await db.execute(all_stmt)
-        for row in all_result.scalars().all():
-            row.is_active = False
 
         # Activate the target
         target.is_active = True
         target.activated_at = datetime.now(timezone.utc)
         target.activated_by = activated_by
-        await db.commit()
-        await db.refresh(target)
+        await db.flush()
 
         logger.info(
             "plan_version_activated",
