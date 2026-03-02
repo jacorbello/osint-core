@@ -18,5 +18,4 @@ def settings() -> Settings:
     gotify_url="http://localhost/message",
     keycloak_url="http://localhost:8080",
     plan_dir="/tmp/osint-plans",
-    _env_file=None,
   )
