@@ -23,7 +23,7 @@ def _mock_sentence_transformer():
 
     fake_model.encode = _encode
 
-    with patch.object(mod, "SentenceTransformer", return_value=fake_model):
+    with patch("sentence_transformers.SentenceTransformer", return_value=fake_model):
         yield fake_model
 
     mod._model = None
@@ -75,7 +75,7 @@ def test_similar_texts_have_high_cosine():
 def test_get_qdrant_returns_client():
     from osint_core.services.vectorize import get_qdrant
 
-    with patch("osint_core.services.vectorize.QdrantClient") as mock_cls:
+    with patch("qdrant_client.QdrantClient") as mock_cls:
         mock_cls.return_value = MagicMock()
         client = get_qdrant()
         mock_cls.assert_called_once()

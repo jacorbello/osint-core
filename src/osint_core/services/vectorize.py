@@ -2,32 +2,36 @@
 
 Uses sentence-transformers (all-MiniLM-L6-v2) to generate 384-dim embeddings
 for OSINT events, and Qdrant for vector storage and similarity search.
+
+These dependencies are optional (install with ``pip install osint-core[ml]``).
+All imports are deferred so the core package loads without them.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
-
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
-from sentence_transformers import SentenceTransformer
+from typing import TYPE_CHECKING, Any
 
 from osint_core.config import settings
+
+if TYPE_CHECKING:
+    from qdrant_client import QdrantClient
 
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 
-_model: SentenceTransformer | None = None
+_model: Any = None
 
 
-def get_model() -> SentenceTransformer:
+def get_model() -> Any:
     """Return the shared SentenceTransformer instance (lazy-loaded)."""
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer
+
         logger.info("Loading sentence-transformer model: %s", MODEL_NAME)
         _model = SentenceTransformer(MODEL_NAME)
     return _model
@@ -43,16 +47,20 @@ def embed_text(text: str) -> list[float]:
         A list of floats with length ``EMBEDDING_DIM`` (384).
     """
     model = get_model()
-    return model.encode(text).tolist()
+    return model.encode(text).tolist()  # type: ignore[no-any-return]
 
 
 def get_qdrant() -> QdrantClient:
     """Return a Qdrant client connected to the configured host."""
-    return QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+    from qdrant_client import QdrantClient as _QdrantClient
+
+    return _QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
 
 
 def ensure_collection(client: QdrantClient) -> None:
     """Create the events collection if it does not already exist."""
+    from qdrant_client.models import Distance, VectorParams
+
     collections = [c.name for c in client.get_collections().collections]
     if settings.qdrant_collection not in collections:
         logger.info("Creating Qdrant collection: %s", settings.qdrant_collection)
@@ -70,6 +78,8 @@ def upsert_event(event_id: str, text: str, payload: dict[str, Any]) -> None:
         text: Text to embed for this event.
         payload: Metadata dict stored alongside the vector.
     """
+    from qdrant_client.models import PointStruct
+
     vector = embed_text(text)
     client = get_qdrant()
     ensure_collection(client)
