@@ -7,7 +7,7 @@ import structlog
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from osint_core.api.routes import health
+from osint_core.api.routes import health, plan
 from osint_core.config import settings
 
 logger = structlog.get_logger()
@@ -33,3 +33,4 @@ app = FastAPI(
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 app.include_router(health.router)
+app.include_router(plan.router)
