@@ -87,6 +87,7 @@ async def ack_alert(
     alert.acked_at = datetime.now(timezone.utc)
     alert.acked_by = body.acked_by
     await db.flush()
+    await db.commit()
     return alert
 
 
@@ -105,6 +106,7 @@ async def escalate_alert(
 
     alert.status = "escalated"
     await db.flush()
+    await db.commit()
     return alert
 
 
@@ -122,4 +124,5 @@ async def resolve_alert(
 
     alert.status = "resolved"
     await db.flush()
+    await db.commit()
     return alert

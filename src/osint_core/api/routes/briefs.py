@@ -84,4 +84,5 @@ async def generate_brief(
     )
     db.add(brief)
     await db.flush()
+    await db.commit()
     return brief

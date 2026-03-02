@@ -25,8 +25,8 @@ __all__ = [
 
 registry = ConnectorRegistry()
 registry.register("cisa_kev", CisaKevConnector)
-registry.register("nvd", NvdConnector)
-registry.register("osv", OsvConnector)
-registry.register("urlhaus", UrlhausConnector)
-registry.register("threatfox", ThreatFoxConnector)
+registry.register("nvd_json_feed", NvdConnector)
+registry.register("osv_api", OsvConnector)
+registry.register("urlhaus_api", UrlhausConnector)
+registry.register("threatfox_api", ThreatFoxConnector)
 registry.register("rss", RssConnector)

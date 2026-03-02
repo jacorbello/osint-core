@@ -82,4 +82,5 @@ async def retry_job(
     job.retry_count += 1
     job.error = None
     await db.flush()
+    await db.commit()
     return job

@@ -269,13 +269,13 @@ def upgrade() -> None:
         sa.Column(
             "event_id",
             sa.UUID(),
-            sa.ForeignKey("osint.events.id"),
+            sa.ForeignKey("osint.events.id", ondelete="CASCADE"),
             primary_key=True,
         ),
         sa.Column(
             "entity_id",
             sa.UUID(),
-            sa.ForeignKey("osint.entities.id"),
+            sa.ForeignKey("osint.entities.id", ondelete="CASCADE"),
             primary_key=True,
         ),
         schema="osint",
@@ -287,13 +287,13 @@ def upgrade() -> None:
         sa.Column(
             "event_id",
             sa.UUID(),
-            sa.ForeignKey("osint.events.id"),
+            sa.ForeignKey("osint.events.id", ondelete="CASCADE"),
             primary_key=True,
         ),
         sa.Column(
             "indicator_id",
             sa.UUID(),
-            sa.ForeignKey("osint.indicators.id"),
+            sa.ForeignKey("osint.indicators.id", ondelete="CASCADE"),
             primary_key=True,
         ),
         schema="osint",
@@ -305,13 +305,13 @@ def upgrade() -> None:
         sa.Column(
             "event_id",
             sa.UUID(),
-            sa.ForeignKey("osint.events.id"),
+            sa.ForeignKey("osint.events.id", ondelete="CASCADE"),
             primary_key=True,
         ),
         sa.Column(
             "artifact_id",
             sa.UUID(),
-            sa.ForeignKey("osint.artifacts.id"),
+            sa.ForeignKey("osint.artifacts.id", ondelete="CASCADE"),
             primary_key=True,
         ),
         schema="osint",

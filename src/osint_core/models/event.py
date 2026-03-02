@@ -26,25 +26,25 @@ from osint_core.models.base import Base, TimestampMixin, UUIDMixin
 event_entities = Table(
     "event_entities",
     Base.metadata,
-    Column("event_id", UUID(as_uuid=True), ForeignKey("osint.events.id"), primary_key=True),
-    Column("entity_id", UUID(as_uuid=True), ForeignKey("osint.entities.id"), primary_key=True),
+    Column("event_id", UUID(as_uuid=True), ForeignKey("osint.events.id", ondelete="CASCADE"), primary_key=True),
+    Column("entity_id", UUID(as_uuid=True), ForeignKey("osint.entities.id", ondelete="CASCADE"), primary_key=True),
 )
 
 event_indicators = Table(
     "event_indicators",
     Base.metadata,
-    Column("event_id", UUID(as_uuid=True), ForeignKey("osint.events.id"), primary_key=True),
+    Column("event_id", UUID(as_uuid=True), ForeignKey("osint.events.id", ondelete="CASCADE"), primary_key=True),
     Column(
-        "indicator_id", UUID(as_uuid=True), ForeignKey("osint.indicators.id"), primary_key=True
+        "indicator_id", UUID(as_uuid=True), ForeignKey("osint.indicators.id", ondelete="CASCADE"), primary_key=True
     ),
 )
 
 event_artifacts = Table(
     "event_artifacts",
     Base.metadata,
-    Column("event_id", UUID(as_uuid=True), ForeignKey("osint.events.id"), primary_key=True),
+    Column("event_id", UUID(as_uuid=True), ForeignKey("osint.events.id", ondelete="CASCADE"), primary_key=True),
     Column(
-        "artifact_id", UUID(as_uuid=True), ForeignKey("osint.artifacts.id"), primary_key=True
+        "artifact_id", UUID(as_uuid=True), ForeignKey("osint.artifacts.id", ondelete="CASCADE"), primary_key=True
     ),
 )
 

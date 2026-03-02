@@ -21,6 +21,7 @@ from osint_core.api.routes import (
     search,
 )
 from osint_core.config import settings
+from osint_core.logging import configure_logging
 import osint_core.metrics as metrics  # noqa: F401 — register custom Prometheus metrics
 
 logger = structlog.get_logger()
@@ -29,6 +30,7 @@ logger = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application startup/shutdown lifecycle."""
+    configure_logging()
     logger.info("osint-core starting", version="0.1.0")
     yield
     logger.info("osint-core shutting down")
