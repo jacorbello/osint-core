@@ -25,6 +25,7 @@ celery_app.conf.update(
         "osint_core.workers.enrich.*": {"queue": "enrich"},
         "osint_core.workers.score.*": {"queue": "score"},
         "osint_core.workers.notify.*": {"queue": "notify"},
+        "osint_core.workers.digest.*": {"queue": "digest"},
     },
 )
 
