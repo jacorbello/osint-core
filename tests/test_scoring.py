@@ -1,0 +1,121 @@
+"""Tests for scoring engine — source reputation, recency decay, and IOC boost."""
+
+import pytest
+from datetime import datetime, timedelta, timezone
+
+from osint_core.services.scoring import score_event, ScoringConfig, score_to_severity
+
+
+def test_base_score_from_source_reputation():
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        source_reputation={"cisa_kev": 1.5},
+        ioc_match_boost=2.0,
+    )
+    score = score_event(
+        source_id="cisa_kev",
+        occurred_at=datetime.now(timezone.utc),
+        indicator_count=0,
+        matched_topics=[],
+        config=config,
+    )
+    assert score == pytest.approx(1.5, abs=0.1)
+
+
+def test_recency_decay():
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        source_reputation={"src": 1.0},
+        ioc_match_boost=1.0,
+    )
+    recent = score_event("src", datetime.now(timezone.utc), 0, [], config)
+    old = score_event("src", datetime.now(timezone.utc) - timedelta(hours=96), 0, [], config)
+    assert recent > old
+    assert old == pytest.approx(recent * 0.25, abs=0.1)  # 2 half-lives
+
+
+def test_ioc_boost():
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        source_reputation={"src": 1.0},
+        ioc_match_boost=3.0,
+    )
+    without = score_event("src", datetime.now(timezone.utc), 0, [], config)
+    with_ioc = score_event("src", datetime.now(timezone.utc), 2, [], config)
+    assert with_ioc == pytest.approx(without * 3.0, abs=0.1)
+
+
+def test_unknown_source_defaults_to_one():
+    """Unknown source_id should default to reputation of 1.0."""
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        source_reputation={"known": 2.0},
+        ioc_match_boost=1.0,
+    )
+    score = score_event("unknown_source", datetime.now(timezone.utc), 0, [], config)
+    assert score == pytest.approx(1.0, abs=0.1)
+
+
+def test_severity_low():
+    assert score_to_severity(0.5) == "low"
+
+
+def test_severity_medium():
+    assert score_to_severity(2.0) == "medium"
+
+
+def test_severity_high():
+    assert score_to_severity(5.0) == "high"
+
+
+def test_severity_critical():
+    assert score_to_severity(8.0) == "critical"
+
+
+def test_severity_boundary_one():
+    """Score of exactly 1.0 should be medium (boundary: 0-1=low, 1-3=medium)."""
+    assert score_to_severity(1.0) == "medium"
+
+
+def test_severity_boundary_three():
+    """Score of exactly 3.0 should be high."""
+    assert score_to_severity(3.0) == "high"
+
+
+def test_severity_boundary_seven():
+    """Score of exactly 7.0 should be critical."""
+    assert score_to_severity(7.0) == "critical"
+
+
+def test_zero_score():
+    """A zero score should be 'low'."""
+    assert score_to_severity(0.0) == "low"
+
+
+def test_very_old_event_has_near_zero_score():
+    """An event from 30 days ago should have a very small score."""
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        source_reputation={"src": 1.0},
+        ioc_match_boost=1.0,
+    )
+    score = score_event(
+        "src",
+        datetime.now(timezone.utc) - timedelta(days=30),
+        0,
+        [],
+        config,
+    )
+    assert score < 0.01
+
+
+def test_ioc_boost_not_applied_when_zero_indicators():
+    """IOC boost should not multiply when indicator_count is 0."""
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        source_reputation={"src": 1.0},
+        ioc_match_boost=10.0,
+    )
+    score = score_event("src", datetime.now(timezone.utc), 0, [], config)
+    # Without IOC boost, score should be close to 1.0 (reputation * ~1.0 recency)
+    assert score == pytest.approx(1.0, abs=0.1)
