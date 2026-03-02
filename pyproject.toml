@@ -39,6 +39,9 @@ dev = [
   "factory-boy>=3.3.0",
   "ruff>=0.5.0",
   "mypy>=1.10.0",
+  "types-jsonschema>=4.20.0",
+  "types-PyYAML>=6.0",
+  "types-python-jose>=3.3.0",
 ]
 
 [tool.ruff]
