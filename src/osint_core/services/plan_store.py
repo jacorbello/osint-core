@@ -1,6 +1,6 @@
 """Plan store — persists and retrieves versioned intelligence collection plans."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
@@ -112,7 +112,7 @@ class PlanStore:
 
         # Activate the target
         target.is_active = True
-        target.activated_at = datetime.now(timezone.utc)
+        target.activated_at = datetime.now(UTC)
         target.activated_by = activated_by
         await db.flush()
 

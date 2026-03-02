@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from osint_core.connectors.base import RawItem, SourceConfig
+from osint_core.connectors.base import SourceConfig
 from osint_core.connectors.osv import OsvConnector
 
 SAMPLE_OSV_RESPONSE = {

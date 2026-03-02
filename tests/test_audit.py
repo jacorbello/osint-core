@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -23,7 +23,7 @@ def _make_audit_log(**overrides) -> AuditLog:
         "resource_type": "event",
         "resource_id": str(uuid.uuid4()),
         "details": {"key": "value"},
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     # Use the constructor — SQLAlchemy instruments it properly

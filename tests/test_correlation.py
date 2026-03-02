@@ -6,7 +6,6 @@ from osint_core.services.correlation import (
     is_semantic_duplicate,
 )
 
-
 # ---- correlate_exact tests ---------------------------------------------------
 
 

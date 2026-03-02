@@ -124,7 +124,7 @@ def test_search_similar_respects_limit():
     mock_client.query_points.return_value.points = []
 
     with patch("osint_core.services.vectorize.get_qdrant", return_value=mock_client):
-        results = search_similar("test query", limit=3)
+        search_similar("test query", limit=3)
         call_args = mock_client.query_points.call_args
         assert call_args.kwargs["limit"] == 3
 

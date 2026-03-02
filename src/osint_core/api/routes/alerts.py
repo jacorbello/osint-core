@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -84,7 +84,7 @@ async def ack_alert(
         raise HTTPException(status_code=404, detail="Alert not found")
 
     alert.status = "acked"
-    alert.acked_at = datetime.now(timezone.utc)
+    alert.acked_at = datetime.now(UTC)
     alert.acked_by = body.acked_by
     await db.flush()
     await db.commit()

@@ -2,7 +2,6 @@
 
 import uuid
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, TIMESTAMP, UUID

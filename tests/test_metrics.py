@@ -2,8 +2,8 @@
 
 from fastapi.testclient import TestClient
 
-from osint_core.main import app
 from osint_core import metrics
+from osint_core.main import app
 
 
 def test_metrics_endpoint():
@@ -11,7 +11,7 @@ def test_metrics_endpoint():
     client = TestClient(app)
     resp = client.get("/metrics")
     assert resp.status_code == 200
-    assert "text/plain" in resp.headers["content-type"] or "text/plain" in resp.text[:0] or resp.headers["content-type"].startswith("text/")
+    assert resp.headers["content-type"].startswith("text/")
 
 
 def test_custom_metrics_registered():

@@ -7,7 +7,7 @@ Scoring -> Alert evaluation -> Notification dispatch -> Brief generation.
 No real Postgres, Redis, or Qdrant needed.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -20,7 +20,6 @@ from osint_core.services.indicators import extract_indicators
 from osint_core.services.notification import NotificationRoute, NotificationService
 from osint_core.services.plan_engine import PlanEngine
 from osint_core.services.scoring import ScoringConfig, score_event, score_to_severity
-
 
 # ---------------------------------------------------------------------------
 # Full end-to-end pipeline test
@@ -107,7 +106,7 @@ async def test_full_pipeline(
     # Score a recent event with indicators
     score = score_event(
         source_id="cisa_kev",
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
         indicator_count=len(indicators),
         matched_topics=[],
         config=scoring_cfg,
@@ -179,7 +178,7 @@ async def test_full_pipeline(
             "severity": severity,
             "score": round(score, 2),
             "source_id": "cisa_kev",
-            "occurred_at": (item.occurred_at or datetime.now(timezone.utc)).isoformat(),
+            "occurred_at": (item.occurred_at or datetime.now(UTC)).isoformat(),
         }
         for item in raw_items
     ]
@@ -305,7 +304,7 @@ def test_scoring_to_alert_pipeline():
     # --- High-priority recent event with indicators ---
     high_score = score_event(
         source_id="cisa_kev",
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
         indicator_count=5,
         matched_topics=[],
         config=config,
@@ -324,7 +323,7 @@ def test_scoring_to_alert_pipeline():
     assert len(fp) == 64
 
     # --- Low-priority old event without indicators ---
-    old_time = datetime.now(timezone.utc) - timedelta(days=7)
+    old_time = datetime.now(UTC) - timedelta(days=7)
     low_score = score_event(
         source_id="rss_threatpost",
         occurred_at=old_time,
@@ -345,7 +344,7 @@ def test_scoring_to_alert_pipeline():
     )
     critical_score = score_event(
         source_id="src",
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
         indicator_count=10,
         matched_topics=[],
         config=critical_config,
@@ -394,14 +393,14 @@ def test_brief_generation_with_pipeline_data():
             "severity": "high",
             "score": 4.5,
             "source_id": "cisa_kev",
-            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "occurred_at": datetime.now(UTC).isoformat(),
         },
         {
             "title": "CVE-2024-0012 - PaloAlto PAN-OS",
             "severity": "high",
             "score": 4.5,
             "source_id": "cisa_kev",
-            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "occurred_at": datetime.now(UTC).isoformat(),
         },
     ]
     indicators = [

@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from osint_core.api.middleware.auth import (
-    UserInfo,
     _DEFAULT_ADMIN,
+    UserInfo,
     get_current_user,
     require_role,
 )
 from osint_core.config import Settings
-
 
 # ---- Helper: build a mini app with a protected route for testing ----
 

@@ -1,11 +1,11 @@
 """Tests for the CISA KEV feed connector."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 
-from osint_core.connectors.base import RawItem, SourceConfig
+from osint_core.connectors.base import SourceConfig
 from osint_core.connectors.cisa_kev import CisaKevConnector
 
 SAMPLE_KEV_RESPONSE = {
@@ -32,7 +32,7 @@ SAMPLE_KEV_RESPONSE = {
             "product": "HTTP Server",
             "vulnerabilityName": "Apache HTTP Server RCE",
             "dateAdded": "2024-01-10",
-            "shortDescription": "Apache HTTP Server contains a remote code execution vulnerability.",
+            "shortDescription": "Apache HTTP Server contains an RCE vulnerability.",
             "requiredAction": "Apply updates per vendor instructions.",
             "dueDate": "2024-01-31",
             "knownRansomwareCampaignUse": "Unknown",
@@ -101,8 +101,8 @@ async def test_fetch_extracts_date_added(connector: CisaKevConnector, respx_mock
         return_value=httpx.Response(200, json=SAMPLE_KEV_RESPONSE)
     )
     items = await connector.fetch()
-    assert items[0].occurred_at == datetime(2024, 1, 15, tzinfo=timezone.utc)
-    assert items[1].occurred_at == datetime(2024, 1, 10, tzinfo=timezone.utc)
+    assert items[0].occurred_at == datetime(2024, 1, 15, tzinfo=UTC)
+    assert items[1].occurred_at == datetime(2024, 1, 10, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

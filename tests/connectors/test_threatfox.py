@@ -1,11 +1,11 @@
 """Tests for the ThreatFox IOC feed connector."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 
-from osint_core.connectors.base import RawItem, SourceConfig
+from osint_core.connectors.base import SourceConfig
 from osint_core.connectors.threatfox import ThreatFoxConnector
 
 SAMPLE_THREATFOX_RESPONSE = {
@@ -166,7 +166,7 @@ async def test_fetch_sets_occurred_at(connector: ThreatFoxConnector, respx_mock)
         return_value=httpx.Response(200, json=SAMPLE_THREATFOX_RESPONSE)
     )
     items = await connector.fetch()
-    assert items[0].occurred_at == datetime(2024, 1, 15, 8, 0, 0, tzinfo=timezone.utc)
+    assert items[0].occurred_at == datetime(2024, 1, 15, 8, 0, 0, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 """OSV API feed connector."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -34,7 +34,7 @@ class OsvConnector(BaseConnector):
         occurred_at = None
         if published:
             occurred_at = datetime.fromisoformat(published.replace("Z", "+00:00")).astimezone(
-                timezone.utc
+                UTC
             )
 
         indicators = self._build_indicators(vuln)

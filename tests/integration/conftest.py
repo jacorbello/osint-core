@@ -2,7 +2,6 @@
 
 import pytest
 
-
 VALID_PLAN_YAML = """\
 version: 1
 plan_id: integration-test-plan

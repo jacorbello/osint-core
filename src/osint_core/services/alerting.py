@@ -125,10 +125,4 @@ def should_escalate(
     current_level = SEVERITY_ORDER.get(current_severity, 0)
     previous_level = SEVERITY_ORDER.get(previous_severity, 0)
 
-    if current_level > previous_level:
-        return True
-
-    if corroborating_sources >= 3:
-        return True
-
-    return False
+    return current_level > previous_level or corroborating_sources >= 3

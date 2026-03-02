@@ -1,7 +1,7 @@
 """Generic RSS/Atom feed connector."""
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from time import struct_time
 
@@ -59,7 +59,7 @@ class RssConnector(BaseConnector):
             parsed: struct_time | None = getattr(entry, attr, None)
             if parsed:
                 try:
-                    return datetime(*parsed[:6], tzinfo=timezone.utc)
+                    return datetime(*parsed[:6], tzinfo=UTC)
                 except (ValueError, TypeError):
                     pass
 
@@ -68,7 +68,7 @@ class RssConnector(BaseConnector):
             raw = getattr(entry, attr, None)
             if raw:
                 try:
-                    return parsedate_to_datetime(raw).replace(tzinfo=timezone.utc)
+                    return parsedate_to_datetime(raw).replace(tzinfo=UTC)
                 except (ValueError, TypeError):
                     pass
 

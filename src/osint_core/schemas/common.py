@@ -1,11 +1,8 @@
 """Common schema types shared across all API resources."""
 
 from enum import StrEnum
-from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field
-
-T = TypeVar("T")
 
 
 class SeverityEnum(StrEnum):
@@ -45,7 +42,7 @@ class RetentionClassEnum(StrEnum):
     evidentiary = "evidentiary"
 
 
-class PaginatedResponse(BaseModel, Generic[T]):
+class PaginatedResponse[T](BaseModel):
     """Generic paginated response wrapper."""
 
     items: list[T]

@@ -6,7 +6,6 @@ import respx
 
 from osint_core.services.brief_generator import BriefGenerator
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

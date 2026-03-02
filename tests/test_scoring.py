@@ -1,9 +1,10 @@
 """Tests for scoring engine — source reputation, recency decay, and IOC boost."""
 
-import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from osint_core.services.scoring import score_event, ScoringConfig, score_to_severity
+import pytest
+
+from osint_core.services.scoring import ScoringConfig, score_event, score_to_severity
 
 
 def test_base_score_from_source_reputation():
@@ -14,7 +15,7 @@ def test_base_score_from_source_reputation():
     )
     score = score_event(
         source_id="cisa_kev",
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
         indicator_count=0,
         matched_topics=[],
         config=config,
@@ -28,8 +29,8 @@ def test_recency_decay():
         source_reputation={"src": 1.0},
         ioc_match_boost=1.0,
     )
-    recent = score_event("src", datetime.now(timezone.utc), 0, [], config)
-    old = score_event("src", datetime.now(timezone.utc) - timedelta(hours=96), 0, [], config)
+    recent = score_event("src", datetime.now(UTC), 0, [], config)
+    old = score_event("src", datetime.now(UTC) - timedelta(hours=96), 0, [], config)
     assert recent > old
     assert old == pytest.approx(recent * 0.25, abs=0.1)  # 2 half-lives
 
@@ -40,8 +41,8 @@ def test_ioc_boost():
         source_reputation={"src": 1.0},
         ioc_match_boost=3.0,
     )
-    without = score_event("src", datetime.now(timezone.utc), 0, [], config)
-    with_ioc = score_event("src", datetime.now(timezone.utc), 2, [], config)
+    without = score_event("src", datetime.now(UTC), 0, [], config)
+    with_ioc = score_event("src", datetime.now(UTC), 2, [], config)
     assert with_ioc == pytest.approx(without * 3.0, abs=0.1)
 
 
@@ -52,7 +53,7 @@ def test_unknown_source_defaults_to_one():
         source_reputation={"known": 2.0},
         ioc_match_boost=1.0,
     )
-    score = score_event("unknown_source", datetime.now(timezone.utc), 0, [], config)
+    score = score_event("unknown_source", datetime.now(UTC), 0, [], config)
     assert score == pytest.approx(1.0, abs=0.1)
 
 
@@ -101,7 +102,7 @@ def test_very_old_event_has_near_zero_score():
     )
     score = score_event(
         "src",
-        datetime.now(timezone.utc) - timedelta(days=30),
+        datetime.now(UTC) - timedelta(days=30),
         0,
         [],
         config,
@@ -116,6 +117,6 @@ def test_ioc_boost_not_applied_when_zero_indicators():
         source_reputation={"src": 1.0},
         ioc_match_boost=10.0,
     )
-    score = score_event("src", datetime.now(timezone.utc), 0, [], config)
+    score = score_event("src", datetime.now(UTC), 0, [], config)
     # Without IOC boost, score should be close to 1.0 (reputation * ~1.0 recency)
     assert score == pytest.approx(1.0, abs=0.1)

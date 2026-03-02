@@ -6,10 +6,9 @@ Uses TestClient with mocked database sessions and auth disabled (default).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from osint_core.api.deps import get_db
@@ -21,7 +20,6 @@ from osint_core.models.entity import Entity
 from osint_core.models.event import Event
 from osint_core.models.indicator import Indicator
 from osint_core.models.job import Job
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,7 +60,7 @@ def _mock_single_result(item):
 
 def _make_event(**overrides) -> MagicMock:
     """Create a mock Event for testing (avoids SQLAlchemy relationship issues)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults = {
         "id": uuid.uuid4(),
         "event_type": "vulnerability",
@@ -91,7 +89,7 @@ def _make_event(**overrides) -> MagicMock:
 
 def _make_indicator(**overrides) -> MagicMock:
     """Create a mock Indicator for testing."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults = {
         "id": uuid.uuid4(),
         "indicator_type": "ipv4",
@@ -113,7 +111,7 @@ def _make_indicator(**overrides) -> MagicMock:
 
 def _make_entity(**overrides) -> MagicMock:
     """Create a mock Entity for testing."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults = {
         "id": uuid.uuid4(),
         "entity_type": "organization",
@@ -133,7 +131,7 @@ def _make_entity(**overrides) -> MagicMock:
 
 def _make_alert(**overrides) -> MagicMock:
     """Create a mock Alert for testing."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults = {
         "id": uuid.uuid4(),
         "fingerprint": "fp-123",
@@ -162,7 +160,7 @@ def _make_alert(**overrides) -> MagicMock:
 
 def _make_brief(**overrides) -> MagicMock:
     """Create a mock Brief for testing."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults = {
         "id": uuid.uuid4(),
         "title": "Test Brief",
@@ -187,7 +185,7 @@ def _make_brief(**overrides) -> MagicMock:
 
 def _make_job(**overrides) -> MagicMock:
     """Create a mock Job for testing."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults = {
         "id": uuid.uuid4(),
         "job_type": "ingest",
@@ -214,7 +212,7 @@ def _make_job(**overrides) -> MagicMock:
 
 def _make_audit_log(**overrides) -> MagicMock:
     """Create a mock AuditLog for testing."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults = {
         "id": uuid.uuid4(),
         "action": "event.created",

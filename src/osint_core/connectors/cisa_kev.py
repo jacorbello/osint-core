@@ -1,6 +1,6 @@
 """CISA Known Exploited Vulnerabilities (KEV) feed connector."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -28,7 +28,7 @@ class CisaKevConnector(BaseConnector):
             occurred_at = None
             if date_added:
                 occurred_at = datetime.strptime(date_added, "%Y-%m-%d").replace(
-                    tzinfo=timezone.utc
+                    tzinfo=UTC
                 )
 
             items.append(

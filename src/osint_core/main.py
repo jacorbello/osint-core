@@ -1,12 +1,13 @@
 """FastAPI application entry point."""
 
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
+import osint_core.metrics as metrics  # noqa: F401 — register custom Prometheus metrics
 from osint_core.api.routes import (
     alerts,
     audit,
@@ -22,7 +23,6 @@ from osint_core.api.routes import (
 )
 from osint_core.config import settings
 from osint_core.logging import configure_logging
-import osint_core.metrics as metrics  # noqa: F401 — register custom Prometheus metrics
 
 logger = structlog.get_logger()
 

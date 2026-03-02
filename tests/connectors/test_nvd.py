@@ -1,11 +1,11 @@
 """Tests for the NVD API 2.0 feed connector."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 
-from osint_core.connectors.base import RawItem, SourceConfig
+from osint_core.connectors.base import SourceConfig
 from osint_core.connectors.nvd import NvdConnector
 
 SAMPLE_NVD_RESPONSE = {
@@ -193,7 +193,7 @@ async def test_fetch_sets_occurred_at(connector: NvdConnector, respx_mock):
         return_value=httpx.Response(200, json=SAMPLE_NVD_RESPONSE)
     )
     items = await connector.fetch()
-    assert items[0].occurred_at == datetime(2024, 1, 10, 12, 0, 0, tzinfo=timezone.utc)
+    assert items[0].occurred_at == datetime(2024, 1, 10, 12, 0, 0, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

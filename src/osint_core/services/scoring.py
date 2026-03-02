@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -54,7 +54,7 @@ def score_event(
     base = config.source_reputation.get(source_id, 1.0)
 
     # Recency decay: 0.5^(hours_old / half_life)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     hours_old = max((now - occurred_at).total_seconds() / 3600.0, 0.0)
     decay = math.pow(0.5, hours_old / config.recency_half_life_hours)
 

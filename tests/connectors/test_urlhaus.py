@@ -5,7 +5,7 @@ import hashlib
 import httpx
 import pytest
 
-from osint_core.connectors.base import RawItem, SourceConfig
+from osint_core.connectors.base import SourceConfig
 from osint_core.connectors.urlhaus import UrlhausConnector
 
 SAMPLE_URLHAUS_RESPONSE = {
@@ -134,7 +134,7 @@ async def test_dedupe_key_uses_url_hash(connector: UrlhausConnector, respx_mock)
     )
     items = await connector.fetch()
     url_hash = hashlib.sha256(
-        "http://malware.example.com/payload.exe".encode()
+        b"http://malware.example.com/payload.exe"
     ).hexdigest()[:16]
     assert connector.dedupe_key(items[0]) == f"urlhaus:{url_hash}"
 

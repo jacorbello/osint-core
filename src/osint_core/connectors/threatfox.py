@@ -1,6 +1,7 @@
 """ThreatFox IOC feed connector."""
 
-from datetime import datetime, timezone
+import contextlib
+from datetime import UTC, datetime
 
 import httpx
 
@@ -37,12 +38,10 @@ class ThreatFoxConnector(BaseConnector):
 
         occurred_at = None
         if first_seen:
-            try:
+            with contextlib.suppress(ValueError):
                 occurred_at = datetime.strptime(
                     first_seen, "%Y-%m-%d %H:%M:%S %Z"
-                ).replace(tzinfo=timezone.utc)
-            except ValueError:
-                pass
+                ).replace(tzinfo=UTC)
 
         indicators: list[dict] = [{"type": ioc_type, "value": ioc_value}]
 

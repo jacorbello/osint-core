@@ -1,7 +1,8 @@
 """URLhaus malicious URL feed connector."""
 
+import contextlib
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import httpx
@@ -36,12 +37,10 @@ class UrlhausConnector(BaseConnector):
 
         occurred_at = None
         if date_added:
-            try:
+            with contextlib.suppress(ValueError):
                 occurred_at = datetime.strptime(
                     date_added, "%Y-%m-%d %H:%M:%S %Z"
-                ).replace(tzinfo=timezone.utc)
-            except ValueError:
-                pass
+                ).replace(tzinfo=UTC)
 
         indicators: list[dict] = [{"type": "url", "value": mal_url}]
         if host:

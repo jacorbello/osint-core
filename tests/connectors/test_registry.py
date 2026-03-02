@@ -1,4 +1,5 @@
 import pytest
+
 from osint_core.connectors.base import BaseConnector, RawItem, SourceConfig
 from osint_core.connectors.registry import ConnectorRegistry
 

@@ -5,7 +5,7 @@ import hashlib
 import httpx
 import pytest
 
-from osint_core.connectors.base import RawItem, SourceConfig
+from osint_core.connectors.base import SourceConfig
 from osint_core.connectors.rss import RssConnector
 
 SAMPLE_RSS_FEED = """<?xml version="1.0" encoding="UTF-8"?>
@@ -24,7 +24,7 @@ SAMPLE_RSS_FEED = """<?xml version="1.0" encoding="UTF-8"?>
     <item>
       <title>New ransomware campaign targets healthcare</title>
       <link>https://security.example.com/ransomware-healthcare</link>
-      <description>Healthcare organizations are being targeted by a new ransomware variant.</description>
+      <description>Healthcare orgs targeted by new ransomware variant.</description>
       <pubDate>Sun, 14 Jan 2024 08:00:00 GMT</pubDate>
       <guid>https://security.example.com/ransomware-healthcare</guid>
     </item>
@@ -130,7 +130,7 @@ async def test_dedupe_key_uses_feed_id_and_link_hash(connector: RssConnector, re
     )
     items = await connector.fetch()
     link_hash = hashlib.sha256(
-        "https://security.example.com/openssl-vuln".encode()
+        b"https://security.example.com/openssl-vuln"
     ).hexdigest()[:16]
     assert connector.dedupe_key(items[0]) == f"rss:security-rss:{link_hash}"
 

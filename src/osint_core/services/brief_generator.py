@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib.resources
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import structlog
@@ -80,7 +80,7 @@ class BriefGenerator:
 
         md = self._template.render(
             title=title,
-            generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            generated_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             generated_by="template",
             events=events,
             indicators=indicators,

@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 
 from osint_core.main import app
 
-
 VALID_PLAN = """
 version: 1
 plan_id: test-plan

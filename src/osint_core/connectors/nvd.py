@@ -1,6 +1,6 @@
 """NVD API 2.0 feed connector."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -45,7 +45,7 @@ class NvdConnector(BaseConnector):
         occurred_at = None
         if published:
             occurred_at = datetime.strptime(published, "%Y-%m-%dT%H:%M:%S.%f").replace(
-                tzinfo=timezone.utc
+                tzinfo=UTC
             )
 
         return RawItem(
