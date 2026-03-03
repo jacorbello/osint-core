@@ -14,6 +14,11 @@
 
 ### Task 1: Create Makefile
 
+> **Note:** The Makefile below reflects the initial plan. During implementation, code review
+> refined two things: (1) `check` no longer includes `format` (it's read-only: lint + typecheck + test),
+> and (2) `scan` includes `--ignorefile .trivyignore` for CI parity. See the actual `Makefile` for
+> the current version.
+
 **Files:**
 - Create: `Makefile`
 

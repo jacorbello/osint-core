@@ -144,7 +144,7 @@ Local task runner mirroring CI. Default target is `help`.
 | `lint` | `ruff check src/ tests/` |
 | `typecheck` | `mypy src/osint_core/` |
 | `test` | `pytest --cov=osint_core --cov-report=term-missing -v` |
-| `check` | format + lint + typecheck + test (fast, mirrors CI) |
+| `check` | lint + typecheck + test (read-only, mirrors CI) |
 | `check-full` | check + scan |
 | `build` | Docker build with SHA tag + `:local` |
 | `push` | Push to Harbor |
