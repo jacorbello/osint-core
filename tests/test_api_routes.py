@@ -77,6 +77,13 @@ def _make_event(**overrides) -> MagicMock:
         "raw_excerpt": None,
         "plan_version_id": None,
         "search_vector": None,
+        "latitude": None,
+        "longitude": None,
+        "country_code": None,
+        "region": None,
+        "source_category": None,
+        "actors": None,
+        "event_subtype": None,
     }
     defaults.update(overrides)
     mock = MagicMock(spec=Event)

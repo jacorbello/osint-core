@@ -12,10 +12,11 @@ import yaml
 from celery.schedules import crontab
 
 
-def _load_schema() -> dict[str, Any]:
+def _load_schema(version: int = 1) -> dict[str, Any]:
     """Load the plan JSON Schema from the osint_core.schemas package."""
     schema_files = importlib.resources.files("osint_core.schemas")
-    schema_file = schema_files.joinpath("plan-v1.schema.json")
+    filename = f"plan-v{version}.schema.json"
+    schema_file = schema_files.joinpath(filename)
     result: dict[str, Any] = json.loads(schema_file.read_text(encoding="utf-8"))
     return result
 
@@ -41,8 +42,10 @@ class PlanEngine:
     """Validates OSINT collection plans and computes content hashes."""
 
     def __init__(self) -> None:
-        self._schema = _load_schema()
-        self._validator = jsonschema.Draft202012Validator(self._schema)
+        self._schema_v1 = _load_schema(1)
+        self._schema_v2 = _load_schema(2)
+        self._validator_v1 = jsonschema.Draft202012Validator(self._schema_v1)
+        self._validator_v2 = jsonschema.Draft202012Validator(self._schema_v2)
 
     def validate_yaml(self, yaml_str: str) -> ValidationResult:
         """Validate a plan YAML string against the JSON Schema and scan for embedded secrets."""
@@ -57,8 +60,12 @@ class PlanEngine:
         if not isinstance(parsed, dict):
             return ValidationResult(is_valid=False, errors=["Plan must be a YAML mapping"])
 
+        # Select validator based on version
+        version = parsed.get("version", 1)
+        validator = self._validator_v2 if version == 2 else self._validator_v1
+
         # JSON Schema validation
-        for err in self._validator.iter_errors(parsed):
+        for err in validator.iter_errors(parsed):
             errors.append(f"{err.json_path}: {err.message}")
 
         # Secret scan

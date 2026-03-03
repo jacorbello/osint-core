@@ -1,0 +1,68 @@
+version: 2
+plan_id: cortech-osint-master
+plan_type: master
+description: "Master OSINT collection plan — defines global defaults and child plan references."
+
+defaults:
+  scoring:
+    recency_half_life_hours: 12
+    ioc_match_boost: 2.0
+  notifications:
+    default_dedupe_window_minutes: 30
+    quiet_hours:
+      timezone: "America/Chicago"
+      start: "23:00"
+      end: "07:00"
+    routes:
+      - name: critical-alerts
+        when:
+          severity_gte: critical
+        channels:
+          - type: gotify
+            application: "osint-critical"
+            priority: 10
+      - name: high-alerts
+        when:
+          severity_gte: high
+        channels:
+          - type: gotify
+            application: "osint-alerts"
+            priority: 8
+
+children:
+  - plan_id: cyber-threat-intel
+  - plan_id: military-intel
+  - plan_id: humanitarian-intel
+
+watches:
+  - name: home-region
+    region: "North America"
+    country_codes:
+      - "USA"
+    severity_threshold: medium
+  - name: eastern-europe
+    region: "Eastern Europe"
+    country_codes:
+      - "UKR"
+      - "RUS"
+      - "BLR"
+      - "POL"
+      - "ROU"
+    severity_threshold: low
+    keywords:
+      - "NATO"
+      - "Wagner"
+      - "nuclear"
+  - name: middle-east
+    region: "Middle East"
+    country_codes:
+      - "IRN"
+      - "IRQ"
+      - "ISR"
+      - "SYR"
+      - "YEM"
+    severity_threshold: low
+    keywords:
+      - "IRGC"
+      - "Hezbollah"
+      - "Hamas"

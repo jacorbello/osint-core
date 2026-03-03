@@ -116,6 +116,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Log in to Harbor (for scan pull)
+        run: echo "${{ secrets.HARBOR_PASSWORD }}" | docker login harbor.corbello.io -u "${{ secrets.HARBOR_USERNAME }}" --password-stdin
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@0.28.0
         with:
@@ -128,10 +131,12 @@ jobs:
           trivyignores: ".trivyignore"
         env:
           TRIVY_DB_REPOSITORY: "ghcr.io/aquasecurity/trivy-db"
+          TRIVY_USERNAME: "${{ secrets.HARBOR_USERNAME }}"
+          TRIVY_PASSWORD: "${{ secrets.HARBOR_PASSWORD }}"
 
       - name: Upload Trivy scan to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: "trivy-results.sarif"
 

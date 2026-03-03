@@ -1,0 +1,62 @@
+version: 2
+plan_id: humanitarian-intel
+plan_type: child
+parent_plan_id: cortech-osint-master
+retention_class: standard
+description: "Humanitarian and human rights intelligence sources."
+
+source_profiles:
+  reliefweb:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "free"
+  hrw_news:
+    reliability: A
+    credibility: 2
+    corroboration_required: false
+    license: "public"
+  amnesty:
+    reliability: A
+    credibility: 2
+    corroboration_required: false
+    license: "public"
+
+sources:
+  - id: reliefweb
+    type: reliefweb_api
+    url: "https://api.reliefweb.int/v2/reports"
+    weight: 1.0
+    schedule_cron: "0 */4 * * *"
+    params:
+      appname: "osint-core-cortech"
+
+  - id: hrw_news
+    type: rss
+    url: "https://www.hrw.org/rss/news"
+    weight: 1.2
+    schedule_cron: "0 */6 * * *"
+
+  - id: amnesty
+    type: rss
+    url: "https://www.amnesty.org/en/feed/"
+    weight: 1.2
+    schedule_cron: "0 */6 * * *"
+
+scoring:
+  recency_half_life_hours: 24
+  source_reputation:
+    reliefweb: 1.0
+    hrw_news: 1.2
+    amnesty: 1.2
+  ioc_match_boost: 1.5
+
+notifications:
+  routes:
+    - name: humanitarian-high
+      when:
+        severity_gte: high
+      channels:
+        - type: gotify
+          application: "osint-humanitarian"
+          priority: 7
