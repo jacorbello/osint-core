@@ -6,7 +6,7 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - "*.md"
+      - "**/*.md"
       - "docs/**"
       - "LICENSE"
 
@@ -90,10 +90,14 @@ jobs:
       - name: Push image and capture digest
         id: push
         run: |
-          docker push ${{ env.IMAGE }}:${{ github.sha }}
+          docker push ${{ env.IMAGE }}:${{ github.sha }} 2>&1 | tee /tmp/push.log
           docker push ${{ env.IMAGE }}:${{ steps.vars.outputs.short_sha }}
           docker push ${{ env.IMAGE }}:latest
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ env.IMAGE }}:${{ github.sha }} | cut -d@ -f2)
+          DIGEST=$(grep -oP 'sha256:[a-f0-9]{64}' /tmp/push.log | head -1)
+          if [ -z "$DIGEST" ]; then
+            echo "::error::Failed to capture image digest from push output"
+            exit 1
+          fi
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "::notice::Image digest: ${DIGEST}"
 
@@ -101,7 +105,7 @@ jobs:
   scan:
     runs-on: self-hosted
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
     steps:
       - uses: actions/checkout@v4
 
@@ -139,26 +143,23 @@ jobs:
           echo "${{ secrets.DEPLOY_KEY_INFRA }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
-          cat >> ~/.ssh/config <<EOF
-          Host github.com
-            IdentityFile ~/.ssh/deploy_key
-            StrictHostKeyChecking yes
-          EOF
 
       - name: Install kustomize
-        uses: imranismail/setup-kustomize@v2
+        uses: imranismail/setup-kustomize@v2.1.0
 
       - name: Clone cortech-infra and update image tag
         env:
+          GIT_SSH_COMMAND: "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes"
           SHORT_SHA: ${{ needs.build.outputs.short_sha }}
           FULL_SHA: ${{ github.sha }}
           DIGEST: ${{ needs.build.outputs.digest }}
           RUN_ID: ${{ github.run_id }}
         run: |
           git clone git@github.com:jacorbello/cortech-infra.git /tmp/cortech-infra
-          cd /tmp/cortech-infra/apps/osint/overlays/production
+          cd /tmp/cortech-infra
 
-          kustomize edit set image ${{ env.IMAGE }}:${SHORT_SHA}
+          # kustomize edit operates on the current directory
+          (cd apps/osint/overlays/production && kustomize edit set image ${{ env.IMAGE }}:${SHORT_SHA})
 
           # No-op if image tag is already current
           if git diff --quiet; then
