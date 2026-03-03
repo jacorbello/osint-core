@@ -22,6 +22,15 @@ class RawItem:
     occurred_at: datetime | None = None
     severity: str | None = None
     indicators: list[dict[str, Any]] = field(default_factory=list)
+    # Geographic fields
+    latitude: float | None = None
+    longitude: float | None = None
+    country_code: str | None = None
+    region: str | None = None
+    source_category: str | None = None
+    actors: list[dict[str, Any]] = field(default_factory=list)
+    event_type: str | None = None
+    fatalities: int | None = None
 
 
 class BaseConnector(ABC):
