@@ -31,6 +31,13 @@ class EventResponse(BaseModel):
     dedupe_fingerprint: str
     plan_version_id: uuid.UUID | None = None
 
+    # Geographic fields
+    latitude: float | None = None
+    longitude: float | None = None
+    country_code: str | None = None
+    region: str | None = None
+    source_category: str | None = None
+
     metadata: dict[str, Any] = {}
 
 

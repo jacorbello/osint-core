@@ -1,26 +1,35 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://osint-core.corbello.io/schemas/plan-v1.schema.json",
-  "title": "OSINT Collection Plan v1",
-  "description": "Schema for OSINT collection plan YAML files — defines sources, scoring rules, and notification routing.",
+  "$id": "https://osint-core.corbello.io/schemas/plan-v2.schema.json",
+  "title": "OSINT Collection Plan v2",
+  "description": "Schema for hierarchical OSINT collection plans — supports master plans with defaults/children and child plans with sources/scoring.",
   "type": "object",
-  "required": ["version", "plan_id", "sources", "scoring", "notifications"],
+  "required": ["version", "plan_id", "plan_type"],
   "additionalProperties": false,
   "properties": {
     "version": {
       "type": "integer",
-      "const": 1,
-      "description": "Schema version, must be 1."
+      "const": 2,
+      "description": "Schema version, must be 2."
     },
     "plan_id": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$",
       "description": "Unique lowercase-hyphenated identifier for the plan."
     },
+    "plan_type": {
+      "type": "string",
+      "enum": ["master", "child"],
+      "description": "Whether this is a master plan (defines defaults and children) or a child plan (defines sources and scoring)."
+    },
     "description": {
       "type": "string",
       "maxLength": 500,
       "description": "Human-readable description of the plan."
+    },
+    "parent_plan_id": {
+      "type": "string",
+      "description": "Plan ID of the parent master plan (child plans only)."
     },
     "retention_class": {
       "type": "string",
@@ -28,69 +37,130 @@
       "default": "standard",
       "description": "Data retention class governing how long collected items are stored."
     },
+    "defaults": {
+      "type": "object",
+      "description": "Default scoring and notification settings inherited by child plans (master plans only).",
+      "properties": {
+        "scoring": {
+          "$ref": "#/$defs/scoring"
+        },
+        "notifications": {
+          "$ref": "#/$defs/notifications"
+        }
+      },
+      "additionalProperties": false
+    },
+    "children": {
+      "type": "array",
+      "description": "List of child plan references (master plans only).",
+      "items": {
+        "type": "object",
+        "required": ["plan_id"],
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "description": "Plan ID of the child plan."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "watches": {
+      "type": "array",
+      "description": "Geographic or thematic watch definitions (master plans only).",
+      "items": {
+        "$ref": "#/$defs/watch"
+      }
+    },
     "sources": {
       "type": "array",
       "minItems": 1,
-      "description": "List of OSINT sources to collect from.",
+      "description": "List of OSINT sources to collect from (child plans only).",
       "items": {
-        "type": "object",
-        "required": ["id", "type"],
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^[a-z0-9_]+$",
-            "description": "Unique identifier for this source within the plan."
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "rss",
-              "sitemap",
-              "http_html",
-              "http_pdf",
-              "http_json",
-              "nvd_json_feed",
-              "osv_api",
-              "cisa_kev",
-              "urlhaus_api",
-              "threatfox_api",
-              "github_releases",
-              "gdelt_api",
-              "reliefweb_api",
-              "shodan_api"
-            ],
-            "description": "Source collector type."
-          },
-          "url": {
-            "type": "string",
-            "format": "uri",
-            "description": "URL endpoint for the source."
-          },
-          "weight": {
-            "type": "number",
-            "minimum": 0.0,
-            "maximum": 10.0,
-            "default": 1.0,
-            "description": "Scoring weight multiplier for items from this source."
-          },
-          "schedule_cron": {
-            "type": "string",
-            "description": "Cron expression for collection schedule."
-          },
-          "params": {
-            "type": "object",
-            "description": "Arbitrary source-specific parameters.",
-            "additionalProperties": true
-          }
+        "$ref": "#/$defs/source"
+      }
+    },
+    "scoring": {
+      "$ref": "#/$defs/scoring"
+    },
+    "notifications": {
+      "$ref": "#/$defs/notifications"
+    },
+    "source_profiles": {
+      "type": "object",
+      "description": "Map of source IDs to reliability/credibility profiles (child plans only).",
+      "additionalProperties": {
+        "$ref": "#/$defs/source_profile"
+      }
+    }
+  },
+  "if": {
+    "properties": {
+      "plan_type": { "const": "master" }
+    }
+  },
+  "then": {
+    "required": ["defaults"]
+  },
+  "else": {
+    "required": ["sources", "scoring", "notifications"]
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "required": ["id", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$",
+          "description": "Unique identifier for this source within the plan."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "rss",
+            "sitemap",
+            "http_html",
+            "http_pdf",
+            "http_json",
+            "nvd_json_feed",
+            "osv_api",
+            "cisa_kev",
+            "urlhaus_api",
+            "threatfox_api",
+            "github_releases",
+            "gdelt_api",
+            "reliefweb_api",
+            "shodan_api"
+          ],
+          "description": "Source collector type."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL endpoint for the source."
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 10.0,
+          "default": 1.0,
+          "description": "Scoring weight multiplier for items from this source."
+        },
+        "schedule_cron": {
+          "type": "string",
+          "description": "Cron expression for collection schedule."
+        },
+        "params": {
+          "type": "object",
+          "description": "Arbitrary source-specific parameters.",
+          "additionalProperties": true
         }
       }
     },
     "scoring": {
       "type": "object",
-      "required": ["recency_half_life_hours", "source_reputation", "ioc_match_boost"],
-      "additionalProperties": false,
-      "description": "Scoring configuration for collected items.",
       "properties": {
         "recency_half_life_hours": {
           "type": "number",
@@ -125,14 +195,13 @@
             },
             "tags_any": {
               "type": "array",
-              "items": {
-                "type": "string"
-              },
+              "items": { "type": "string" },
               "description": "If any of these tags are present, force an alert."
             }
           }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "notifications": {
       "type": "object",
@@ -193,16 +262,12 @@
                   },
                   "tags_any": {
                     "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
+                    "items": { "type": "string" },
                     "description": "Match if any of these tags are present."
                   },
                   "source_ids": {
                     "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
+                    "items": { "type": "string" },
                     "description": "Match only items from these source ids."
                   }
                 }
@@ -245,6 +310,67 @@
               }
             }
           }
+        }
+      }
+    },
+    "watch": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "description": "A geographic or thematic watch definition.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable name for this watch."
+        },
+        "country_codes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{2,3}$"
+          },
+          "description": "ISO 3166-1 alpha-2 or alpha-3 country codes to monitor."
+        },
+        "region": {
+          "type": "string",
+          "description": "Human-readable region name."
+        },
+        "severity_threshold": {
+          "type": "string",
+          "enum": ["info", "low", "medium", "high", "critical"],
+          "description": "Minimum severity to trigger alerts for this watch."
+        },
+        "keywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Keywords to match in event titles and summaries."
+        }
+      }
+    },
+    "source_profile": {
+      "type": "object",
+      "description": "NATO-style source reliability and information credibility profile.",
+      "additionalProperties": false,
+      "properties": {
+        "reliability": {
+          "type": "string",
+          "enum": ["A", "B", "C", "D", "E", "F"],
+          "description": "Source reliability rating (A=completely reliable, F=reliability cannot be judged)."
+        },
+        "credibility": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6,
+          "description": "Information credibility rating (1=confirmed, 6=truth cannot be judged)."
+        },
+        "corroboration_required": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether items from this source require corroboration before alerting."
+        },
+        "license": {
+          "type": "string",
+          "description": "Data license or usage restrictions for this source."
         }
       }
     }

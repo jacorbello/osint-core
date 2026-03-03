@@ -1,5 +1,8 @@
 """Tests for Pydantic v2 API schemas."""
 
+import uuid
+from datetime import UTC, datetime
+
 from osint_core.schemas.alert import AlertAckRequest, AlertEscalateRequest, AlertResponse
 from osint_core.schemas.audit import AuditLogResponse
 from osint_core.schemas.brief import BriefGenerateRequest, BriefResponse
@@ -15,6 +18,12 @@ from osint_core.schemas.event import EventResponse
 from osint_core.schemas.indicator import IndicatorResponse
 from osint_core.schemas.job import JobResponse
 from osint_core.schemas.plan import PlanValidationResult, PlanVersionResponse
+from osint_core.schemas.watch import (
+    WatchCreateRequest,
+    WatchResponse,
+    WatchStatusEnum,
+    WatchTypeEnum,
+)
 
 
 def test_event_response_schema():
@@ -210,3 +219,53 @@ def test_paginated_response():
     assert len(page.items) == 2
     assert page.total == 10
     assert page.pages == 5
+
+
+def test_event_response_includes_geo_fields():
+    from osint_core.schemas.event import EventResponse
+
+    event = EventResponse(
+        id=uuid.uuid4(),
+        event_type="conflict",
+        source_id="gdelt_global",
+        ingested_at=datetime.now(UTC),
+        dedupe_fingerprint="abc123",
+        latitude=48.38,
+        longitude=31.17,
+        country_code="UKR",
+        region="Eastern Europe",
+        source_category="military",
+    )
+    assert event.latitude == 48.38
+    assert event.longitude == 31.17
+    assert event.country_code == "UKR"
+    assert event.region == "Eastern Europe"
+    assert event.source_category == "military"
+
+
+def test_watch_create_request():
+    req = WatchCreateRequest(
+        name="eastern-europe",
+        region="Eastern Europe",
+        country_codes=["UKR", "RUS", "BLR"],
+        severity_threshold="low",
+        keywords=["NATO", "Wagner"],
+    )
+    assert req.name == "eastern-europe"
+    assert len(req.country_codes) == 3
+
+
+def test_watch_response():
+    resp = WatchResponse(
+        id=uuid.uuid4(),
+        name="eastern-europe",
+        watch_type=WatchTypeEnum.dynamic,
+        status=WatchStatusEnum.active,
+        region="Eastern Europe",
+        country_codes=["UKR", "RUS"],
+        severity_threshold="low",
+        created_at=datetime.now(UTC),
+        created_by="manual",
+    )
+    assert resp.watch_type == "dynamic"
+    assert resp.status == "active"
