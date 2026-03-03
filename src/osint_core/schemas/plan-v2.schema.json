@@ -5,6 +5,7 @@
   "description": "Schema for hierarchical OSINT collection plans — supports master plans with defaults/children and child plans with sources/scoring.",
   "type": "object",
   "required": ["version", "plan_id", "plan_type"],
+  "additionalProperties": false,
   "properties": {
     "version": {
       "type": "integer",

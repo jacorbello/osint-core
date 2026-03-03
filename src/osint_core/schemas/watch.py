@@ -6,7 +6,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
-from osint_core.schemas.common import PaginatedResponse
+from osint_core.schemas.common import PaginatedResponse, SeverityEnum
 
 
 class WatchTypeEnum(StrEnum):
@@ -21,14 +21,23 @@ class WatchStatusEnum(StrEnum):
     promoted = "promoted"
 
 
+class BoundingBox(BaseModel):
+    """Geographic bounding box with required cardinal boundaries."""
+
+    north: float
+    south: float
+    east: float
+    west: float
+
+
 class WatchCreateRequest(BaseModel):
     name: str
     region: str | None = None
     country_codes: list[str] | None = None
-    bounding_box: dict[str, float] | None = None
+    bounding_box: BoundingBox | None = None
     keywords: list[str] | None = None
     source_filter: list[str] | None = None
-    severity_threshold: str = "medium"
+    severity_threshold: SeverityEnum = SeverityEnum.medium
     plan_id: str | None = None
     ttl_hours: int | None = None
 
@@ -37,10 +46,10 @@ class WatchUpdateRequest(BaseModel):
     status: WatchStatusEnum | None = None
     region: str | None = None
     country_codes: list[str] | None = None
-    bounding_box: dict[str, float] | None = None
+    bounding_box: BoundingBox | None = None
     keywords: list[str] | None = None
     source_filter: list[str] | None = None
-    severity_threshold: str | None = None
+    severity_threshold: SeverityEnum | None = None
     ttl_hours: int | None = None
 
 
@@ -56,7 +65,7 @@ class WatchResponse(BaseModel):
     bounding_box: dict[str, float] | None = None
     keywords: list[str] | None = None
     source_filter: list[str] | None = None
-    severity_threshold: str
+    severity_threshold: SeverityEnum
     plan_id: str | None = None
     ttl_hours: int | None = None
     created_at: datetime

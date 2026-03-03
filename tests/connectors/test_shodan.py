@@ -93,7 +93,7 @@ async def test_fetch_extracts_geolocation(connector: ShodanConnector, respx_mock
     items = await connector.fetch()
     assert items[0].latitude == 37.7749
     assert items[0].longitude == -122.4194
-    assert items[0].country_code == "US"
+    assert items[0].country_code == "USA"
 
 
 @pytest.mark.asyncio

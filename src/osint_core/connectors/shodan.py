@@ -6,14 +6,28 @@ from typing import Any
 import httpx
 
 from osint_core.connectors.base import BaseConnector, RawItem
+from osint_core.services.geo import iso2_to_iso3
 
 
 class ShodanConnector(BaseConnector):
     """Fetches infrastructure data from the Shodan search API."""
 
+    def _resolve_api_key(self) -> str:
+        """Return the API key from source config or global settings."""
+        key: str = self.config.extra.get("api_key", "")
+        if not key:
+            from osint_core.config import settings
+
+            key = settings.shodan_api_key
+        if not key:
+            raise ValueError(
+                "Shodan API key not configured in source params or OSINT_SHODAN_API_KEY"
+            )
+        return key
+
     async def fetch(self) -> list[RawItem]:
         params = {
-            "key": self.config.extra["api_key"],
+            "key": self._resolve_api_key(),
             "query": self.config.extra["query"],
         }
 
@@ -49,6 +63,11 @@ class ShodanConnector(BaseConnector):
         for hostname in hostnames:
             indicators.append({"type": "domain", "value": hostname})
 
+        # Shodan returns ISO-2 country codes; normalize to ISO-3 for
+        # consistency with the rest of the platform (watches, geo service).
+        raw_cc = location.get("country_code")
+        country_code = iso2_to_iso3(raw_cc) if raw_cc else None
+
         return RawItem(
             title=title,
             url=f"https://www.shodan.io/host/{ip_str}",
@@ -60,7 +79,7 @@ class ShodanConnector(BaseConnector):
             indicators=indicators,
             latitude=location.get("latitude"),
             longitude=location.get("longitude"),
-            country_code=location.get("country_code"),
+            country_code=country_code,
             source_category="cyber",
         )
 

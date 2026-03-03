@@ -41,12 +41,15 @@ def matches_watch(event: dict[str, Any], watch: dict[str, Any]) -> bool:
 
     # Bounding box match
     bbox = watch.get("bounding_box")
-    if bbox and event.get("latitude") is not None and event.get("longitude") is not None:
+    if (
+        bbox
+        and isinstance(bbox, dict)
+        and all(k in bbox for k in ("south", "north", "west", "east"))
+        and event.get("latitude") is not None
+        and event.get("longitude") is not None
+    ):
         lat, lon = event["latitude"], event["longitude"]
-        if (
-            bbox["south"] <= lat <= bbox["north"]
-            and bbox["west"] <= lon <= bbox["east"]
-        ):
+        if bbox["south"] <= lat <= bbox["north"] and bbox["west"] <= lon <= bbox["east"]:
             criteria_matched = True
 
     # Keyword match

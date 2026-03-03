@@ -96,7 +96,7 @@ class Event(UUIDMixin, TimestampMixin, Base):
     country_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     region: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    actors: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    actors: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
     event_subtype: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     dedupe_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)

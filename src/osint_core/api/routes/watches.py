@@ -16,6 +16,7 @@ from osint_core.schemas.watch import (
     WatchCreateRequest,
     WatchList,
     WatchResponse,
+    WatchStatusEnum,
     WatchUpdateRequest,
 )
 
@@ -46,7 +47,7 @@ async def create_watch(
         plan_id=body.plan_id,
         ttl_hours=body.ttl_hours,
         expires_at=expires_at,
-        created_by="manual",
+        created_by=current_user.username,
     )
 
     db.add(watch)
@@ -57,7 +58,7 @@ async def create_watch(
 
 @router.get("", response_model=WatchList)
 async def list_watches(
-    status: str | None = Query(None),
+    status: WatchStatusEnum | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -136,6 +137,7 @@ async def promote_watch(
         raise HTTPException(status_code=400, detail="Only dynamic watches can be promoted")
 
     watch.status = "promoted"
+    watch.watch_type = "persistent"
     watch.promoted_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(watch)

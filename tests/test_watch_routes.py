@@ -129,7 +129,7 @@ class TestWatchRoutes:
                 "ttl_hours": None,
                 "expires_at": None,
                 "promoted_at": None,
-                "created_by": "manual",
+                "created_by": "admin",
                 "created_at": watch_mock.created_at,
             }.items():
                 setattr(obj, k, v)
