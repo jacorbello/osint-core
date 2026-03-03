@@ -2,6 +2,7 @@
 
 from osint_core.connectors.base import BaseConnector, RawItem, SourceConfig
 from osint_core.connectors.cisa_kev import CisaKevConnector
+from osint_core.connectors.gdelt import GdeltConnector
 from osint_core.connectors.nvd import NvdConnector
 from osint_core.connectors.osv import OsvConnector
 from osint_core.connectors.registry import ConnectorRegistry
@@ -13,6 +14,7 @@ __all__ = [
     "BaseConnector",
     "CisaKevConnector",
     "ConnectorRegistry",
+    "GdeltConnector",
     "NvdConnector",
     "OsvConnector",
     "RawItem",
@@ -25,6 +27,7 @@ __all__ = [
 
 registry = ConnectorRegistry()
 registry.register("cisa_kev", CisaKevConnector)
+registry.register("gdelt_api", GdeltConnector)
 registry.register("nvd_json_feed", NvdConnector)
 registry.register("osv_api", OsvConnector)
 registry.register("urlhaus_api", UrlhausConnector)
