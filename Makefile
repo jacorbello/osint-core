@@ -21,7 +21,7 @@ typecheck: ## Run mypy strict type checking
 test: ## Run pytest with coverage
 	pytest --cov=osint_core --cov-report=term-missing -v
 
-check: format lint typecheck test ## Run all checks (fast, mirrors CI)
+check: lint typecheck test ## Run all checks (read-only, mirrors CI)
 
 check-full: check scan ## Run all checks including container scan
 
@@ -32,7 +32,7 @@ push: ## Push SHA-tagged image to Harbor
 	docker push $(IMAGE):$(SHA)
 
 scan: ## Trivy scan (mirrors CI flags)
-	trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 $(IMAGE):local
+	trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --ignorefile .trivyignore $(IMAGE):local
 
 dev: ## Start local dev stack
 	docker compose -f docker-compose.dev.yaml up --build
