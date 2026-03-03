@@ -64,7 +64,7 @@ def ingest_source(self: Any, source_id: str, plan_id: str) -> dict[str, Any]:
         }
     except Exception as exc:
         countdown = min(2 ** self.request.retries * 30, 900)
-        raise self.retry(exc=exc, countdown=countdown)
+        raise self.retry(exc=exc, countdown=countdown) from exc
 
 
 async def _ingest_source_async(
