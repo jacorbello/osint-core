@@ -41,6 +41,9 @@ class Settings(BaseSettings):
   gotify_url: str = "http://gotify/message"
   gotify_token: str = ""
 
+  # --- Shodan ---
+  shodan_api_key: str = ""
+
   # --- Keycloak ---
   keycloak_url: str = "https://keycloak.corbello.io"
   keycloak_realm: str = "cortech"
