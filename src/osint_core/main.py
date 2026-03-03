@@ -20,6 +20,7 @@ from osint_core.api.routes import (
     jobs,
     plan,
     search,
+    watches,
 )
 from osint_core.config import settings
 from osint_core.logging import configure_logging
@@ -58,3 +59,4 @@ app.include_router(search.router)
 app.include_router(ingest.router)
 app.include_router(jobs.router)
 app.include_router(audit.router)
+app.include_router(watches.router)
