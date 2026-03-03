@@ -54,7 +54,7 @@ async def test_full_pipeline(
     assert "ingest-cisa_kev" in schedule
     entry = schedule["ingest-cisa_kev"]
     assert entry["task"] == "osint.ingest_source"
-    assert entry["args"] == ["cisa_kev"]
+    assert entry["args"] == ["cisa_kev", "integration-test-plan"]
     assert entry["options"]["queue"] == "ingest"
 
     # ---- Step c: Connector fetch via mocked HTTP ----
@@ -228,7 +228,7 @@ def test_plan_to_beat_schedule_roundtrip(valid_plan_yaml: str):
 
     entry = schedule["ingest-cisa_kev"]
     assert entry["task"] == "osint.ingest_source"
-    assert entry["args"] == ["cisa_kev"]
+    assert entry["args"] == ["cisa_kev", "integration-test-plan"]
     assert entry["options"]["queue"] == "ingest"
 
     # The crontab should be parsed from "0 */6 * * *"

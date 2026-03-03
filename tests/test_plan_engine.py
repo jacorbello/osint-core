@@ -161,6 +161,7 @@ def test_build_beat_schedule_from_v2_child():
     engine = PlanEngine()
     plan = {
         "version": 2,
+        "plan_id": "military-intel",
         "plan_type": "child",
         "sources": [
             {"id": "gdelt_global", "type": "gdelt_api", "schedule_cron": "*/15 * * * *"},

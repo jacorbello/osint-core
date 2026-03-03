@@ -91,11 +91,12 @@ class PlanEngine:
         dispatches the ``osint.ingest_source`` task to the ``ingest`` queue.
 
         Args:
-            plan: Parsed plan dict (must contain a ``sources`` key).
+            plan: Parsed plan dict (must contain ``plan_id`` and ``sources`` keys).
 
         Returns:
             Dict suitable for ``celery_app.conf.beat_schedule``.
         """
+        plan_id = plan["plan_id"]
         schedule: dict[str, Any] = {}
         for source in plan.get("sources", []):
             cron_expr = source.get("schedule_cron")
@@ -105,7 +106,7 @@ class PlanEngine:
             schedule[f"ingest-{source_id}"] = {
                 "task": "osint.ingest_source",
                 "schedule": _parse_cron(cron_expr),
-                "args": [source_id],
+                "args": [source_id, plan_id],
                 "options": {"queue": "ingest"},
             }
         return schedule

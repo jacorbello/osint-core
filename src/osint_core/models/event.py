@@ -123,7 +123,7 @@ class Event(UUIDMixin, TimestampMixin, Base):
             "severity IN ('info', 'low', 'medium', 'high', 'critical')",
             name="severity_check",
         ),
-        Index("ix_events_dedupe_fingerprint", "dedupe_fingerprint"),
+        Index("ix_events_dedupe_fingerprint", "dedupe_fingerprint", unique=True),
         Index("ix_events_source_id_ingested_at", "source_id", ingested_at.desc()),
         Index("ix_events_score_desc", score.desc().nullslast()),
         Index("ix_events_search_vector", "search_vector", postgresql_using="gin"),

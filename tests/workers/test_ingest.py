@@ -24,6 +24,7 @@ def test_ingest_source_is_bound():
 def test_build_beat_schedule_basic():
     """Build a Beat schedule from a plan with one source using schedule_cron."""
     plan = {
+        "plan_id": "test-plan",
         "sources": [
             {
                 "id": "cisa_kev",
@@ -31,20 +32,21 @@ def test_build_beat_schedule_basic():
                 "url": "https://www.cisa.gov/kev",
                 "schedule_cron": "0 */6 * * *",
             }
-        ]
+        ],
     }
     engine = PlanEngine()
     schedule = engine.build_beat_schedule(plan)
     assert "ingest-cisa_kev" in schedule
     entry = schedule["ingest-cisa_kev"]
     assert entry["task"] == "osint.ingest_source"
-    assert entry["args"] == ["cisa_kev"]
+    assert entry["args"] == ["cisa_kev", "test-plan"]
     assert isinstance(entry["schedule"], crontab)
 
 
 def test_build_beat_schedule_multiple_sources():
     """Build a Beat schedule from a plan with multiple sources."""
     plan = {
+        "plan_id": "test-plan",
         "sources": [
             {
                 "id": "cisa_kev",
@@ -74,6 +76,7 @@ def test_build_beat_schedule_multiple_sources():
 def test_build_beat_schedule_skips_sources_without_cron():
     """Sources without schedule_cron should be skipped in the Beat schedule."""
     plan = {
+        "plan_id": "test-plan",
         "sources": [
             {
                 "id": "manual_source",
@@ -96,7 +99,7 @@ def test_build_beat_schedule_skips_sources_without_cron():
 
 def test_build_beat_schedule_empty_sources():
     """An empty sources list should produce an empty schedule."""
-    plan = {"sources": []}
+    plan = {"plan_id": "test-plan", "sources": []}
     engine = PlanEngine()
     schedule = engine.build_beat_schedule(plan)
     assert schedule == {}
@@ -105,6 +108,7 @@ def test_build_beat_schedule_empty_sources():
 def test_build_beat_schedule_cron_parsing():
     """Verify cron expression is correctly parsed into minute/hour/day_of_week etc."""
     plan = {
+        "plan_id": "test-plan",
         "sources": [
             {
                 "id": "test_src",
@@ -123,6 +127,7 @@ def test_build_beat_schedule_cron_parsing():
 def test_build_beat_schedule_options_queue():
     """Beat schedule entries should route to the 'ingest' queue."""
     plan = {
+        "plan_id": "test-plan",
         "sources": [
             {
                 "id": "src1",
@@ -135,3 +140,22 @@ def test_build_beat_schedule_options_queue():
     schedule = engine.build_beat_schedule(plan)
     entry = schedule["ingest-src1"]
     assert entry["options"]["queue"] == "ingest"
+
+
+def test_build_beat_schedule_includes_plan_id():
+    """Beat schedule entries should include plan_id in task args."""
+    plan = {
+        "plan_id": "military-intel",
+        "sources": [
+            {
+                "id": "cisa_kev",
+                "type": "cisa_kev",
+                "url": "https://www.cisa.gov/kev",
+                "schedule_cron": "0 */6 * * *",
+            }
+        ],
+    }
+    engine = PlanEngine()
+    schedule = engine.build_beat_schedule(plan)
+    entry = schedule["ingest-cisa_kev"]
+    assert entry["args"] == ["cisa_kev", "military-intel"]

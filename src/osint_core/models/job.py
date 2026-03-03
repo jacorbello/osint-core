@@ -49,11 +49,14 @@ class Job(UUIDMixin, TimestampMixin, Base):
 
     plan_version = relationship("PlanVersion", lazy="selectin")
 
+    _status_values = (
+        "status IN ("
+        "'queued', 'running', 'succeeded', 'failed', 'partial_success', 'dead_letter'"
+        ")"
+    )
+
     __table_args__ = (
-        CheckConstraint(
-            "status IN ('queued', 'running', 'succeeded', 'failed', 'dead_letter')",
-            name="status_check",
-        ),
+        CheckConstraint(_status_values, name="status_check"),
         Index(
             "ix_jobs_idempotency_key",
             "idempotency_key",
