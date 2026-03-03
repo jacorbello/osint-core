@@ -6,6 +6,7 @@ from osint_core.connectors.gdelt import GdeltConnector
 from osint_core.connectors.nvd import NvdConnector
 from osint_core.connectors.osv import OsvConnector
 from osint_core.connectors.registry import ConnectorRegistry
+from osint_core.connectors.reliefweb import ReliefWebConnector
 from osint_core.connectors.rss import RssConnector
 from osint_core.connectors.threatfox import ThreatFoxConnector
 from osint_core.connectors.urlhaus import UrlhausConnector
@@ -18,6 +19,7 @@ __all__ = [
     "NvdConnector",
     "OsvConnector",
     "RawItem",
+    "ReliefWebConnector",
     "RssConnector",
     "SourceConfig",
     "ThreatFoxConnector",
@@ -32,4 +34,5 @@ registry.register("nvd_json_feed", NvdConnector)
 registry.register("osv_api", OsvConnector)
 registry.register("urlhaus_api", UrlhausConnector)
 registry.register("threatfox_api", ThreatFoxConnector)
+registry.register("reliefweb_api", ReliefWebConnector)
 registry.register("rss", RssConnector)
