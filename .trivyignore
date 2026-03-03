@@ -1,5 +1,5 @@
 # Trivy ignore list for osint-core container image.
-# Base image (python-base:ml) includes PyTorch/numpy which trigger known CVEs.
+# Base image (harbor.corbello.io/osint/python-base:ml-latest) includes PyTorch/numpy which trigger known CVEs.
 #
 # Format: one CVE per line
 #   owner: <name> | date: YYYY-MM-DD | reason: <why>

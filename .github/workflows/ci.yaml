@@ -90,16 +90,20 @@ jobs:
       - name: Push image and capture digest
         id: push
         run: |
-          docker push ${{ env.IMAGE }}:${{ github.sha }} 2>&1 | tee /tmp/push.log
+          set -o pipefail
+          PUSH_LOG="/tmp/push-${GITHUB_RUN_ID}.log"
+          docker push ${{ env.IMAGE }}:${{ github.sha }} 2>&1 | tee "${PUSH_LOG}"
           docker push ${{ env.IMAGE }}:${{ steps.vars.outputs.short_sha }}
           docker push ${{ env.IMAGE }}:latest
-          DIGEST=$(awk '/digest: sha256:/{print $3}' /tmp/push.log | head -1)
+          DIGEST=$(awk '/digest: sha256:/{print $3}' "${PUSH_LOG}" | head -1)
           if [ -z "$DIGEST" ]; then
             echo "::error::Failed to capture image digest from push output"
+            rm -f "${PUSH_LOG}"
             exit 1
           fi
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "::notice::Image digest: ${DIGEST}"
+          rm -f "${PUSH_LOG}"
 
   # ── Stage 3: Security scan (main only) ─────────────────────────
   scan:
@@ -145,7 +149,13 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.DEPLOY_KEY_INFRA }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan github.com > /tmp/github_known_hosts 2>/dev/null
+          # Pinned GitHub SSH host keys (from https://api.github.com/meta)
+          # Avoids TOFU risk of ssh-keyscan at runtime
+          cat > /tmp/github_known_hosts <<'KEYS'
+          github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+          github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=
+          github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=
+          KEYS
 
       - name: Install kustomize
         uses: imranismail/setup-kustomize@v2.1.0

@@ -4,7 +4,7 @@
 
 **Goal:** Replace the single-job CI pipeline with a parallel lint/test + build + scan + deploy pipeline, add a Makefile for local dev parity, and automate GitOps deployments to the K8s cluster via cortech-infra.
 
-**Architecture:** GitHub Actions with 4 stages (lint, test, build, scan, deploy). Build pushes a SHA-tagged image to Harbor. Deploy job updates the Kustomize overlay in `cortech-infra` repo. ArgoCD auto-syncs. Makefile mirrors CI commands locally.
+**Architecture:** GitHub Actions with 4 stages (lint/test, build, scan, deploy). Build pushes a SHA-tagged image to Harbor. Deploy job updates the Kustomize overlay in `cortech-infra` repo. ArgoCD auto-syncs. Makefile mirrors CI commands locally.
 
 **Tech Stack:** GitHub Actions, Docker, Trivy, Kustomize, ArgoCD, Make
 
