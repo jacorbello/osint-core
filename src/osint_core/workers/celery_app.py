@@ -8,6 +8,13 @@ celery_app = Celery(
     "osint-core",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
+    include=[
+        "osint_core.workers.ingest",
+        "osint_core.workers.enrich",
+        "osint_core.workers.score",
+        "osint_core.workers.notify",
+        "osint_core.workers.digest",
+    ],
 )
 
 celery_app.conf.update(
