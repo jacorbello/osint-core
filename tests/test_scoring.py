@@ -4,7 +4,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from osint_core.services.scoring import ScoringConfig, score_event, score_to_severity
+from osint_core.services.scoring import (
+    ReliabilityProfile,
+    ScoringConfig,
+    reliability_factor,
+    score_event,
+    score_event_v2,
+    score_to_severity,
+)
 
 
 def test_base_score_from_source_reputation():
@@ -120,3 +127,60 @@ def test_ioc_boost_not_applied_when_zero_indicators():
     score = score_event("src", datetime.now(UTC), 0, [], config)
     # Without IOC boost, score should be close to 1.0 (reputation * ~1.0 recency)
     assert score == pytest.approx(1.0, abs=0.1)
+
+
+def test_reliability_factor_a():
+    assert reliability_factor("A") == 1.5
+
+
+def test_reliability_factor_b():
+    assert reliability_factor("B") == 1.2
+
+
+def test_reliability_factor_c():
+    assert reliability_factor("C") == 1.0
+
+
+def test_reliability_factor_unknown_defaults_to_c():
+    assert reliability_factor("X") == 1.0
+
+
+def test_score_event_v2_includes_reliability():
+    config = ScoringConfig(recency_half_life_hours=24)
+    profile = ReliabilityProfile(reliability="A", credibility=2, corroboration_required=False)
+    score = score_event_v2(
+        source_id="isw",
+        occurred_at=datetime.now(UTC),
+        indicator_count=0,
+        matched_topics=[],
+        config=config,
+        reliability_profile=profile,
+        corroborated=False,
+    )
+    # A reliability = 1.5x multiplier, freshly occurred = ~1.0 decay
+    assert score > 1.0
+
+
+def test_score_event_v2_corroboration_bonus():
+    config = ScoringConfig(recency_half_life_hours=24)
+    profile = ReliabilityProfile(reliability="B", credibility=3, corroboration_required=True)
+    uncorroborated = score_event_v2(
+        source_id="gdelt",
+        occurred_at=datetime.now(UTC),
+        indicator_count=0,
+        matched_topics=[],
+        config=config,
+        reliability_profile=profile,
+        corroborated=False,
+    )
+    corroborated = score_event_v2(
+        source_id="gdelt",
+        occurred_at=datetime.now(UTC),
+        indicator_count=0,
+        matched_topics=[],
+        config=config,
+        reliability_profile=profile,
+        corroborated=True,
+    )
+    assert corroborated > uncorroborated
+    assert corroborated == pytest.approx(uncorroborated * 1.5, rel=0.01)
