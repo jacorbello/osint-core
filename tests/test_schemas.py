@@ -18,6 +18,12 @@ from osint_core.schemas.event import EventResponse
 from osint_core.schemas.indicator import IndicatorResponse
 from osint_core.schemas.job import JobResponse
 from osint_core.schemas.plan import PlanValidationResult, PlanVersionResponse
+from osint_core.schemas.watch import (
+    WatchCreateRequest,
+    WatchResponse,
+    WatchStatusEnum,
+    WatchTypeEnum,
+)
 
 
 def test_event_response_schema():
@@ -235,9 +241,6 @@ def test_event_response_includes_geo_fields():
     assert event.country_code == "UKR"
     assert event.region == "Eastern Europe"
     assert event.source_category == "military"
-
-
-from osint_core.schemas.watch import WatchResponse, WatchCreateRequest, WatchStatusEnum, WatchTypeEnum
 
 
 def test_watch_create_request():

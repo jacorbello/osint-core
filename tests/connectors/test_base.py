@@ -1,6 +1,5 @@
 """Tests for RawItem geographic and military intel fields."""
 
-from datetime import datetime, timezone
 
 from osint_core.connectors.base import RawItem
 

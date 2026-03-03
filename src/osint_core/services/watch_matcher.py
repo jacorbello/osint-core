@@ -36,9 +36,8 @@ def matches_watch(event: dict[str, Any], watch: dict[str, Any]) -> bool:
 
     # Country code match
     watch_codes = watch.get("country_codes")
-    if watch_codes and event.get("country_code"):
-        if event["country_code"] in watch_codes:
-            criteria_matched = True
+    if watch_codes and event.get("country_code") and event["country_code"] in watch_codes:
+        criteria_matched = True
 
     # Bounding box match
     bbox = watch.get("bounding_box")

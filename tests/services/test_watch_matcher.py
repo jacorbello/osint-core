@@ -1,6 +1,5 @@
 """Tests for the watch matching service."""
 
-import pytest
 
 from osint_core.services.watch_matcher import matches_watch
 

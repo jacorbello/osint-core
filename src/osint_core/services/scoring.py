@@ -120,7 +120,8 @@ def score_event_v2(
     """Extended scoring with reliability weighting and corroboration bonus.
 
     Formula:
-        score = base_reputation * reliability_factor * recency_decay * ioc_multiplier * corroboration_bonus
+        score = base_reputation * reliability_factor * recency_decay
+               * ioc_multiplier * corroboration_bonus
     """
     base_score = score_event(source_id, occurred_at, indicator_count, matched_topics, config)
 

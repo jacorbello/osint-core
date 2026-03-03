@@ -1,6 +1,6 @@
 """Tests for the ReliefWeb API v2 connector."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -15,7 +15,10 @@ SAMPLE_RELIEFWEB_RESPONSE = {
             "id": "4001234",
             "fields": {
                 "title": "Flash Update: Earthquake in Region X",
-                "body": "A magnitude 6.2 earthquake struck Region X early this morning, affecting an estimated 50,000 people.",
+                "body": (
+                    "A magnitude 6.2 earthquake struck Region X early this morning,"
+                    " affecting an estimated 50,000 people."
+                ),
                 "date": {"created": "2026-03-03T10:00:00+00:00"},
                 "url": "https://reliefweb.int/report/country/flash-update-earthquake",
                 "primary_country": {"iso3": "TUR", "name": "Türkiye"},
@@ -28,7 +31,10 @@ SAMPLE_RELIEFWEB_RESPONSE = {
             "id": "4001235",
             "fields": {
                 "title": "Situation Report: Refugee Crisis Update",
-                "body": "UNHCR reports continued displacement in the border region with over 100,000 new arrivals.",
+                "body": (
+                    "UNHCR reports continued displacement in the border region"
+                    " with over 100,000 new arrivals."
+                ),
                 "date": {"created": "2026-03-02T08:00:00+00:00"},
                 "url": "https://reliefweb.int/report/country/sitrep-refugee-crisis",
                 "primary_country": {"iso3": "SYR", "name": "Syrian Arab Republic"},
@@ -102,8 +108,8 @@ async def test_fetch_extracts_occurred_at(connector: ReliefWebConnector, respx_m
         return_value=httpx.Response(200, json=SAMPLE_RELIEFWEB_RESPONSE)
     )
     items = await connector.fetch()
-    assert items[0].occurred_at == datetime(2026, 3, 3, 10, 0, 0, tzinfo=timezone.utc)
-    assert items[1].occurred_at == datetime(2026, 3, 2, 8, 0, 0, tzinfo=timezone.utc)
+    assert items[0].occurred_at == datetime(2026, 3, 3, 10, 0, 0, tzinfo=UTC)
+    assert items[1].occurred_at == datetime(2026, 3, 2, 8, 0, 0, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

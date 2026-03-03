@@ -1,6 +1,5 @@
 """Watch model — persistent and dynamic regional monitors."""
 
-import uuid
 from datetime import datetime
 from typing import Any
 
@@ -15,7 +14,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.sql import func
 
 from osint_core.models.base import Base, TimestampMixin, UUIDMixin
 
