@@ -1,0 +1,171 @@
+"""Tests for the GDELT DOC 2.0 API connector."""
+
+import hashlib
+from datetime import UTC, datetime
+
+import httpx
+import pytest
+
+from osint_core.connectors.base import SourceConfig
+from osint_core.connectors.gdelt import GdeltConnector
+
+SAMPLE_GDELT_RESPONSE = {
+    "articles": [
+        {
+            "url": "https://reuters.com/world/conflict-event-1",
+            "title": "Military forces clash in border region",
+            "seendate": "20260303T120000Z",
+            "domain": "reuters.com",
+            "language": "English",
+            "sourcecountry": "United States",
+            "tone": "-3.5",
+        },
+        {
+            "url": "https://bbc.co.uk/news/world-event-2",
+            "title": "Humanitarian crisis deepens in conflict zone",
+            "seendate": "20260303T110000Z",
+            "domain": "bbc.co.uk",
+            "language": "English",
+            "sourcecountry": "United Kingdom",
+            "tone": "-5.2",
+        },
+    ]
+}
+
+
+@pytest.fixture()
+def config() -> SourceConfig:
+    return SourceConfig(
+        id="gdelt",
+        type="gdelt_api",
+        url="https://api.gdeltproject.org/api/v2/doc/doc",
+        weight=0.7,
+        extra={
+            "query": "conflict",
+            "mode": "ArtList",
+            "format": "json",
+            "maxrecords": "50",
+            "timespan": "15min",
+        },
+    )
+
+
+@pytest.fixture()
+def connector(config: SourceConfig) -> GdeltConnector:
+    return GdeltConnector(config)
+
+
+@pytest.mark.asyncio
+async def test_fetch_parses_articles(connector: GdeltConnector, respx_mock):
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json=SAMPLE_GDELT_RESPONSE)
+    )
+    items = await connector.fetch()
+    assert len(items) == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_extracts_title(connector: GdeltConnector, respx_mock):
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json=SAMPLE_GDELT_RESPONSE)
+    )
+    items = await connector.fetch()
+    assert items[0].title == "Military forces clash in border region"
+    assert items[1].title == "Humanitarian crisis deepens in conflict zone"
+
+
+@pytest.mark.asyncio
+async def test_fetch_extracts_url(connector: GdeltConnector, respx_mock):
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json=SAMPLE_GDELT_RESPONSE)
+    )
+    items = await connector.fetch()
+    assert items[0].url == "https://reuters.com/world/conflict-event-1"
+    assert items[1].url == "https://bbc.co.uk/news/world-event-2"
+
+
+@pytest.mark.asyncio
+async def test_fetch_extracts_occurred_at(connector: GdeltConnector, respx_mock):
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json=SAMPLE_GDELT_RESPONSE)
+    )
+    items = await connector.fetch()
+    assert items[0].occurred_at == datetime(2026, 3, 3, 12, 0, 0, tzinfo=UTC)
+    assert items[1].occurred_at == datetime(2026, 3, 3, 11, 0, 0, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_fetch_sets_source_category(connector: GdeltConnector, respx_mock):
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json=SAMPLE_GDELT_RESPONSE)
+    )
+    items = await connector.fetch()
+    assert items[0].source_category == "geopolitical"
+    assert items[1].source_category == "geopolitical"
+
+
+@pytest.mark.asyncio
+async def test_fetch_stores_raw_data(connector: GdeltConnector, respx_mock):
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json=SAMPLE_GDELT_RESPONSE)
+    )
+    items = await connector.fetch()
+    assert items[0].raw_data["domain"] == "reuters.com"
+    assert items[0].raw_data["language"] == "English"
+    assert items[0].raw_data["sourcecountry"] == "United States"
+    assert items[0].raw_data["tone"] == "-3.5"
+
+
+@pytest.mark.asyncio
+async def test_fetch_sends_query_params(connector: GdeltConnector, respx_mock):
+    route = respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json=SAMPLE_GDELT_RESPONSE)
+    )
+    await connector.fetch()
+    request = route.calls.last.request
+    assert "query=conflict" in str(request.url)
+    assert "mode=ArtList" in str(request.url)
+    assert "format=json" in str(request.url)
+    assert "maxrecords=50" in str(request.url)
+    assert "timespan=15min" in str(request.url)
+
+
+@pytest.mark.asyncio
+async def test_fetch_empty_response(connector: GdeltConnector, respx_mock):
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json={"articles": []})
+    )
+    items = await connector.fetch()
+    assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_missing_articles_key(connector: GdeltConnector, respx_mock):
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json={})
+    )
+    items = await connector.fetch()
+    assert items == []
+
+
+@pytest.mark.asyncio
+async def test_dedupe_key_uses_url_hash(connector: GdeltConnector, respx_mock):
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json=SAMPLE_GDELT_RESPONSE)
+    )
+    items = await connector.fetch()
+    url_hash = hashlib.sha256(
+        b"https://reuters.com/world/conflict-event-1"
+    ).hexdigest()[:16]
+    key = connector.dedupe_key(items[0])
+    assert key.startswith("gdelt:")
+    assert key == f"gdelt:{url_hash}"
+
+
+@pytest.mark.asyncio
+async def test_dedupe_keys_differ(connector: GdeltConnector, respx_mock):
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json=SAMPLE_GDELT_RESPONSE)
+    )
+    items = await connector.fetch()
+    assert connector.dedupe_key(items[0]) != connector.dedupe_key(items[1])
