@@ -57,6 +57,14 @@ def _mock_task_self():
     return task_self
 
 
+def _make_nested_ctx():
+    """Create a mock async context manager for begin_nested()."""
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=None)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    return ctx
+
+
 def _make_mock_db():
     """Create a mock async DB session with proper async methods."""
     mock_db = AsyncMock()
@@ -67,6 +75,8 @@ def _make_mock_db():
     mock_db.flush = AsyncMock()
     mock_db.commit = AsyncMock()
     mock_db.rollback = AsyncMock()
+    # begin_nested() must return an async context manager (not a coroutine)
+    mock_db.begin_nested = MagicMock(side_effect=lambda: _make_nested_ctx())
     # The event needs an id after flush
     mock_db.add = MagicMock()
     return mock_db
@@ -251,11 +261,7 @@ async def test_ingest_error_rate_threshold():
     mock_db = _make_mock_db()
     task_self = _mock_task_self()
 
-    call_count = 0
-
     # Make the dedupe check pass (no dup), but flush raises for 3 of 4 items
-    original_execute = mock_db.execute
-
     async def execute_side_effect(*args, **kwargs):
         result = MagicMock()
         result.scalar_one_or_none.return_value = None

@@ -49,7 +49,10 @@ def ingest_source(self: Any, source_id: str, plan_id: str) -> dict[str, Any]:
         return asyncio.run(_ingest_source_async(self, source_id, plan_id))
     except (ValueError, KeyError) as exc:
         logger.error("Ingest config error for %s: %s", source_id, exc)
-        asyncio.run(_record_failed_job(self, plan_id, source_id, str(exc)))
+        try:
+            asyncio.run(_record_failed_job(self, plan_id, source_id, str(exc)))
+        except Exception:
+            logger.exception("Failed to record failed job for %s", source_id)
         return {
             "source_id": source_id,
             "plan_id": plan_id,
@@ -116,49 +119,49 @@ async def _ingest_source_async(
                     skipped += 1
                     continue
 
-                # Create Event
-                event = Event(
-                    event_type=source_cfg.type,
-                    source_id=source_id,
-                    title=item.title,
-                    summary=item.summary,
-                    raw_excerpt=item.url,
-                    occurred_at=item.occurred_at,
-                    severity=item.severity,
-                    dedupe_fingerprint=fingerprint,
-                    metadata_=item.raw_data,
-                    plan_version_id=plan.id,
-                )
-                db.add(event)
-
-                try:
-                    await db.flush()
-                except IntegrityError:
-                    await db.rollback()
-                    skipped += 1
-                    continue
-
-                # Extract and link indicators
-                indicator_dicts = extract_indicators(
-                    f"{item.title} {item.summary}"
-                )
-                for ind_dict in indicator_dicts:
-                    indicator = await _upsert_indicator(
-                        db, ind_dict, source_id
+                async with db.begin_nested():
+                    # Create Event
+                    event = Event(
+                        event_type=source_cfg.type,
+                        source_id=source_id,
+                        title=item.title,
+                        summary=item.summary,
+                        raw_excerpt=item.url,
+                        occurred_at=item.occurred_at,
+                        severity=item.severity,
+                        dedupe_fingerprint=fingerprint,
+                        metadata_=item.raw_data,
+                        plan_version_id=plan.id,
                     )
-                    if indicator is not None:
-                        event.indicators.append(indicator)
+                    db.add(event)
 
-                new_event_ids.append(str(event.id))
-                ingested += 1
+                    try:
+                        async with db.begin_nested():
+                            await db.flush()
+                    except IntegrityError:
+                        skipped += 1
+                        continue
+
+                    # Extract and link indicators
+                    indicator_dicts = extract_indicators(
+                        f"{item.title} {item.summary}"
+                    )
+                    for ind_dict in indicator_dicts:
+                        indicator = await _upsert_indicator(
+                            db, ind_dict, source_id
+                        )
+                        if indicator is not None:
+                            event.indicators.append(indicator)
+
+                    new_event_ids.append(str(event.id))
+                    ingested += 1
 
             except Exception:
                 logger.exception("Failed to process item from %s", source_id)
-                await db.rollback()
                 errors += 1
 
         # Step 4: Error rate check
-        if items and len(items) > 0 and errors / len(items) > ERROR_RATE_THRESHOLD:
+        if items and errors / len(items) > ERROR_RATE_THRESHOLD:
             raise RuntimeError(
                 f"High error rate: {errors}/{len(items)} items failed for {source_id}"
             )
@@ -180,10 +183,13 @@ async def _ingest_source_async(
     else:
         job_status = "succeeded"
 
-    await _record_job(
-        task_self, plan_version_id, source_id, plan_id,
-        job_status, ingested, skipped, errors,
-    )
+    try:
+        await _record_job(
+            task_self, plan_version_id, source_id, plan_id,
+            job_status, ingested, skipped, errors,
+        )
+    except Exception:
+        logger.exception("Failed to record job for %s", source_id)
 
     return {
         "source_id": source_id,
@@ -224,11 +230,11 @@ async def _upsert_indicator(
     )
     db.add(indicator)
     try:
-        await db.flush()
+        async with db.begin_nested():
+            await db.flush()
         return indicator
     except IntegrityError:
-        await db.rollback()
-        # Re-fetch after race condition
+        # Savepoint rolled back, outer transaction intact
         result = await db.execute(
             select(Indicator).where(
                 Indicator.indicator_type == ind_dict["type"],
