@@ -116,23 +116,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Log in to Harbor (for scan pull)
-        run: echo "${{ secrets.HARBOR_PASSWORD }}" | docker login harbor.corbello.io -u "${{ secrets.HARBOR_USERNAME }}" --password-stdin
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: "${{ env.IMAGE }}@${{ needs.build.outputs.digest }}"
-          format: "sarif"
-          output: "trivy-results.sarif"
-          severity: "HIGH,CRITICAL"
-          ignore-unfixed: true
-          exit-code: "1"
-          trivyignores: ".trivyignore"
+      - name: Run Trivy vulnerability scanner (containerized)
         env:
           TRIVY_DB_REPOSITORY: "ghcr.io/aquasecurity/trivy-db"
           TRIVY_USERNAME: "${{ secrets.HARBOR_USERNAME }}"
           TRIVY_PASSWORD: "${{ secrets.HARBOR_PASSWORD }}"
+        run: |
+          docker run --rm \
+            -e TRIVY_DB_REPOSITORY \
+            -e TRIVY_USERNAME \
+            -e TRIVY_PASSWORD \
+            -v "$PWD:/workspace" \
+            aquasec/trivy:0.56.1 image \
+            --format sarif \
+            --output /workspace/trivy-results.sarif \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --ignorefile /workspace/.trivyignore \
+            "${{ env.IMAGE }}@${{ needs.build.outputs.digest }}"
 
       - name: Upload Trivy scan to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
