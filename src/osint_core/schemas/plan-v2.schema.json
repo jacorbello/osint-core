@@ -330,20 +330,19 @@
           },
           "description": "ISO 3166-1 alpha-2 or alpha-3 country codes to monitor."
         },
-        "region_codes": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Region codes or names to monitor."
+        "region": {
+          "type": "string",
+          "description": "Human-readable region name."
         },
         "severity_threshold": {
           "type": "string",
-          "enum": ["low", "medium", "high", "critical"],
+          "enum": ["info", "low", "medium", "high", "critical"],
           "description": "Minimum severity to trigger alerts for this watch."
         },
-        "tags": {
+        "keywords": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Tags to match for this watch."
+          "description": "Keywords to match in event titles and summaries."
         }
       }
     },
