@@ -687,14 +687,15 @@ class TestIngestRoutes:
         mock_ingest.delay.return_value = mock_task
 
         client = TestClient(app)
-        resp = client.post("/api/v1/ingest/source/cisa_kev/run")
+        resp = client.post("/api/v1/ingest/source/cisa_kev/run?plan_id=test-plan")
         assert resp.status_code == 200
         data = resp.json()
         assert data["source_id"] == "cisa_kev"
+        assert data["plan_id"] == "test-plan"
         assert data["task_id"] == "task-abc-123"
         assert data["status"] == "dispatched"
 
-        mock_ingest.delay.assert_called_once_with("cisa_kev")
+        mock_ingest.delay.assert_called_once_with("cisa_kev", "test-plan")
 
 
 # ---------------------------------------------------------------------------
