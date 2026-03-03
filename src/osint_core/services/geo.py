@@ -88,4 +88,5 @@ def get_region(iso3: str) -> str | None:
     entry = lookup_country(iso3)
     if entry is None:
         return None
-    return entry["region"]
+    result: str = entry["region"]
+    return result
