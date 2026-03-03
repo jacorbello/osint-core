@@ -8,6 +8,7 @@ from osint_core.connectors.osv import OsvConnector
 from osint_core.connectors.registry import ConnectorRegistry
 from osint_core.connectors.reliefweb import ReliefWebConnector
 from osint_core.connectors.rss import RssConnector
+from osint_core.connectors.shodan import ShodanConnector
 from osint_core.connectors.threatfox import ThreatFoxConnector
 from osint_core.connectors.urlhaus import UrlhausConnector
 
@@ -21,6 +22,7 @@ __all__ = [
     "RawItem",
     "ReliefWebConnector",
     "RssConnector",
+    "ShodanConnector",
     "SourceConfig",
     "ThreatFoxConnector",
     "UrlhausConnector",
@@ -35,4 +37,5 @@ registry.register("osv_api", OsvConnector)
 registry.register("urlhaus_api", UrlhausConnector)
 registry.register("threatfox_api", ThreatFoxConnector)
 registry.register("reliefweb_api", ReliefWebConnector)
+registry.register("shodan_api", ShodanConnector)
 registry.register("rss", RssConnector)
