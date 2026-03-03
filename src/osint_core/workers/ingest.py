@@ -43,7 +43,7 @@ def _dedupe_fingerprint(plan_id: str, source_id: str, item_data: dict[str, Any])
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-@celery_app.task(bind=True, name="osint.ingest_source", max_retries=3)
+@celery_app.task(bind=True, name="osint.ingest_source", max_retries=3)  # type: ignore[untyped-decorator]
 def ingest_source(self: Any, source_id: str, plan_id: str) -> dict[str, Any]:
     """Ingest items from a configured source.
 
@@ -220,7 +220,7 @@ async def _upsert_indicator(
             Indicator.value == ind_dict["value"],
         )
     )
-    indicator = result.scalar_one_or_none()
+    indicator: Indicator | None = result.scalar_one_or_none()
 
     if indicator is not None:
         # Merge source_id if missing
@@ -247,10 +247,10 @@ async def _upsert_indicator(
                 Indicator.value == ind_dict["value"],
             )
         )
-        indicator = result.scalar_one_or_none()
-        if indicator and source_id not in (indicator.sources or []):
-            indicator.sources = [*(indicator.sources or []), source_id]
-        return indicator
+        found: Indicator | None = result.scalar_one_or_none()
+        if found and source_id not in (found.sources or []):
+            found.sources = [*(found.sources or []), source_id]
+        return found
 
 
 async def _record_job(
