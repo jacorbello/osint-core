@@ -235,3 +235,34 @@ def test_event_response_includes_geo_fields():
     assert event.country_code == "UKR"
     assert event.region == "Eastern Europe"
     assert event.source_category == "military"
+
+
+from osint_core.schemas.watch import WatchResponse, WatchCreateRequest, WatchStatusEnum, WatchTypeEnum
+
+
+def test_watch_create_request():
+    req = WatchCreateRequest(
+        name="eastern-europe",
+        region="Eastern Europe",
+        country_codes=["UKR", "RUS", "BLR"],
+        severity_threshold="low",
+        keywords=["NATO", "Wagner"],
+    )
+    assert req.name == "eastern-europe"
+    assert len(req.country_codes) == 3
+
+
+def test_watch_response():
+    resp = WatchResponse(
+        id=uuid.uuid4(),
+        name="eastern-europe",
+        watch_type=WatchTypeEnum.dynamic,
+        status=WatchStatusEnum.active,
+        region="Eastern Europe",
+        country_codes=["UKR", "RUS"],
+        severity_threshold="low",
+        created_at=datetime.now(UTC),
+        created_by="manual",
+    )
+    assert resp.watch_type == "dynamic"
+    assert resp.status == "active"
