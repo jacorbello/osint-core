@@ -1,0 +1,8 @@
+# Trivy ignore list for osint-core container image.
+# Base image (harbor.corbello.io/osint/python-base:ml-latest) includes PyTorch/numpy which trigger known CVEs.
+#
+# Format: one CVE per line
+#   owner: <name> | date: YYYY-MM-DD | reason: <why>
+#
+# Maintenance: prune entries older than 90 days.
+# No entries yet — add as needed after first scan.

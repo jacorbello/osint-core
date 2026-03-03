@@ -1,4 +1,3 @@
-# .github/workflows/ci.yaml
 name: CI
 
 on:
@@ -6,37 +5,210 @@ on:
     branches: [main]
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+
+env:
+  IMAGE: harbor.corbello.io/osint/osint-core
 
 jobs:
-  lint-test:
+  # ── Stage 1: Lint (parallel with test) ──────────────────────────
+  lint:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install dependencies
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-lint-${{ hashFiles('pyproject.toml') }}
+          restore-keys: pip-lint-
+
+      - name: Install dev dependencies
         run: pip install -e ".[dev]"
+
       - name: Lint (ruff)
         run: ruff check src/ tests/
+
       - name: Type check (mypy)
         run: mypy src/osint_core/
+
+  # ── Stage 1: Test (parallel with lint) ──────────────────────────
+  test:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-test-${{ hashFiles('pyproject.toml') }}
+          restore-keys: pip-test-
+
+      - name: Install dev dependencies
+        run: pip install -e ".[dev]"
+
       - name: Test
         run: pytest --cov=osint_core --cov-report=term-missing -v
 
+  # ── Stage 2: Build + push Docker image (main only) ─────────────
   build:
     runs-on: self-hosted
-    needs: lint-test
+    needs: [lint, test]
     if: github.ref == 'refs/heads/main'
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      short_sha: ${{ steps.vars.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set variables
+        id: vars
+        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Harbor
         run: echo "${{ secrets.HARBOR_PASSWORD }}" | docker login harbor.corbello.io -u "${{ secrets.HARBOR_USERNAME }}" --password-stdin
 
-      - name: Build and push
+      - name: Build image
         run: |
-          IMAGE=harbor.corbello.io/osint/osint-core
-          docker build --target api -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
-          docker push $IMAGE:${{ github.sha }}
-          docker push $IMAGE:latest
+          docker build --target api \
+            -t ${{ env.IMAGE }}:${{ github.sha }} \
+            -t ${{ env.IMAGE }}:${{ steps.vars.outputs.short_sha }} \
+            -t ${{ env.IMAGE }}:latest \
+            .
+
+      - name: Push image and capture digest
+        id: push
+        run: |
+          set -o pipefail
+          PUSH_LOG="/tmp/push-${GITHUB_RUN_ID}.log"
+          docker push ${{ env.IMAGE }}:${{ github.sha }} 2>&1 | tee "${PUSH_LOG}"
+          docker push ${{ env.IMAGE }}:${{ steps.vars.outputs.short_sha }}
+          docker push ${{ env.IMAGE }}:latest
+          DIGEST=$(awk '/digest: sha256:/{print $3}' "${PUSH_LOG}" | head -1)
+          if [ -z "$DIGEST" ]; then
+            echo "::error::Failed to capture image digest from push output"
+            rm -f "${PUSH_LOG}"
+            exit 1
+          fi
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Image digest: ${DIGEST}"
+          rm -f "${PUSH_LOG}"
+
+  # ── Stage 3: Security scan (main only) ─────────────────────────
+  scan:
+    runs-on: self-hosted
+    needs: build
+    if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "${{ env.IMAGE }}@${{ needs.build.outputs.digest }}"
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "HIGH,CRITICAL"
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: ".trivyignore"
+        env:
+          TRIVY_DB_REPOSITORY: "ghcr.io/aquasecurity/trivy-db"
+
+      - name: Upload Trivy scan to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: "trivy-results.sarif"
+
+  # ── Stage 4: Deploy to K8s via GitOps (main only) ──────────────
+  deploy:
+    runs-on: self-hosted
+    needs: [build, scan]
+    if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: osint-infra-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Set up SSH for cortech-infra
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KEY_INFRA }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pinned GitHub SSH host keys (from https://api.github.com/meta)
+          # Avoids TOFU risk of ssh-keyscan at runtime
+          cat > /tmp/github_known_hosts <<'KEYS'
+          github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+          github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=
+          github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=
+          KEYS
+
+      - name: Install kustomize
+        uses: imranismail/setup-kustomize@v2.1.0
+
+      - name: Clone cortech-infra and update image tag
+        env:
+          GIT_SSH_COMMAND: "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/github_known_hosts"
+          SHORT_SHA: ${{ needs.build.outputs.short_sha }}
+          FULL_SHA: ${{ github.sha }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          rm -rf /tmp/cortech-infra
+          git clone git@github.com:jacorbello/cortech-infra.git /tmp/cortech-infra
+          cd /tmp/cortech-infra
+
+          # kustomize edit operates on the current directory
+          (cd apps/osint/overlays/production && kustomize edit set image ${{ env.IMAGE }}:${SHORT_SHA})
+
+          # No-op if image tag is already current
+          if git diff --quiet; then
+            echo "::notice::Image tag already up to date — no deploy needed."
+            exit 0
+          fi
+
+          # Assert only the expected file changed
+          CHANGED=$(git diff --name-only)
+          if [ "$CHANGED" != "apps/osint/overlays/production/kustomization.yaml" ]; then
+            echo "::error::Unexpected files changed: ${CHANGED}"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add apps/osint/overlays/production/kustomization.yaml
+          git commit -m "deploy(osint): update osint-core to ${SHORT_SHA}
+
+          Source: jacorbello/osint-core@${FULL_SHA}
+          Workflow: https://github.com/jacorbello/osint-core/actions/runs/${RUN_ID}
+          ArgoCD: osint-platform (apps/osint/overlays/production)
+          Digest: ${DIGEST}"
+
+          # Push with one retry on conflict
+          if ! git push origin main; then
+            echo "::warning::Push conflict — retrying with pull-rebase"
+            git pull --rebase origin main
+            git push origin main
+          fi
+
+      - name: Cleanup credentials
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key
+          rm -f /tmp/github_known_hosts
+          rm -rf /tmp/cortech-infra
