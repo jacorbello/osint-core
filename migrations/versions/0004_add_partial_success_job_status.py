@@ -16,9 +16,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.drop_constraint("ck_jobs_status_check", "jobs", schema="osint")
+    op.drop_constraint(op.f("ck_jobs_status_check"), "jobs", schema="osint")
     op.create_check_constraint(
-        "ck_jobs_status_check",
+        op.f("ck_jobs_status_check"),
         "jobs",
         "status IN ('queued', 'running', 'succeeded', 'failed', 'partial_success', 'dead_letter')",
         schema="osint",
@@ -26,9 +26,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_jobs_status_check", "jobs", schema="osint")
+    op.drop_constraint(op.f("ck_jobs_status_check"), "jobs", schema="osint")
     op.create_check_constraint(
-        "ck_jobs_status_check",
+        op.f("ck_jobs_status_check"),
         "jobs",
         "status IN ('queued', 'running', 'succeeded', 'failed', 'dead_letter')",
         schema="osint",
