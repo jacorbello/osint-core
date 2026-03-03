@@ -90,6 +90,15 @@ class Event(UUIDMixin, TimestampMixin, Base):
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     severity: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Geographic fields
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    country_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    region: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actors: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    event_subtype: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     dedupe_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     plan_version_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("osint.plan_versions.id"), nullable=True
@@ -118,4 +127,7 @@ class Event(UUIDMixin, TimestampMixin, Base):
         Index("ix_events_source_id_ingested_at", "source_id", ingested_at.desc()),
         Index("ix_events_score_desc", score.desc().nullslast()),
         Index("ix_events_search_vector", "search_vector", postgresql_using="gin"),
+        Index("ix_events_country_code", "country_code"),
+        Index("ix_events_region", "region"),
+        Index("ix_events_source_category", "source_category"),
     )

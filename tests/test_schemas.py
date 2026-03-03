@@ -1,5 +1,8 @@
 """Tests for Pydantic v2 API schemas."""
 
+import uuid
+from datetime import UTC, datetime
+
 from osint_core.schemas.alert import AlertAckRequest, AlertEscalateRequest, AlertResponse
 from osint_core.schemas.audit import AuditLogResponse
 from osint_core.schemas.brief import BriefGenerateRequest, BriefResponse
@@ -210,3 +213,25 @@ def test_paginated_response():
     assert len(page.items) == 2
     assert page.total == 10
     assert page.pages == 5
+
+
+def test_event_response_includes_geo_fields():
+    from osint_core.schemas.event import EventResponse
+
+    event = EventResponse(
+        id=uuid.uuid4(),
+        event_type="conflict",
+        source_id="gdelt_global",
+        ingested_at=datetime.now(UTC),
+        dedupe_fingerprint="abc123",
+        latitude=48.38,
+        longitude=31.17,
+        country_code="UKR",
+        region="Eastern Europe",
+        source_category="military",
+    )
+    assert event.latitude == 48.38
+    assert event.longitude == 31.17
+    assert event.country_code == "UKR"
+    assert event.region == "Eastern Europe"
+    assert event.source_category == "military"
