@@ -51,7 +51,7 @@ class Job(UUIDMixin, TimestampMixin, Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('queued', 'running', 'succeeded', 'failed', 'dead_letter')",
+            "status IN ('queued', 'running', 'succeeded', 'failed', 'partial_success', 'dead_letter')",
             name="status_check",
         ),
         Index(
