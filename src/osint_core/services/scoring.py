@@ -31,6 +31,32 @@ class ScoringConfig:
     ioc_match_boost: float = 1.0
 
 
+@dataclass
+class ReliabilityProfile:
+    """NATO-style source reliability metadata."""
+
+    reliability: str = "C"  # A through F
+    credibility: int = 3    # 1 (confirmed) through 6 (truth cannot be judged)
+    corroboration_required: bool = False
+
+
+RELIABILITY_FACTORS: dict[str, float] = {
+    "A": 1.5,
+    "B": 1.2,
+    "C": 1.0,
+    "D": 0.7,
+    "E": 0.5,
+    "F": 0.3,
+}
+
+CORROBORATION_BONUS = 1.5
+
+
+def reliability_factor(grade: str) -> float:
+    """Convert a NATO reliability grade to a scoring multiplier."""
+    return RELIABILITY_FACTORS.get(grade.upper(), 1.0)
+
+
 def score_event(
     source_id: str,
     occurred_at: datetime,
@@ -80,3 +106,28 @@ def score_to_severity(score: float) -> str:
     if score < 7.0:
         return "high"
     return "critical"
+
+
+def score_event_v2(
+    source_id: str,
+    occurred_at: datetime,
+    indicator_count: int,
+    matched_topics: list[str],
+    config: ScoringConfig,
+    reliability_profile: ReliabilityProfile | None = None,
+    corroborated: bool = False,
+) -> float:
+    """Extended scoring with reliability weighting and corroboration bonus.
+
+    Formula:
+        score = base_reputation * reliability_factor * recency_decay * ioc_multiplier * corroboration_bonus
+    """
+    base_score = score_event(source_id, occurred_at, indicator_count, matched_topics, config)
+
+    rel_factor = 1.0
+    if reliability_profile:
+        rel_factor = reliability_factor(reliability_profile.reliability)
+
+    corr_bonus = CORROBORATION_BONUS if corroborated else 1.0
+
+    return base_score * rel_factor * corr_bonus
