@@ -89,7 +89,7 @@ class PlanEngine:
         Returns:
             Dict suitable for ``celery_app.conf.beat_schedule``.
         """
-        plan_id = plan.get("plan_id", "")
+        plan_id = plan["plan_id"]
         schedule: dict[str, Any] = {}
         for source in plan.get("sources", []):
             cron_expr = source.get("schedule_cron")

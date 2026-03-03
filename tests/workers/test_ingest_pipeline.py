@@ -12,7 +12,6 @@ import pytest
 from osint_core.connectors.base import RawItem
 from osint_core.workers.ingest import _ingest_source_async
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -144,7 +143,8 @@ async def test_ingest_creates_events():
     plan = _make_plan()
     items = [_make_raw_item("Item 1", "https://a.com/1"), _make_raw_item("Item 2", "https://a.com/2")]
     mock_db = _make_mock_db()
-    patches = _patch_all(mock_db, plan, items, extract_return=[{"type": "cve", "value": "CVE-2025-0001"}])
+    cve_indicator = [{"type": "cve", "value": "CVE-2025-0001"}]
+    patches = _patch_all(mock_db, plan, items, extract_return=cve_indicator)
     task_self = _mock_task_self()
 
     # We need events to get UUIDs after flush — patch Event so .id is set
@@ -168,7 +168,10 @@ async def test_ingest_creates_events():
         patch("osint_core.workers.ingest.score_event_task", patches["score_event_task"]),
         patch("osint_core.workers.ingest.vectorize_event_task", patches["vectorize_event_task"]),
         patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
-        patch("osint_core.workers.ingest.extract_indicators", return_value=[{"type": "cve", "value": "CVE-2025-0001"}]),
+        patch(
+            "osint_core.workers.ingest.extract_indicators",
+            return_value=[{"type": "cve", "value": "CVE-2025-0001"}],
+        ),
     ):
         result = await _ingest_source_async(task_self, "src-1", "plan-1")
 
@@ -228,9 +231,9 @@ async def test_ingest_raises_for_missing_plan():
         patch("osint_core.workers.ingest.async_session", patches["async_session"]),
         patch("osint_core.workers.ingest.plan_store", patches["plan_store"]),
         patch("osint_core.workers.ingest.registry", patches["registry"]),
+        pytest.raises(ValueError, match="No active plan"),
     ):
-        with pytest.raises(ValueError, match="No active plan"):
-            await _ingest_source_async(task_self, "src-1", "plan-1")
+        await _ingest_source_async(task_self, "src-1", "plan-1")
 
 
 @pytest.mark.asyncio
@@ -247,9 +250,9 @@ async def test_ingest_raises_for_missing_source():
         patch("osint_core.workers.ingest.async_session", patches["async_session"]),
         patch("osint_core.workers.ingest.plan_store", patches["plan_store"]),
         patch("osint_core.workers.ingest.registry", patches["registry"]),
+        pytest.raises(ValueError, match="Source .* not in plan"),
     ):
-        with pytest.raises(ValueError, match="Source .* not in plan"):
-            await _ingest_source_async(task_self, "src-1", "plan-1")
+        await _ingest_source_async(task_self, "src-1", "plan-1")
 
 
 @pytest.mark.asyncio
@@ -295,6 +298,6 @@ async def test_ingest_error_rate_threshold():
         patch("osint_core.workers.ingest.vectorize_event_task", patches["vectorize_event_task"]),
         patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
         patch("osint_core.workers.ingest.extract_indicators", return_value=[]),
+        pytest.raises(RuntimeError, match="High error rate"),
     ):
-        with pytest.raises(RuntimeError, match="High error rate"):
-            await _ingest_source_async(task_self, "src-1", "plan-1")
+        await _ingest_source_async(task_self, "src-1", "plan-1")

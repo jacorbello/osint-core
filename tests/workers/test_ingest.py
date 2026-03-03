@@ -99,7 +99,7 @@ def test_build_beat_schedule_skips_sources_without_cron():
 
 def test_build_beat_schedule_empty_sources():
     """An empty sources list should produce an empty schedule."""
-    plan = {"sources": []}
+    plan = {"plan_id": "test-plan", "sources": []}
     engine = PlanEngine()
     schedule = engine.build_beat_schedule(plan)
     assert schedule == {}

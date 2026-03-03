@@ -31,9 +31,15 @@ plan_store = PlanStore()
 ERROR_RATE_THRESHOLD = 0.5
 
 
-def _dedupe_fingerprint(source_id: str, item_data: dict[str, Any]) -> str:
-    """Compute a deterministic SHA-256 fingerprint for deduplication."""
-    payload = json.dumps({"source": source_id, **item_data}, sort_keys=True)
+def _dedupe_fingerprint(plan_id: str, source_id: str, item_data: dict[str, Any]) -> str:
+    """Compute a deterministic SHA-256 fingerprint for deduplication.
+
+    Includes plan_id so that identical items from the same source_id
+    across different plans are not incorrectly treated as duplicates.
+    """
+    payload = json.dumps(
+        {"plan": plan_id, "source": source_id, **item_data}, sort_keys=True,
+    )
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -109,7 +115,7 @@ async def _ingest_source_async(
         # Step 3: Dedupe & persist each item
         for item in items:
             try:
-                fingerprint = _dedupe_fingerprint(source_id, item.raw_data)
+                fingerprint = _dedupe_fingerprint(plan_id, source_id, item.raw_data)
 
                 # Pre-check for duplicate (fast path)
                 result = await db.execute(
