@@ -1,16 +1,13 @@
 # Dockerfile
-FROM python:3.12-slim AS base
+# Uses pre-built base with ML deps (sentence-transformers, spaCy, qdrant-client).
+# Rebuild base via: .github/workflows/build-base-images.yml
+FROM harbor.corbello.io/osint/python-base:ml-latest AS base
 WORKDIR /app
 
-# Install system deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libpq-dev && \
-    rm -rf /var/lib/apt/lists/*
-
-# Copy source and install (hatchling needs src/osint_core to build the wheel)
+# Install only core Python deps (ML deps already in base image)
 COPY pyproject.toml .
 COPY src/ src/
-RUN pip install --no-cache-dir ".[ml]"
+RUN pip install --no-cache-dir "."
 
 COPY alembic.ini .
 COPY plans/ plans/
