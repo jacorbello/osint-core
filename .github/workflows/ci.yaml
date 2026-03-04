@@ -189,6 +189,7 @@ jobs:
             aquasec/trivy:0.56.1 image \
               --timeout 15m0s \
               --skip-dirs "usr/local/lib/python3.12/site-packages/torch" \
+              --skip-dirs "usr/local/lib/python3.12/site-packages/nvidia" \
               --format sarif \
               --output /workspace/trivy-results-${{ matrix.target }}.sarif \
               --severity HIGH,CRITICAL \
@@ -196,6 +197,11 @@ jobs:
               --exit-code 1 \
               --ignorefile /workspace/.trivyignore \
               "${{ steps.img.outputs.ref }}"
+          # binary .so files that cause Trivy to time out and are not our code to remediate.
+          # --skip-dirs does not support globs, so if the Python version in the base image
+          # changes (e.g. 3.12 → 3.13) add a second --skip-dirs for the new path.
+          docker run --rm             -e TRIVY_DB_REPOSITORY             -e TRIVY_USERNAME             -e TRIVY_PASSWORD             -v "$PWD:/workspace"             aquasec/trivy:0.56.1 image             --format sarif             --output /workspace/trivy-results-${{ matrix.target }}.sarif             --severity HIGH,CRITICAL             --ignore-unfixed             --exit-code 1             --ignorefile /workspace/.trivyignore             --skip-dirs "usr/local/lib/python3.12/site-packages/nvidia"             "${{ steps.img.outputs.ref }}"
+>>>>>>> 067c13b (ci(scan): skip nvidia site-packages to prevent trivy timeout)
 
       - name: Upload Trivy scan to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
