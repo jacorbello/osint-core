@@ -70,7 +70,9 @@ jobs:
     needs: [lint, test]
     if: github.ref == 'refs/heads/main'
     outputs:
-      digest: ${{ steps.push.outputs.digest }}
+      digest_api: ${{ steps.build_api.outputs.digest }}
+      digest_worker: ${{ steps.build_worker.outputs.digest }}
+      digest_beat: ${{ steps.build_beat.outputs.digest }}
       short_sha: ${{ steps.vars.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v4
@@ -98,31 +100,47 @@ jobs:
           username: ${{ secrets.HARBOR_USERNAME }}
           password: ${{ secrets.HARBOR_PASSWORD }}
 
-      - name: Build image
-        run: |
-          docker build --target api \
-            -t ${{ env.IMAGE }}:${{ github.sha }} \
-            -t ${{ env.IMAGE }}:${{ steps.vars.outputs.short_sha }} \
-            -t ${{ env.IMAGE }}:latest \
-            .
+      - name: Build and push api
+        id: build_api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: api
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:${{ steps.vars.outputs.short_sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.IMAGE_CACHE }}
+          cache-to: type=registry,ref=${{ env.IMAGE_CACHE }},mode=max
 
-      - name: Push image and capture digest
-        id: push
-        run: |
-          set -o pipefail
-          PUSH_LOG="/tmp/push-${GITHUB_RUN_ID}.log"
-          docker push ${{ env.IMAGE }}:${{ github.sha }} 2>&1 | tee "${PUSH_LOG}"
-          docker push ${{ env.IMAGE }}:${{ steps.vars.outputs.short_sha }}
-          docker push ${{ env.IMAGE }}:latest
-          DIGEST=$(awk '/digest: sha256:/{print $3}' "${PUSH_LOG}" | head -1)
-          if [ -z "$DIGEST" ]; then
-            echo "::error::Failed to capture image digest from push output"
-            rm -f "${PUSH_LOG}"
-            exit 1
-          fi
-          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "::notice::Image digest: ${DIGEST}"
-          rm -f "${PUSH_LOG}"
+      - name: Build and push worker
+        id: build_worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          push: true
+          tags: |
+            ${{ env.IMAGE_WORKER }}:${{ github.sha }}
+            ${{ env.IMAGE_WORKER }}:${{ steps.vars.outputs.short_sha }}
+            ${{ env.IMAGE_WORKER }}:latest
+          cache-from: type=registry,ref=${{ env.IMAGE_CACHE }}
+          cache-to: type=registry,ref=${{ env.IMAGE_CACHE }}
+
+      - name: Build and push beat
+        id: build_beat
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: beat
+          push: true
+          tags: |
+            ${{ env.IMAGE_BEAT }}:${{ github.sha }}
+            ${{ env.IMAGE_BEAT }}:${{ steps.vars.outputs.short_sha }}
+            ${{ env.IMAGE_BEAT }}:latest
+          cache-from: type=registry,ref=${{ env.IMAGE_CACHE }}
+          cache-to: type=registry,ref=${{ env.IMAGE_CACHE }}
 
   # ── Stage 3: Security scan (main only) ─────────────────────────
   scan:
