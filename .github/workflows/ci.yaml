@@ -146,6 +146,10 @@ jobs:
   scan:
     runs-on: [self-hosted, linux, osint-deploy]
     needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [api, worker, beat]
     if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
     permissions:
       contents: read
@@ -153,19 +157,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve image for this target
+        id: img
+        run: |
+          case "${{ matrix.target }}" in
+            api)    echo "ref=${{ env.IMAGE }}@${{ needs.build.outputs.digest_api }}" >> "$GITHUB_OUTPUT" ;;
+            worker) echo "ref=${{ env.IMAGE_WORKER }}@${{ needs.build.outputs.digest_worker }}" >> "$GITHUB_OUTPUT" ;;
+            beat)   echo "ref=${{ env.IMAGE_BEAT }}@${{ needs.build.outputs.digest_beat }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Run Trivy vulnerability scanner (containerized)
         env:
           TRIVY_DB_REPOSITORY: "ghcr.io/aquasecurity/trivy-db"
           TRIVY_USERNAME: "${{ secrets.HARBOR_USERNAME }}"
           TRIVY_PASSWORD: "${{ secrets.HARBOR_PASSWORD }}"
         run: |
-          docker run --rm             -e TRIVY_DB_REPOSITORY             -e TRIVY_USERNAME             -e TRIVY_PASSWORD             -v "$PWD:/workspace"             aquasec/trivy:0.56.1 image             --format sarif             --output /workspace/trivy-results.sarif             --severity HIGH,CRITICAL             --ignore-unfixed             --exit-code 1             --ignorefile /workspace/.trivyignore             "${{ env.IMAGE }}@${{ needs.build.outputs.digest }}"
+          docker run --rm             -e TRIVY_DB_REPOSITORY             -e TRIVY_USERNAME             -e TRIVY_PASSWORD             -v "$PWD:/workspace"             aquasec/trivy:0.56.1 image             --format sarif             --output /workspace/trivy-results-${{ matrix.target }}.sarif             --severity HIGH,CRITICAL             --ignore-unfixed             --exit-code 1             --ignorefile /workspace/.trivyignore             "${{ steps.img.outputs.ref }}"
 
       - name: Upload Trivy scan to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
-        if: always() && hashFiles('trivy-results.sarif') != ''
+        if: always() && hashFiles('trivy-results-${{ matrix.target }}.sarif') != ''
         with:
-          sarif_file: "trivy-results.sarif"
+          sarif_file: "trivy-results-${{ matrix.target }}.sarif"
 
   # ── Stage 4: Deploy to K8s via GitOps (main only) ──────────────
   deploy:
@@ -197,7 +210,7 @@ jobs:
           GIT_SSH_COMMAND: "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/github_known_hosts"
           SHORT_SHA: ${{ needs.build.outputs.short_sha }}
           FULL_SHA: ${{ github.sha }}
-          DIGEST: ${{ needs.build.outputs.digest }}
+          DIGEST: ${{ needs.build.outputs.digest_api }}
           RUN_ID: ${{ github.run_id }}
         run: |
           rm -rf /tmp/cortech-infra
