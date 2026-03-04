@@ -164,6 +164,7 @@ jobs:
             api)    echo "ref=${{ env.IMAGE }}@${{ needs.build.outputs.digest_api }}" >> "$GITHUB_OUTPUT" ;;
             worker) echo "ref=${{ env.IMAGE_WORKER }}@${{ needs.build.outputs.digest_worker }}" >> "$GITHUB_OUTPUT" ;;
             beat)   echo "ref=${{ env.IMAGE_BEAT }}@${{ needs.build.outputs.digest_beat }}" >> "$GITHUB_OUTPUT" ;;
+            *)      echo "::error::Unknown matrix.target: ${{ matrix.target }}"; exit 1 ;;
           esac
 
       - name: Run Trivy vulnerability scanner (containerized)
@@ -184,7 +185,7 @@ jobs:
   deploy:
     runs-on: [self-hosted, linux, osint-deploy]
     needs: [build, scan]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.scan.result == 'success'
     concurrency:
       group: osint-infra-deploy
       cancel-in-progress: false
