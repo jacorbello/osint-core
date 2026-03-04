@@ -72,12 +72,13 @@ Add a BuildKit cache mount to the `pip install` step in the `base` stage:
 
 ```dockerfile
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir "."
+    pip install "."
 ```
 
 The `--mount=type=cache` persists the pip download cache between builds on the same runner
-without including it in the image layer. Combined with registry layer caching, a code-only
-change skips both pip download and pip install entirely.
+without including it in the image layer. `--no-cache-dir` is omitted — it would instruct pip
+to bypass the cache entirely, directly cancelling the mount's effect. Combined with registry
+layer caching, a code-only change skips both pip download and pip install entirely.
 
 ### 4. Scan Job
 

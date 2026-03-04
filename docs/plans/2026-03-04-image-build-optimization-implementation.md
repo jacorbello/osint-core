@@ -42,10 +42,10 @@ RUN pip install --no-cache-dir "."
 To:
 ```dockerfile
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir "."
+    pip install "."
 ```
 
-The `--mount=type=cache` is a BuildKit directive that mounts a persistent cache directory during the build step. It does not add the cache to the image layer — it only speeds up the build by reusing previously downloaded wheels.
+The `--mount=type=cache` is a BuildKit directive that mounts a persistent cache directory during the build step. It does not add the cache to the image layer — it only speeds up the build by reusing previously downloaded wheels. Note that `--no-cache-dir` must be removed: it instructs pip to bypass its cache entirely, which directly cancels the effect of the cache mount.
 
 **Step 2: Validate Dockerfile syntax**
 
