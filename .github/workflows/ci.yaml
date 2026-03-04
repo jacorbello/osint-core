@@ -16,7 +16,7 @@ env:
 jobs:
   # ── Stage 1: Lint (parallel with test) ──────────────────────────
   lint:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, osint-deploy]
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +41,7 @@ jobs:
 
   # ── Stage 1: Test (parallel with lint) ──────────────────────────
   test:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, osint-deploy]
     steps:
       - uses: actions/checkout@v4
 
@@ -63,7 +63,7 @@ jobs:
 
   # ── Stage 2: Build + push Docker image (main only) ─────────────
   build:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, osint-deploy]
     needs: [lint, test]
     if: github.ref == 'refs/heads/main'
     outputs:
@@ -71,6 +71,27 @@ jobs:
       short_sha: ${{ steps.vars.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Runner disk snapshot (pre-clean)
+        run: |
+          echo "== df -h =="
+          df -h
+          echo "== docker system df =="
+          docker system df || true
+
+      - name: Pre-build Docker cleanup
+        run: |
+          docker system prune -af --volumes || true
+          docker builder prune -af || true
+
+      - name: Enforce minimum free disk
+        run: |
+          FREE_GB=$(df -BG /runner/_work | awk 'NR==2 {gsub("G","",$4); print $4}')
+          echo "Free space on /runner/_work: ${FREE_GB}G"
+          if [ "${FREE_GB}" -lt 12 ]; then
+            echo "::error::Insufficient disk space (${FREE_GB}G free, need >= 12G)"
+            exit 1
+          fi
 
       - name: Set variables
         id: vars
@@ -105,9 +126,16 @@ jobs:
           echo "::notice::Image digest: ${DIGEST}"
           rm -f "${PUSH_LOG}"
 
+      - name: Post-build Docker cleanup
+        if: always()
+        run: |
+          docker image prune -af || true
+          docker builder prune -af || true
+          docker system df || true
+
   # ── Stage 3: Security scan (main only) ─────────────────────────
   scan:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, osint-deploy]
     needs: build
     if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
     permissions:
@@ -132,7 +160,7 @@ jobs:
 
   # ── Stage 4: Deploy to K8s via GitOps (main only) ──────────────
   deploy:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, osint-deploy]
     needs: [build, scan]
     if: github.ref == 'refs/heads/main'
     concurrency:
