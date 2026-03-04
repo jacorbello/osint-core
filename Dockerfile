@@ -7,7 +7,8 @@ WORKDIR /app
 # Install only core Python deps (ML deps already in base image)
 COPY pyproject.toml .
 COPY src/ src/
-RUN pip install --no-cache-dir "."
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install "."
 
 COPY alembic.ini .
 COPY plans/ plans/

@@ -12,6 +12,9 @@ on:
 
 env:
   IMAGE: harbor.corbello.io/osint/osint-core
+  IMAGE_WORKER: harbor.corbello.io/osint/osint-core-worker
+  IMAGE_BEAT: harbor.corbello.io/osint/osint-core-beat
+  IMAGE_CACHE: harbor.corbello.io/osint/osint-core-cache
 
 jobs:
   # ── Stage 1: Lint (parallel with test) ──────────────────────────
@@ -67,22 +70,12 @@ jobs:
     needs: [lint, test]
     if: github.ref == 'refs/heads/main'
     outputs:
-      digest: ${{ steps.push.outputs.digest }}
+      digest_api: ${{ steps.build_api.outputs.digest }}
+      digest_worker: ${{ steps.build_worker.outputs.digest }}
+      digest_beat: ${{ steps.build_beat.outputs.digest }}
       short_sha: ${{ steps.vars.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Runner disk snapshot (pre-clean)
-        run: |
-          echo "== df -h =="
-          df -h
-          echo "== docker system df =="
-          docker system df || true
-
-      - name: Pre-build Docker cleanup
-        run: |
-          docker system prune -af --volumes || true
-          docker builder prune -af || true
 
       - name: Enforce minimum free disk
         run: |
@@ -97,46 +90,66 @@ jobs:
         id: vars
         run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to Harbor
-        run: echo "${{ secrets.HARBOR_PASSWORD }}" | docker login harbor.corbello.io -u "${{ secrets.HARBOR_USERNAME }}" --password-stdin
+        uses: docker/login-action@v3
+        with:
+          registry: harbor.corbello.io
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
 
-      - name: Build image
-        run: |
-          docker build --target api \
-            -t ${{ env.IMAGE }}:${{ github.sha }} \
-            -t ${{ env.IMAGE }}:${{ steps.vars.outputs.short_sha }} \
-            -t ${{ env.IMAGE }}:latest \
-            .
+      - name: Build and push api
+        id: build_api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: api
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:${{ steps.vars.outputs.short_sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.IMAGE_CACHE }}
+          cache-to: type=registry,ref=${{ env.IMAGE_CACHE }},mode=max
 
-      - name: Push image and capture digest
-        id: push
-        run: |
-          set -o pipefail
-          PUSH_LOG="/tmp/push-${GITHUB_RUN_ID}.log"
-          docker push ${{ env.IMAGE }}:${{ github.sha }} 2>&1 | tee "${PUSH_LOG}"
-          docker push ${{ env.IMAGE }}:${{ steps.vars.outputs.short_sha }}
-          docker push ${{ env.IMAGE }}:latest
-          DIGEST=$(awk '/digest: sha256:/{print $3}' "${PUSH_LOG}" | head -1)
-          if [ -z "$DIGEST" ]; then
-            echo "::error::Failed to capture image digest from push output"
-            rm -f "${PUSH_LOG}"
-            exit 1
-          fi
-          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "::notice::Image digest: ${DIGEST}"
-          rm -f "${PUSH_LOG}"
+      - name: Build and push worker
+        id: build_worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          push: true
+          tags: |
+            ${{ env.IMAGE_WORKER }}:${{ github.sha }}
+            ${{ env.IMAGE_WORKER }}:${{ steps.vars.outputs.short_sha }}
+            ${{ env.IMAGE_WORKER }}:latest
+          cache-from: type=registry,ref=${{ env.IMAGE_CACHE }}
+          cache-to: type=registry,ref=${{ env.IMAGE_CACHE }},mode=max
 
-      - name: Post-build Docker cleanup
-        if: always()
-        run: |
-          docker image prune -af || true
-          docker builder prune -af || true
-          docker system df || true
+      - name: Build and push beat
+        id: build_beat
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: beat
+          push: true
+          tags: |
+            ${{ env.IMAGE_BEAT }}:${{ github.sha }}
+            ${{ env.IMAGE_BEAT }}:${{ steps.vars.outputs.short_sha }}
+            ${{ env.IMAGE_BEAT }}:latest
+          cache-from: type=registry,ref=${{ env.IMAGE_CACHE }}
+          cache-to: type=registry,ref=${{ env.IMAGE_CACHE }},mode=max
 
   # ── Stage 3: Security scan (main only) ─────────────────────────
   scan:
     runs-on: [self-hosted, linux, osint-deploy]
     needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [api, worker, beat]
     if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
     permissions:
       contents: read
@@ -144,25 +157,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve image for this target
+        id: img
+        run: |
+          case "${{ matrix.target }}" in
+            api)    echo "ref=${{ env.IMAGE }}@${{ needs.build.outputs.digest_api }}" >> "$GITHUB_OUTPUT" ;;
+            worker) echo "ref=${{ env.IMAGE_WORKER }}@${{ needs.build.outputs.digest_worker }}" >> "$GITHUB_OUTPUT" ;;
+            beat)   echo "ref=${{ env.IMAGE_BEAT }}@${{ needs.build.outputs.digest_beat }}" >> "$GITHUB_OUTPUT" ;;
+            *)      echo "::error::Unknown matrix.target: ${{ matrix.target }}"; exit 1 ;;
+          esac
+
       - name: Run Trivy vulnerability scanner (containerized)
         env:
           TRIVY_DB_REPOSITORY: "ghcr.io/aquasecurity/trivy-db"
           TRIVY_USERNAME: "${{ secrets.HARBOR_USERNAME }}"
           TRIVY_PASSWORD: "${{ secrets.HARBOR_PASSWORD }}"
         run: |
-          docker run --rm             -e TRIVY_DB_REPOSITORY             -e TRIVY_USERNAME             -e TRIVY_PASSWORD             -v "$PWD:/workspace"             aquasec/trivy:0.56.1 image             --format sarif             --output /workspace/trivy-results.sarif             --severity HIGH,CRITICAL             --ignore-unfixed             --exit-code 1             --ignorefile /workspace/.trivyignore             "${{ env.IMAGE }}@${{ needs.build.outputs.digest }}"
+          docker run --rm             -e TRIVY_DB_REPOSITORY             -e TRIVY_USERNAME             -e TRIVY_PASSWORD             -v "$PWD:/workspace"             aquasec/trivy:0.56.1 image             --format sarif             --output /workspace/trivy-results-${{ matrix.target }}.sarif             --severity HIGH,CRITICAL             --ignore-unfixed             --exit-code 1             --ignorefile /workspace/.trivyignore             "${{ steps.img.outputs.ref }}"
 
       - name: Upload Trivy scan to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
-        if: always() && hashFiles('trivy-results.sarif') != ''
+        if: always() && hashFiles('trivy-results-${{ matrix.target }}.sarif') != ''
         with:
-          sarif_file: "trivy-results.sarif"
+          sarif_file: "trivy-results-${{ matrix.target }}.sarif"
+          category: "trivy-${{ matrix.target }}"
 
   # ── Stage 4: Deploy to K8s via GitOps (main only) ──────────────
   deploy:
     runs-on: [self-hosted, linux, osint-deploy]
     needs: [build, scan]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.scan.result == 'success'
     concurrency:
       group: osint-infra-deploy
       cancel-in-progress: false
@@ -188,7 +212,7 @@ jobs:
           GIT_SSH_COMMAND: "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/github_known_hosts"
           SHORT_SHA: ${{ needs.build.outputs.short_sha }}
           FULL_SHA: ${{ github.sha }}
-          DIGEST: ${{ needs.build.outputs.digest }}
+          DIGEST: ${{ needs.build.outputs.digest_api }}
           RUN_ID: ${{ github.run_id }}
         run: |
           rm -rf /tmp/cortech-infra
