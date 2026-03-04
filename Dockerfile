@@ -8,7 +8,7 @@ WORKDIR /app
 COPY pyproject.toml .
 COPY src/ src/
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir "."
+    pip install "."
 
 COPY alembic.ini .
 COPY plans/ plans/
