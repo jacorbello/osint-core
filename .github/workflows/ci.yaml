@@ -126,7 +126,7 @@ jobs:
             ${{ env.IMAGE_WORKER }}:${{ steps.vars.outputs.short_sha }}
             ${{ env.IMAGE_WORKER }}:latest
           cache-from: type=registry,ref=${{ env.IMAGE_CACHE }}
-          cache-to: type=registry,ref=${{ env.IMAGE_CACHE }}
+          cache-to: type=registry,ref=${{ env.IMAGE_CACHE }},mode=max
 
       - name: Build and push beat
         id: build_beat
@@ -140,7 +140,7 @@ jobs:
             ${{ env.IMAGE_BEAT }}:${{ steps.vars.outputs.short_sha }}
             ${{ env.IMAGE_BEAT }}:latest
           cache-from: type=registry,ref=${{ env.IMAGE_CACHE }}
-          cache-to: type=registry,ref=${{ env.IMAGE_CACHE }}
+          cache-to: type=registry,ref=${{ env.IMAGE_CACHE }},mode=max
 
   # ── Stage 3: Security scan (main only) ─────────────────────────
   scan:
@@ -180,6 +180,7 @@ jobs:
         if: always() && hashFiles('trivy-results-${{ matrix.target }}.sarif') != ''
         with:
           sarif_file: "trivy-results-${{ matrix.target }}.sarif"
+          category: "trivy-${{ matrix.target }}"
 
   # ── Stage 4: Deploy to K8s via GitOps (main only) ──────────────
   deploy:
