@@ -12,6 +12,9 @@ on:
 
 env:
   IMAGE: harbor.corbello.io/osint/osint-core
+  IMAGE_WORKER: harbor.corbello.io/osint/osint-core-worker
+  IMAGE_BEAT: harbor.corbello.io/osint/osint-core-beat
+  IMAGE_CACHE: harbor.corbello.io/osint/osint-core-cache
 
 jobs:
   # ── Stage 1: Lint (parallel with test) ──────────────────────────
