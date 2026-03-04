@@ -63,7 +63,7 @@ git commit -m "perf(docker): add BuildKit pip cache mount to base stage"
 
 ---
 
-### Task 2: Add IMAGE_WORKER and IMAGE_BEAT env vars
+### Task 2: Add IMAGE_WORKER, IMAGE_BEAT, and IMAGE_CACHE env vars
 
 **Files:**
 - Modify: `.github/workflows/ci.yaml`
@@ -321,6 +321,7 @@ First, add a step before the Trivy run to resolve the correct image and digest f
             api)    echo "ref=${{ env.IMAGE }}@${{ needs.build.outputs.digest_api }}" >> "$GITHUB_OUTPUT" ;;
             worker) echo "ref=${{ env.IMAGE_WORKER }}@${{ needs.build.outputs.digest_worker }}" >> "$GITHUB_OUTPUT" ;;
             beat)   echo "ref=${{ env.IMAGE_BEAT }}@${{ needs.build.outputs.digest_beat }}" >> "$GITHUB_OUTPUT" ;;
+            *)      echo "::error::Unknown matrix.target: ${{ matrix.target }}"; exit 1 ;;
           esac
 ```
 

@@ -64,7 +64,7 @@ Separate Harbor repositories per component (industry standard):
 | `worker` | `harbor.corbello.io/osint/osint-core-worker` (new) |
 | `beat` | `harbor.corbello.io/osint/osint-core-beat` (new) |
 
-Add `IMAGE_WORKER` and `IMAGE_BEAT` top-level env vars alongside the existing `IMAGE`.
+Add `IMAGE_WORKER`, `IMAGE_BEAT`, and `IMAGE_CACHE` top-level env vars alongside the existing `IMAGE`.
 
 ### 3. Dockerfile — pip Cache Mount
 
