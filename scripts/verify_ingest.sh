@@ -51,8 +51,8 @@ require_cmd() {
     fi
 }
 
-api_get() { curl -sf -H "Content-Type: application/json" "${API_BASE_URL}$1"; }
-api_post() { curl -sf -X POST -H "Content-Type: application/json" "${API_BASE_URL}$1"; }
+api_get() { curl -fsS --fail-with-body -H "Content-Type: application/json" "${API_BASE_URL}$1"; }
+api_post() { curl -fsS --fail-with-body -X POST -H "Content-Type: application/json" "${API_BASE_URL}$1"; }
 
 # ---------------------------------------------------------------------------
 # Preflight
@@ -88,6 +88,8 @@ echo ""
 # ---------------------------------------------------------------------------
 bold "Step 1: Trigger manual ingest"
 
+DISPATCH_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
 DISPATCH_RESPONSE=$(api_post "/api/v1/ingest/source/${SOURCE_ID}/run?plan_id=${PLAN_ID}" 2>&1) || {
     check_fail "POST /api/v1/ingest/source/${SOURCE_ID}/run returned an error"
     echo "  Response: ${DISPATCH_RESPONSE}"
@@ -95,6 +97,7 @@ DISPATCH_RESPONSE=$(api_post "/api/v1/ingest/source/${SOURCE_ID}/run?plan_id=${P
 }
 
 TASK_ID=$(echo "${DISPATCH_RESPONSE}" | jq -r '.task_id // empty')
+CELERY_TASK_ID=$(echo "${DISPATCH_RESPONSE}" | jq -r '.celery_task_id // empty')
 DISPATCH_STATUS=$(echo "${DISPATCH_RESPONSE}" | jq -r '.status // empty')
 
 if [[ -n "${TASK_ID}" && "${DISPATCH_STATUS}" == "dispatched" ]]; then
@@ -115,12 +118,17 @@ JOB_STATUS=""
 JOB_ID=""
 
 while [[ ${ELAPSED} -lt ${POLL_TIMEOUT} ]]; do
-    JOBS_RESPONSE=$(api_get "/api/v1/jobs?limit=10" 2>/dev/null) || true
+    JOBS_RESPONSE=$(api_get "/api/v1/jobs?limit=100" 2>/dev/null) || true
 
     if [[ -n "${JOBS_RESPONSE}" ]]; then
-        # Find a job whose input_params contains our source_id, ordered by most recent
-        JOB_MATCH=$(echo "${JOBS_RESPONSE}" | jq -r --arg sid "${SOURCE_ID}" \
-            '[.items[] | select(.input_params.source_id == $sid)] | sort_by(.created_at) | last // empty')
+        # Find the job matching our celery_task_id, falling back to source_id + dispatch time
+        if [[ -n "${CELERY_TASK_ID}" ]]; then
+            JOB_MATCH=$(echo "${JOBS_RESPONSE}" | jq -r --arg tid "${CELERY_TASK_ID}" \
+                '[.items[] | select(.celery_task_id == $tid)] | first // empty')
+        else
+            JOB_MATCH=$(echo "${JOBS_RESPONSE}" | jq -r --arg sid "${SOURCE_ID}" --arg dt "${DISPATCH_TIME}" \
+                '[.items[] | select(.input_params.source_id == $sid and .created_at >= $dt)] | sort_by(.created_at) | last // empty')
+        fi
 
         if [[ -n "${JOB_MATCH}" && "${JOB_MATCH}" != "null" ]]; then
             JOB_STATUS=$(echo "${JOB_MATCH}" | jq -r '.status')
@@ -160,7 +168,7 @@ echo ""
 # ---------------------------------------------------------------------------
 bold "Step 3: Verify events were created"
 
-EVENTS_RESPONSE=$(api_get "/api/v1/events?source_id=${SOURCE_ID}&limit=5" 2>/dev/null) || true
+EVENTS_RESPONSE=$(api_get "/api/v1/events?source_id=${SOURCE_ID}&limit=5&date_from=${DISPATCH_TIME}" 2>/dev/null) || true
 
 if [[ -n "${EVENTS_RESPONSE}" ]]; then
     EVENT_COUNT=$(echo "${EVENTS_RESPONSE}" | jq -r '.total // 0')
@@ -182,17 +190,20 @@ echo ""
 # ---------------------------------------------------------------------------
 bold "Step 4: Verify indicators were extracted"
 
-INDICATORS_RESPONSE=$(api_get "/api/v1/indicators?limit=10" 2>/dev/null) || true
+INDICATORS_RESPONSE=$(api_get "/api/v1/indicators?source_id=${SOURCE_ID}&limit=10" 2>/dev/null) || true
 
 if [[ -n "${INDICATORS_RESPONSE}" ]]; then
-    INDICATOR_COUNT=$(echo "${INDICATORS_RESPONSE}" | jq -r '.total // 0')
+    # Filter to indicators linked to our source and seen after dispatch
+    MATCHING_INDICATORS=$(echo "${INDICATORS_RESPONSE}" | jq --arg sid "${SOURCE_ID}" --arg dt "${DISPATCH_TIME}" \
+        '[.items[] | select((.sources // [] | any(. == $sid)) and .last_seen >= $dt)]')
+    INDICATOR_COUNT=$(echo "${MATCHING_INDICATORS}" | jq 'length')
     if [[ "${INDICATOR_COUNT}" -gt 0 ]]; then
-        check_pass "Found ${INDICATOR_COUNT} indicator(s) in the database"
+        check_pass "Found ${INDICATOR_COUNT} indicator(s) for source_id=${SOURCE_ID} since dispatch"
         # Show breakdown by type
-        echo "${INDICATORS_RESPONSE}" | jq -r '.items | group_by(.indicator_type) | .[] |
+        echo "${MATCHING_INDICATORS}" | jq -r 'group_by(.indicator_type) | .[] |
             "  Type: \(.[0].indicator_type) — count: \(length)"' 2>/dev/null || true
     else
-        check_fail "No indicators found in the database"
+        check_fail "No indicators found for source_id=${SOURCE_ID} since dispatch"
     fi
 else
     check_fail "Could not query indicators API"
