@@ -109,12 +109,15 @@ class Event(UUIDMixin, TimestampMixin, Base):
         "metadata", JSONB, server_default="{}", nullable=False
     )
 
+    _SEARCH_EXPR = (
+        "to_tsvector('english',"
+        " coalesce(title, '') || ' '"
+        " || coalesce(summary, '') || ' '"
+        " || coalesce(raw_excerpt, ''))"
+    )
     search_vector: Mapped[Any | None] = mapped_column(
         TSVECTOR,
-        Computed(
-            "to_tsvector('english', coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(raw_excerpt, ''))",
-            persisted=True,
-        ),
+        Computed(_SEARCH_EXPR, persisted=True),
         nullable=True,
     )
 
