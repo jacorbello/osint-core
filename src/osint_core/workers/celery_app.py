@@ -1,6 +1,7 @@
 """Celery application and Beat configuration."""
 
 import asyncio
+import sys
 
 import structlog
 from celery import Celery
@@ -67,6 +68,13 @@ async def _fetch_active_plans_schedule() -> dict:
 
     for plan_version in active_plans:
         plan_schedule = engine.build_beat_schedule(plan_version.content)
+        collisions = set(schedule.keys()) & set(plan_schedule.keys())
+        if collisions:
+            logger.warning(
+                "beat_schedule_key_collision",
+                plan_id=plan_version.plan_id,
+                colliding_keys=sorted(collisions),
+            )
         schedule.update(plan_schedule)
         logger.info(
             "beat_plan_loaded",
@@ -78,18 +86,41 @@ async def _fetch_active_plans_schedule() -> dict:
     return schedule
 
 
+_BEAT_LOAD_MAX_RETRIES = 3
+_BEAT_LOAD_BACKOFF_SECONDS = 2
+
+
 def load_beat_schedule() -> None:
-    """Load the active plan schedule into celery_app.conf.beat_schedule."""
-    try:
-        schedule = asyncio.run(_fetch_active_plans_schedule())
-        celery_app.conf.beat_schedule = schedule
-        logger.info("beat_schedule_loaded", total_tasks=len(schedule))
-    except Exception:
-        logger.exception(
-            "beat_schedule_load_failed",
-            msg="Failed to load beat schedule from database",
-        )
-        celery_app.conf.beat_schedule = {}
+    """Load the active plan schedule into celery_app.conf.beat_schedule.
+
+    Retries with exponential backoff on failure. If all retries are exhausted,
+    exits with a non-zero code so orchestrators can restart Beat.
+    """
+    import time
+
+    for attempt in range(1, _BEAT_LOAD_MAX_RETRIES + 1):
+        try:
+            schedule = asyncio.run(_fetch_active_plans_schedule())
+            celery_app.conf.beat_schedule = schedule
+            logger.info("beat_schedule_loaded", total_tasks=len(schedule))
+            return
+        except Exception:
+            logger.exception(
+                "beat_schedule_load_failed",
+                msg="Failed to load beat schedule from database",
+                attempt=attempt,
+                max_retries=_BEAT_LOAD_MAX_RETRIES,
+            )
+            if attempt < _BEAT_LOAD_MAX_RETRIES:
+                backoff = _BEAT_LOAD_BACKOFF_SECONDS ** attempt
+                logger.info("beat_schedule_load_retry", backoff_seconds=backoff)
+                time.sleep(backoff)
+
+    logger.critical(
+        "beat_schedule_load_exhausted",
+        msg="All retries exhausted loading beat schedule; exiting",
+    )
+    sys.exit(1)
 
 
 @beat_init.connect

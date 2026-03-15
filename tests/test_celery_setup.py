@@ -2,6 +2,8 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from osint_core.workers.celery_app import celery_app, load_beat_schedule
 
 
@@ -66,12 +68,12 @@ def test_load_beat_schedule_with_active_plan():
         load_beat_schedule()
 
     schedule = celery_app.conf.beat_schedule
-    assert "ingest-cisa_kev" in schedule
-    assert "ingest-gdelt" in schedule
-    assert schedule["ingest-cisa_kev"]["task"] == "osint.ingest_source"
-    assert schedule["ingest-cisa_kev"]["args"] == ["cisa_kev", "test-plan"]
-    assert schedule["ingest-cisa_kev"]["options"]["queue"] == "ingest"
-    assert schedule["ingest-gdelt"]["args"] == ["gdelt", "test-plan"]
+    assert "ingest-test-plan-cisa_kev" in schedule
+    assert "ingest-test-plan-gdelt" in schedule
+    assert schedule["ingest-test-plan-cisa_kev"]["task"] == "osint.ingest_source"
+    assert schedule["ingest-test-plan-cisa_kev"]["args"] == ["cisa_kev", "test-plan"]
+    assert schedule["ingest-test-plan-cisa_kev"]["options"]["queue"] == "ingest"
+    assert schedule["ingest-test-plan-gdelt"]["args"] == ["gdelt", "test-plan"]
 
     # Reset for other tests
     celery_app.conf.beat_schedule = {}
@@ -97,15 +99,19 @@ def test_load_beat_schedule_no_active_plans():
     assert celery_app.conf.beat_schedule == {}
 
 
-def test_load_beat_schedule_db_error_does_not_crash():
-    """If the database is unreachable, beat_schedule falls back to empty."""
-    with patch(
-        "osint_core.workers.celery_app._fetch_active_plans_schedule",
-        side_effect=ConnectionError("DB unreachable"),
+def test_load_beat_schedule_db_error_exits_after_retries():
+    """If the database is unreachable after all retries, Beat exits non-zero."""
+    with (
+        patch(
+            "osint_core.workers.celery_app._fetch_active_plans_schedule",
+            side_effect=ConnectionError("DB unreachable"),
+        ),
+        patch("time.sleep"),
+        pytest.raises(SystemExit) as exc_info,
     ):
         load_beat_schedule()
 
-    assert celery_app.conf.beat_schedule == {}
+    assert exc_info.value.code == 1
 
 
 def test_load_beat_schedule_multiple_active_plans():
@@ -141,10 +147,10 @@ def test_load_beat_schedule_multiple_active_plans():
         load_beat_schedule()
 
     schedule = celery_app.conf.beat_schedule
-    assert "ingest-src_a" in schedule
-    assert "ingest-src_b" in schedule
-    assert schedule["ingest-src_a"]["args"] == ["src_a", "plan-a"]
-    assert schedule["ingest-src_b"]["args"] == ["src_b", "plan-b"]
+    assert "ingest-plan-a-src_a" in schedule
+    assert "ingest-plan-b-src_b" in schedule
+    assert schedule["ingest-plan-a-src_a"]["args"] == ["src_a", "plan-a"]
+    assert schedule["ingest-plan-b-src_b"]["args"] == ["src_b", "plan-b"]
 
     # Reset for other tests
     celery_app.conf.beat_schedule = {}
