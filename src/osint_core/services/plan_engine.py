@@ -103,7 +103,7 @@ class PlanEngine:
             if not cron_expr:
                 continue
             source_id = source["id"]
-            schedule[f"ingest-{source_id}"] = {
+            schedule[f"ingest-{plan_id}-{source_id}"] = {
                 "task": "osint.ingest_source",
                 "schedule": _parse_cron(cron_expr),
                 "args": [source_id, plan_id],
