@@ -16,6 +16,9 @@ docker compose exec api alembic upgrade head
 # 3. Load and activate plans
 ./scripts/load_plan.sh              # uses http://localhost:8000 by default
 ./scripts/load_plan.sh http://api:8000  # or pass a custom API URL
+
+# In production (auth_disabled=false), pass a Bearer token:
+# OSINT_API_TOKEN=<token> ./scripts/load_plan.sh http://api:8000
 ```
 
 The script calls `POST /api/v1/plan/sync`, which:
