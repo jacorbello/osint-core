@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
+from sqlalchemy import select
+
+from osint_core.db import async_session
+from osint_core.models.event import Event
+from osint_core.services.vectorize import upsert_event
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -16,30 +22,74 @@ def vectorize_event_task(self: Any, event_id: str) -> dict[str, Any]:
 
     Pipeline steps:
       1. Load the event from the database by event_id
-      2. Build text representation (title + description + raw content)
+      2. Build text representation (title + summary)
       3. Call upsert_event() to embed and store in Qdrant
-      4. Mark event as vectorized in the database
+      4. Return a summary dict with event_id, vector_id, and status
 
-    Returns a summary dict with the event_id and status.
-
-    Note: Full DB integration is deferred until the database layer is
-    connected.  This task currently serves as the registered entry point
-    for the vectorization pipeline.
+    Raises:
+        Retry: On transient Qdrant or database failures (up to max_retries).
     """
     logger.info("Vectorizing event: %s", event_id)
 
-    # --- Stub implementation ---
-    # In production this would:
-    # 1. Load event from DB by event_id
-    # 2. Build text = f"{event.title} {event.description} {event.raw_content}"
-    # 3. Build payload = {"title": event.title, "source": event.source_id, ...}
-    # 4. Call upsert_event(event_id, text, payload)
-    # 5. Update event.vectorized = True in DB
+    try:
+        return asyncio.run(_vectorize_event_async(event_id))
+    except _EventNotFoundError as exc:
+        logger.error("Event not found for vectorization: %s", event_id)
+        return {
+            "event_id": event_id,
+            "status": "not_found",
+            "error": str(exc),
+        }
+    except Exception as exc:
+        countdown = min(2 ** self.request.retries * 30, 900)
+        logger.warning(
+            "Vectorize failed for event %s (attempt %d), retrying in %ds: %s",
+            event_id,
+            self.request.retries,
+            countdown,
+            exc,
+        )
+        raise self.retry(exc=exc, countdown=countdown) from exc
 
+
+class _EventNotFoundError(Exception):
+    """Raised when an event cannot be found in the database."""
+
+
+async def _vectorize_event_async(event_id: str) -> dict[str, Any]:
+    """Async implementation: fetch event, embed, upsert to Qdrant."""
+    import uuid
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Event).where(Event.id == uuid.UUID(event_id))
+        )
+        event: Event | None = result.scalar_one_or_none()
+
+    if event is None:
+        raise _EventNotFoundError(f"No event found with id={event_id}")
+
+    parts = [p for p in (event.title, event.summary) if p]
+    text = " ".join(parts) if parts else event_id
+
+    payload: dict[str, Any] = {
+        "source_id": event.source_id,
+        "event_type": event.event_type,
+        "severity": event.severity,
+        "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+        "title": event.title,
+    }
+
+    upsert_event(event_id, text, payload)
+
+    import uuid as _uuid
+
+    vector_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, event_id))
+    logger.info("Vectorized event %s -> vector %s", event_id, vector_id)
     return {
         "event_id": event_id,
-        "status": "stub",
-        "vectorized": False,
+        "vector_id": vector_id,
+        "status": "ok",
     }
 
 
