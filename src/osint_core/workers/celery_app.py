@@ -123,7 +123,7 @@ def load_beat_schedule() -> None:
     sys.exit(1)
 
 
-@beat_init.connect
+@beat_init.connect  # type: ignore[untyped-decorator]
 def on_beat_init(sender: object, **kwargs: object) -> None:
     """Signal handler: load active plan schedule when Beat starts."""
     load_beat_schedule()
