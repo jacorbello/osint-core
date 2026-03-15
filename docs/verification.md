@@ -38,6 +38,8 @@ Defaults: `SOURCE_ID=cisa_kev`, `PLAN_ID=libertycenter-osint`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_BASE_URL` | `http://localhost:8000` | Base URL of the API |
+| `API_TOKEN` | _(empty)_ | Bearer token — required when `auth_disabled=false` (e.g. staging/prod) |
+| `CURL_TIMEOUT` | `30` | Max seconds per individual curl request |
 | `POLL_INTERVAL` | `5` | Seconds between job status polls |
 | `POLL_TIMEOUT` | `120` | Max seconds to wait for job completion |
 

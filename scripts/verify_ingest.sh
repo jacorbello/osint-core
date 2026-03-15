@@ -16,6 +16,8 @@
 #
 # Environment:
 #   API_BASE_URL  — API base URL (default: http://localhost:8000)
+#   API_TOKEN     — Bearer token for authenticated deployments (omit when auth_disabled=true)
+#   CURL_TIMEOUT  — Max seconds per curl request (default: 30)
 #   POLL_INTERVAL — Seconds between status polls (default: 5)
 #   POLL_TIMEOUT  — Max seconds to wait for task completion (default: 120)
 
@@ -29,6 +31,8 @@ SOURCE_ID="${1:-cisa_kev}"
 PLAN_ID="${2:-libertycenter-osint}"
 POLL_INTERVAL="${POLL_INTERVAL:-5}"
 POLL_TIMEOUT="${POLL_TIMEOUT:-120}"
+API_TOKEN="${API_TOKEN:-}"
+CURL_TIMEOUT="${CURL_TIMEOUT:-30}"
 
 PASS=0
 FAIL=0
@@ -51,8 +55,24 @@ require_cmd() {
     fi
 }
 
-api_get() { curl -fsS --fail-with-body -H "Content-Type: application/json" "${API_BASE_URL}$1"; }
-api_post() { curl -fsS --fail-with-body -X POST -H "Content-Type: application/json" "${API_BASE_URL}$1"; }
+api_get() {
+    if [[ -n "${API_TOKEN}" ]]; then
+        curl -sf --max-time "${CURL_TIMEOUT}" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            "${API_BASE_URL}$1"
+    else
+        curl -sf --max-time "${CURL_TIMEOUT}" "${API_BASE_URL}$1"
+    fi
+}
+api_post() {
+    if [[ -n "${API_TOKEN}" ]]; then
+        curl -sf --max-time "${CURL_TIMEOUT}" -X POST \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            "${API_BASE_URL}$1"
+    else
+        curl -sf --max-time "${CURL_TIMEOUT}" -X POST "${API_BASE_URL}$1"
+    fi
+}
 
 # ---------------------------------------------------------------------------
 # Preflight
