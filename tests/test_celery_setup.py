@@ -40,7 +40,7 @@ def test_celery_beat_schedule_empty_at_import():
 
 
 def test_load_beat_schedule_with_active_plan():
-    """load_beat_schedule populates beat_schedule from active plans."""
+    """load_beat_schedule populates beat_schedule from active plans, namespaced by plan_id."""
     mock_plan = MagicMock()
     mock_plan.plan_id = "test-plan"
     mock_plan.version = 1
@@ -99,23 +99,51 @@ def test_load_beat_schedule_no_active_plans():
     assert celery_app.conf.beat_schedule == {}
 
 
-def test_load_beat_schedule_db_error_exits_after_retries():
-    """If the database is unreachable after all retries, Beat exits non-zero."""
+def test_load_beat_schedule_db_error_raises_after_retries():
+    """If the database is unreachable, load_beat_schedule raises after exhausting retries."""
     with (
         patch(
             "osint_core.workers.celery_app._fetch_active_plans_schedule",
             side_effect=ConnectionError("DB unreachable"),
         ),
-        patch("time.sleep"),
-        pytest.raises(SystemExit) as exc_info,
+        patch("osint_core.workers.celery_app.time.sleep"),
     ):
-        load_beat_schedule()
+        try:
+            load_beat_schedule()
+        except ConnectionError:
+            pass
+        else:
+            raise AssertionError("Expected ConnectionError to be raised")
 
-    assert exc_info.value.code == 1
+
+def test_load_beat_schedule_db_error_retries_correct_number_of_times():
+    """load_beat_schedule retries _BEAT_SCHEDULE_MAX_RETRIES times before giving up."""
+    from osint_core.workers.celery_app import _BEAT_SCHEDULE_MAX_RETRIES
+
+    call_count = 0
+
+    def failing_fetch():
+        nonlocal call_count
+        call_count += 1
+        raise ConnectionError("DB unreachable")
+
+    with (
+        patch(
+            "osint_core.workers.celery_app._fetch_active_plans_schedule",
+            side_effect=failing_fetch,
+        ),
+        patch("osint_core.workers.celery_app.time.sleep"),
+    ):
+        try:
+            load_beat_schedule()
+        except ConnectionError:
+            pass
+
+    assert call_count == _BEAT_SCHEDULE_MAX_RETRIES
 
 
 def test_load_beat_schedule_multiple_active_plans():
-    """Multiple active plans should merge their schedules."""
+    """Multiple active plans should merge their schedules, each namespaced by plan_id."""
     plan_a = MagicMock()
     plan_a.plan_id = "plan-a"
     plan_a.version = 1
@@ -151,6 +179,48 @@ def test_load_beat_schedule_multiple_active_plans():
     assert "ingest-plan-b-src_b" in schedule
     assert schedule["ingest-plan-a-src_a"]["args"] == ["src_a", "plan-a"]
     assert schedule["ingest-plan-b-src_b"]["args"] == ["src_b", "plan-b"]
+
+    # Reset for other tests
+    celery_app.conf.beat_schedule = {}
+
+
+def test_load_beat_schedule_same_source_id_different_plans_no_collision():
+    """Two plans sharing a source id produce distinct namespaced keys without collision."""
+    plan_a = MagicMock()
+    plan_a.plan_id = "plan-a"
+    plan_a.version = 1
+    plan_a.content = {
+        "plan_id": "plan-a",
+        "sources": [{"id": "shared_src", "type": "rss", "schedule_cron": "0 * * * *"}],
+    }
+    plan_b = MagicMock()
+    plan_b.plan_id = "plan-b"
+    plan_b.version = 1
+    plan_b.content = {
+        "plan_id": "plan-b",
+        "sources": [{"id": "shared_src", "type": "rss", "schedule_cron": "30 * * * *"}],
+    }
+
+    mock_session = AsyncMock()
+    mock_session_factory = MagicMock()
+    mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("osint_core.db.async_session", mock_session_factory),
+        patch(
+            "osint_core.services.plan_store.PlanStore.get_all_active",
+            new_callable=AsyncMock,
+            return_value=[plan_a, plan_b],
+        ),
+    ):
+        load_beat_schedule()
+
+    schedule = celery_app.conf.beat_schedule
+    assert "ingest-plan-a-shared_src" in schedule
+    assert "ingest-plan-b-shared_src" in schedule
+    assert schedule["ingest-plan-a-shared_src"]["args"] == ["shared_src", "plan-a"]
+    assert schedule["ingest-plan-b-shared_src"]["args"] == ["shared_src", "plan-b"]
 
     # Reset for other tests
     celery_app.conf.beat_schedule = {}

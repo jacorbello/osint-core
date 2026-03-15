@@ -58,7 +58,7 @@ class PlanStore:
         return plan
 
     async def get_all_active(self, db: AsyncSession) -> list[PlanVersion]:
-        """Return all currently active plan versions."""
+"""Return all currently active plan versions, ordered by plan_id then version."""
         stmt = (
             select(PlanVersion)
             .where(PlanVersion.is_active.is_(True))
