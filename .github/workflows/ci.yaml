@@ -173,7 +173,7 @@ jobs:
           TRIVY_USERNAME: "${{ secrets.HARBOR_USERNAME }}"
           TRIVY_PASSWORD: "${{ secrets.HARBOR_PASSWORD }}"
         run: |
-          docker run --rm             -e TRIVY_DB_REPOSITORY             -e TRIVY_USERNAME             -e TRIVY_PASSWORD             -v "$PWD:/workspace"             aquasec/trivy:0.56.1 image             --format sarif             --output /workspace/trivy-results-${{ matrix.target }}.sarif             --severity HIGH,CRITICAL             --ignore-unfixed             --exit-code 1             --ignorefile /workspace/.trivyignore             "${{ steps.img.outputs.ref }}"
+          docker run --rm             -e TRIVY_DB_REPOSITORY             -e TRIVY_USERNAME             -e TRIVY_PASSWORD             -v "$PWD:/workspace"             aquasec/trivy:0.56.1 image             --timeout 15m0s             --format sarif             --output /workspace/trivy-results-${{ matrix.target }}.sarif             --severity HIGH,CRITICAL             --ignore-unfixed             --exit-code 1             --ignorefile /workspace/.trivyignore             "${{ steps.img.outputs.ref }}"
 
       - name: Upload Trivy scan to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
