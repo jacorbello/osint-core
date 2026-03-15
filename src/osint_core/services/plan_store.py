@@ -57,6 +57,12 @@ class PlanStore:
         )
         return plan
 
+    async def get_all_active(self, db: AsyncSession) -> list[PlanVersion]:
+        """Return all currently active plan versions."""
+        stmt = select(PlanVersion).where(PlanVersion.is_active.is_(True))
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_active(self, db: AsyncSession, plan_id: str) -> PlanVersion | None:
         """Return the currently active version of a plan, or None."""
         stmt = (
