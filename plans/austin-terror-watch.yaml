@@ -1,0 +1,94 @@
+version: 2
+plan_id: austin-terror-watch
+plan_type: child
+parent_plan_id: cortech-osint-master
+retention_class: standard
+description: "Monitor for terrorism, extremism, and mass violence signals in the Austin, TX / Travis County area."
+
+source_profiles:
+  gdelt_austin_terror:
+    reliability: C
+    credibility: 3
+    corroboration_required: true
+    license: "free"
+  reliefweb_us:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "free"
+  austin_news:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "public"
+  fbi_press:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public"
+
+sources:
+  - id: gdelt_austin_terror
+    type: gdelt_api
+    url: "https://api.gdeltproject.org/api/v2/doc/doc"
+    weight: 1.0
+    schedule_cron: "*/15 * * * *"
+    params:
+      query: "(terrorism OR terrorist OR extremist OR extremism OR bombing OR shooter OR mass shooting OR attack OR threat) (Austin OR Travis County)"
+      mode: "ArtList"
+      maxrecords: "75"
+      format: "json"
+      timespan: "1h"
+
+  - id: reliefweb_us
+    type: reliefweb_api
+    url: "https://api.reliefweb.int/v2/reports"
+    weight: 0.8
+    schedule_cron: "0 */4 * * *"
+    params:
+      appname: "osint-core-cortech"
+
+  - id: austin_statesman
+    type: rss
+    url: "https://www.statesman.com/rss/"
+    weight: 1.2
+    schedule_cron: "*/30 * * * *"
+
+  - id: kxan_news
+    type: rss
+    url: "https://www.kxan.com/feed/"
+    weight: 1.2
+    schedule_cron: "*/30 * * * *"
+
+  - id: fbi_press
+    type: rss
+    url: "https://www.fbi.gov/feeds/fbi-in-the-news/rss.xml"
+    weight: 1.5
+    schedule_cron: "0 */6 * * *"
+
+scoring:
+  recency_half_life_hours: 12
+  source_reputation:
+    gdelt_austin_terror: 0.8
+    reliefweb_us: 1.0
+    austin_statesman: 1.2
+    kxan_news: 1.2
+    fbi_press: 1.5
+  ioc_match_boost: 2.0
+
+notifications:
+  routes:
+    - name: austin-terror-high
+      when:
+        severity_gte: high
+      channels:
+        - type: gotify
+          application: "osint-austin-terror"
+          priority: 8
+    - name: austin-terror-critical
+      when:
+        severity_gte: critical
+      channels:
+        - type: gotify
+          application: "osint-austin-terror"
+          priority: 10
