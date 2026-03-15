@@ -145,7 +145,7 @@ async def _score_event_async(event_id: str) -> dict[str, Any]:
         send_notification.delay(alert_id)
         logger.info("Chained send_notification for alert %s", alert_id)
 
-    result: dict[str, Any] = {
+    return {
         "event_id": event_id,
         "score": computed_score,
         "severity": severity,

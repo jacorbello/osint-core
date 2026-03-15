@@ -51,8 +51,8 @@ async def test_full_pipeline(
     schedule = engine.build_beat_schedule(plan)
     # Only the cisa_kev source has schedule_cron, so exactly 1 entry
     assert len(schedule) == 1
-    assert "ingest-cisa_kev" in schedule
-    entry = schedule["ingest-cisa_kev"]
+    assert "ingest-integration-test-plan-cisa_kev" in schedule
+    entry = schedule["ingest-integration-test-plan-cisa_kev"]
     assert entry["task"] == "osint.ingest_source"
     assert entry["args"] == ["cisa_kev", "integration-test-plan"]
     assert entry["options"]["queue"] == "ingest"
@@ -226,7 +226,7 @@ def test_plan_to_beat_schedule_roundtrip(valid_plan_yaml: str):
     schedule = engine.build_beat_schedule(plan)
     assert len(schedule) == 1  # Only cisa_kev has schedule_cron
 
-    entry = schedule["ingest-cisa_kev"]
+    entry = schedule["ingest-integration-test-plan-cisa_kev"]
     assert entry["task"] == "osint.ingest_source"
     assert entry["args"] == ["cisa_kev", "integration-test-plan"]
     assert entry["options"]["queue"] == "ingest"
