@@ -37,6 +37,13 @@ def _severity_gte(a: str, b: str) -> bool:
         return False
 
 
+def _chain_notify(event_id: str, event_data: dict[str, Any]) -> None:
+    """Fire send_notification as a follow-up task (import deferred to avoid circular)."""
+    from osint_core.workers.notify import send_notification  # noqa: PLC0415
+
+    send_notification.delay(event_id, event_data)
+
+
 @celery_app.task(bind=True, name="osint.score_event", max_retries=3)  # type: ignore[untyped-decorator]
 def score_event_task(self: Any, event_id: str) -> dict[str, Any]:
     """Score a single event by its ID.
@@ -138,7 +145,7 @@ async def _score_event_async(event_id: str) -> dict[str, Any]:
         send_notification.delay(alert_id)
         logger.info("Chained send_notification for alert %s", alert_id)
 
-    return {
+    result: dict[str, Any] = {
         "event_id": event_id,
         "score": computed_score,
         "severity": severity,
