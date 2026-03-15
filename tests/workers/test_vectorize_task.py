@@ -173,14 +173,25 @@ async def test_vectorize_event_async_payload_metadata():
 # ---------------------------------------------------------------------------
 
 
+def _mock_loop(return_value=None, side_effect=None):
+    """Return a mock event loop whose run_until_complete behaves as specified."""
+    loop = MagicMock()
+    if side_effect is not None:
+        loop.run_until_complete.side_effect = side_effect
+    else:
+        loop.run_until_complete.return_value = return_value
+    return loop
+
+
 def test_vectorize_event_task_returns_ok_on_success():
     """Task returns status=ok for a valid event."""
     event_id = str(uuid.uuid4())
     expected_vid = str(uuid.uuid5(uuid.NAMESPACE_URL, event_id))
+    mock_result = {"event_id": event_id, "vector_id": expected_vid, "status": "ok"}
 
     with patch(
-        "osint_core.workers.enrich.asyncio.run",
-        return_value={"event_id": event_id, "vector_id": expected_vid, "status": "ok"},
+        "osint_core.workers.enrich.asyncio.new_event_loop",
+        return_value=_mock_loop(return_value=mock_result),
     ):
         from osint_core.workers.enrich import vectorize_event_task
 
@@ -195,8 +206,8 @@ def test_vectorize_event_task_returns_not_found_for_missing_event():
     event_id = str(uuid.uuid4())
 
     with patch(
-        "osint_core.workers.enrich.asyncio.run",
-        side_effect=_EventNotFoundError("no event"),
+        "osint_core.workers.enrich.asyncio.new_event_loop",
+        return_value=_mock_loop(side_effect=_EventNotFoundError("no event")),
     ):
         from osint_core.workers.enrich import vectorize_event_task
 
@@ -217,12 +228,11 @@ def test_vectorize_event_task_retries_on_qdrant_unavailable():
     mock_self.retry = MagicMock(side_effect=celery.exceptions.Retry())
 
     with patch(
-        "osint_core.workers.enrich.asyncio.run",
-        side_effect=ConnectionRefusedError("Qdrant unavailable"),
+        "osint_core.workers.enrich.asyncio.new_event_loop",
+        return_value=_mock_loop(side_effect=ConnectionRefusedError("Qdrant unavailable")),
     ):
         from osint_core.workers.enrich import vectorize_event_task
 
-        # Call the underlying function directly via the task's run method
         with pytest.raises(celery.exceptions.Retry):
             vectorize_event_task.run.__func__(mock_self, event_id)  # type: ignore[attr-defined]
 

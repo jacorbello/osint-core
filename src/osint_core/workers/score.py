@@ -60,11 +60,14 @@ def score_event_task(self: Any, event_id: str) -> dict[str, Any]:
     Returns a dict with event_id, score, and severity.
     """
     logger.info("Scoring event: %s", event_id)
+    loop = asyncio.new_event_loop()
     try:
-        return asyncio.run(_score_event_async(event_id))
+        return loop.run_until_complete(_score_event_async(event_id))
     except Exception as exc:
         countdown = min(2 ** self.request.retries * 30, 900)
         raise self.retry(exc=exc, countdown=countdown) from exc
+    finally:
+        loop.close()
 
 
 async def _score_event_async(event_id: str) -> dict[str, Any]:

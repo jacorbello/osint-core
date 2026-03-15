@@ -5,7 +5,7 @@ import sys
 
 import structlog
 from celery import Celery
-from celery.signals import beat_init, worker_process_init
+from celery.signals import beat_init
 
 from osint_core.config import settings
 
@@ -121,13 +121,6 @@ def load_beat_schedule() -> None:
         msg="All retries exhausted loading beat schedule; exiting",
     )
     sys.exit(1)
-
-
-@worker_process_init.connect  # type: ignore[untyped-decorator]
-def on_worker_process_init(sender: object, **kwargs: object) -> None:
-    """Reinitialize the DB engine in each forked worker process."""
-    from osint_core.db import reinitialize_engine
-    reinitialize_engine()
 
 
 @beat_init.connect  # type: ignore[untyped-decorator]

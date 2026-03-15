@@ -32,8 +32,9 @@ def vectorize_event_task(self: Any, event_id: str) -> dict[str, Any]:
     """
     logger.info("Vectorizing event: %s", event_id)
 
+    loop = asyncio.new_event_loop()
     try:
-        return asyncio.run(_vectorize_event_async(event_id))
+        return loop.run_until_complete(_vectorize_event_async(event_id))
     except _EventNotFoundError as exc:
         logger.error("Event not found for vectorization: %s", event_id)
         return {
@@ -51,6 +52,8 @@ def vectorize_event_task(self: Any, event_id: str) -> dict[str, Any]:
             exc,
         )
         raise self.retry(exc=exc, countdown=countdown) from exc
+    finally:
+        loop.close()
 
 
 class _EventNotFoundError(Exception):
