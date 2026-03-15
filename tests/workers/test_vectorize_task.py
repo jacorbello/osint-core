@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from osint_core.workers.enrich import _EventNotFoundError, _vectorize_event_async
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,7 +55,7 @@ async def test_vectorize_event_async_success():
 
     with (
         patch("osint_core.workers.enrich.async_session", return_value=mock_db),
-        patch("osint_core.workers.enrich.upsert_event") as mock_upsert,
+        patch("osint_core.workers.enrich.upsert_event"),
     ):
         result = await _vectorize_event_async(event_id)
 
@@ -82,9 +80,11 @@ async def test_vectorize_event_async_missing_event():
     mock_db.__aenter__ = AsyncMock(return_value=mock_db)
     mock_db.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("osint_core.workers.enrich.async_session", return_value=mock_db):
-        with pytest.raises(_EventNotFoundError):
-            await _vectorize_event_async(event_id)
+    with (
+        patch("osint_core.workers.enrich.async_session", return_value=mock_db),
+        pytest.raises(_EventNotFoundError),
+    ):
+        await _vectorize_event_async(event_id)
 
 
 @pytest.mark.asyncio

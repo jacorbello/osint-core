@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from osint_core.services.notification import SEVERITY_ORDER, NotificationRoute, NotificationService
+from osint_core.services.notification import SEVERITY_ORDER, NotificationService
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,9 @@ def _post_to_gotify(title: str, message: str, priority: int) -> bool:
 
 
 @celery_app.task(bind=True, name="osint.send_notification", max_retries=3)  # type: ignore[untyped-decorator]
-def send_notification(self: Any, event_id: str, event_data: dict[str, Any] | None = None) -> dict[str, Any]:
+def send_notification(
+    self: Any, event_id: str, event_data: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Send a Gotify push notification for a scored event.
 
     Args:
@@ -129,7 +131,7 @@ def send_notification(self: Any, event_id: str, event_data: dict[str, Any] | Non
         dispatched = _post_to_gotify(msg["title"], msg["body"], priority)
     except (httpx.HTTPStatusError, httpx.RequestError) as exc:
         logger.warning("Gotify dispatch failed for event %s; retrying. %s", event_id, exc)
-        raise self.retry(exc=exc, countdown=2 ** self.request.retries)
+        raise self.retry(exc=exc, countdown=2 ** self.request.retries) from exc
 
     if not dispatched:
         return {

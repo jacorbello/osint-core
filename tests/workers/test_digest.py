@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 
 from osint_core.workers.digest import (
@@ -12,7 +10,6 @@ from osint_core.workers.digest import (
     _window_hours,
     compile_digest,
 )
-
 
 # ---------------------------------------------------------------------------
 # Task registration

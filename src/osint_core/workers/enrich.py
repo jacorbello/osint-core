@@ -219,4 +219,4 @@ def correlate_event_task(self: Any, event_id: str) -> dict[str, Any]:
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("correlate_event_error event_id=%s error=%s", event_id, exc)
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc

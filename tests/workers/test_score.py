@@ -7,10 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
-from osint_core.workers.score import score_event_task, _severity_gte
-
+from osint_core.workers.score import _severity_gte, score_event_task
 
 # ---------------------------------------------------------------------------
 # _severity_gte helper
@@ -205,6 +202,7 @@ def test_score_event_writes_back_to_event():
 def test_score_event_chains_notification_on_force_alert():
     """When severity meets force_alert threshold, send_notification is chained."""
     import asyncio as _asyncio
+
     from osint_core.workers.score import _score_event_async
 
     event = _make_event(

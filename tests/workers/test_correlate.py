@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 from osint_core.workers.enrich import correlate_event_task
-
 
 # ---------------------------------------------------------------------------
 # Task registration

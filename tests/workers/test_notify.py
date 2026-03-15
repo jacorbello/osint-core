@@ -8,7 +8,6 @@ import pytest
 
 from osint_core.workers.notify import send_notification
 
-
 # ---------------------------------------------------------------------------
 # Task registration
 # ---------------------------------------------------------------------------
@@ -119,13 +118,12 @@ def test_gotify_unreachable_triggers_retry(monkeypatch: pytest.MonkeyPatch) -> N
     with patch(
         "osint_core.workers.notify._post_to_gotify",
         side_effect=httpx.ConnectError("connection refused"),
-    ):
-        with pytest.raises(Exception, match="retried"):
-            send_notification.run.__func__(
-                mock_self,
-                "evt-005",
-                {"severity": "high", "title": "T", "summary": "S"},
-            )
+    ), pytest.raises(Exception, match="retried"):
+        send_notification.run.__func__(
+            mock_self,
+            "evt-005",
+            {"severity": "high", "title": "T", "summary": "S"},
+        )
 
     mock_self.retry.assert_called_once()
 
