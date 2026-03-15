@@ -49,7 +49,7 @@ celery_app.conf.beat_schedule = {}
 celery_app.autodiscover_tasks(["osint_core.workers"])
 
 
-async def _fetch_active_plans_schedule() -> dict:
+async def _fetch_active_plans_schedule() -> dict[str, object]:
     """Query the database for all active plans and build a combined beat schedule."""
     from osint_core.db import async_session
     from osint_core.services.plan_engine import PlanEngine
@@ -57,7 +57,7 @@ async def _fetch_active_plans_schedule() -> dict:
 
     store = PlanStore()
     engine = PlanEngine()
-    schedule: dict = {}
+    schedule: dict[str, object] = {}
 
     async with async_session() as db:
         active_plans = await store.get_all_active(db)
@@ -124,6 +124,6 @@ def load_beat_schedule() -> None:
 
 
 @beat_init.connect
-def on_beat_init(sender, **kwargs):
+def on_beat_init(sender: object, **kwargs: object) -> None:
     """Signal handler: load active plan schedule when Beat starts."""
     load_beat_schedule()
