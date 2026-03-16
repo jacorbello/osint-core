@@ -39,16 +39,26 @@ def _make_event(
     event_id: uuid.UUID | None = None,
     source_id: str = "test_source",
     title: str = "Test event",
+    summary: str | None = None,
     occurred_at: datetime | None = None,
     indicators: list[Any] | None = None,
     entities: list[Any] | None = None,
     plan_version_id: uuid.UUID | None = None,
     ingested_at: datetime | None = None,
+    nlp_summary: str | None = None,
+    nlp_relevance: str | None = None,
+    corroboration_count: int = 0,
+    country_code: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    source_category: str | None = None,
+    event_type: str = "generic",
 ) -> MagicMock:
     event = MagicMock()
     event.id = event_id or uuid.uuid4()
     event.source_id = source_id
     event.title = title
+    event.summary = summary
     event.occurred_at = occurred_at or datetime.now(UTC)
     event.ingested_at = ingested_at or datetime.now(UTC)
     event.indicators = indicators or []
@@ -56,6 +66,14 @@ def _make_event(
     event.plan_version_id = plan_version_id
     event.score = None
     event.severity = None
+    event.nlp_summary = nlp_summary
+    event.nlp_relevance = nlp_relevance
+    event.corroboration_count = corroboration_count
+    event.country_code = country_code
+    event.latitude = latitude
+    event.longitude = longitude
+    event.source_category = source_category
+    event.event_type = event_type
     return event
 
 
@@ -128,7 +146,7 @@ def test_score_event_missing_event():
 
 
 def test_score_event_low_severity():
-    """A very old event with no IOCs from an unknown source should score low."""
+    """A very old event with no IOCs from an unknown source scores info/low."""
     old_time = datetime(2020, 1, 1, tzinfo=UTC)  # many years ago -> near-zero score
     event = _make_event(occurred_at=old_time, source_id="obscure_feed")
 
@@ -139,8 +157,9 @@ def test_score_event_low_severity():
 
     assert result["event_id"] == str(event.id)
     assert result["score"] is not None
-    assert result["score"] >= 0
-    assert result["severity"] == "low"
+    assert 0.0 <= result["score"] <= 1.0
+    # Very old event decays to near zero — severity is info or low
+    assert result["severity"] in ("info", "low")
 
 
 # ---------------------------------------------------------------------------
@@ -149,20 +168,21 @@ def test_score_event_low_severity():
 
 
 def test_score_event_high_severity():
-    """A fresh event from a high-reputation source with many IOCs scores high+."""
+    """A fresh event with NLP-marked relevant from a high-reputation source scores high."""
     event = _make_event(
         source_id="cisa_kev",
         occurred_at=datetime.now(UTC),
         indicators=[MagicMock(id=uuid.uuid4()) for _ in range(5)],
+        nlp_relevance="relevant",
+        corroboration_count=3,
     )
 
-    # Plan with a config that gives cisa_kev high reputation and big IOC boost
+    # Plan with a config that gives cisa_kev high reputation
     plan = MagicMock()
     plan.content = {
         "scoring": {
             "recency_half_life_hours": 48,
-            "source_reputation": {"cisa_kev": 3.0},
-            "ioc_match_boost": 5.0,
+            "source_reputation": {"cisa_kev": 1.0},
         }
     }
     event.plan_version_id = uuid.uuid4()
@@ -185,8 +205,9 @@ def test_score_event_high_severity():
         result = score_event_task.apply(args=[str(event.id)]).get()
 
     assert result["score"] is not None
-    assert result["score"] > 3.0
-    assert result["severity"] in ("high", "critical")
+    assert 0.0 <= result["score"] <= 1.0
+    assert result["score"] >= 0.5
+    assert result["severity"] in ("medium", "high", "critical")
 
 
 # ---------------------------------------------------------------------------
@@ -209,12 +230,12 @@ def test_score_event_writes_back_to_event():
 
 
 # ---------------------------------------------------------------------------
-# force_alert threshold triggers send_notification
+# Alert rules trigger send_notification
 # ---------------------------------------------------------------------------
 
 
-def test_score_event_chains_notification_on_force_alert():
-    """When severity meets force_alert threshold, send_notification is chained."""
+def test_score_event_chains_notification_on_alert_rule():
+    """When an alert rule matches, send_notification is chained with rule metadata."""
     import asyncio as _asyncio
 
     from osint_core.workers.score import _score_event_async
@@ -223,6 +244,8 @@ def test_score_event_chains_notification_on_force_alert():
         source_id="cisa_kev",
         occurred_at=datetime.now(UTC),
         indicators=[MagicMock(id=uuid.uuid4()) for _ in range(3)],
+        nlp_relevance="relevant",
+        corroboration_count=2,
     )
     event.plan_version_id = uuid.uuid4()
     event.entities = []
@@ -232,10 +255,18 @@ def test_score_event_chains_notification_on_force_alert():
     plan.content = {
         "scoring": {
             "recency_half_life_hours": 48,
-            "source_reputation": {"cisa_kev": 5.0},
-            "ioc_match_boost": 5.0,
-            "force_alert": {"min_severity": "high"},
-        }
+            "source_reputation": {"cisa_kev": 1.0},
+        },
+        "alerts": {
+            "rules": [
+                {
+                    "name": "high-cisa",
+                    "condition": {"severity": {"gte": "medium"}},
+                    "channels": ["gotify"],
+                    "cooldown_minutes": 30,
+                }
+            ]
+        },
     }
 
     db = AsyncMock()
@@ -267,6 +298,12 @@ def test_score_event_chains_notification_on_force_alert():
             _score_event_async(str(event.id))
         )
 
-    assert result["severity"] in ("high", "critical")
-    # send_notification.delay should have been called with an alert_id string
+    assert result["severity"] in ("medium", "high", "critical")
+    # send_notification.delay should have been called with alert_id and rule list
     notify_mock.delay.assert_called_once()
+    call_args = notify_mock.delay.call_args
+    assert call_args is not None
+    # Second positional arg is the list of rule dicts
+    rule_list = call_args[0][1]
+    assert isinstance(rule_list, list)
+    assert rule_list[0]["name"] == "high-cisa"

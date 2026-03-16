@@ -30,6 +30,7 @@ class RawItem:
     source_category: str | None = None
     actors: list[dict[str, Any]] = field(default_factory=list)
     event_type: str | None = None
+    event_subtype: str | None = None
     fatalities: int | None = None
 
 
