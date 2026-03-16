@@ -68,7 +68,7 @@ scoring:
       promote_to: high
 ```
 
-Condition operators: `eq`, `neq`, `gte`, `lte`, `gt`, `lt`, `contains`, `in`.
+Condition operators: `eq`, `neq`, `gte`, `lte`, `gt`, `lt`, `contains` (field string contains value substring), `in` (field value is one of the provided list).
 
 Fields available: `severity`, `source_id`, `source_category`, `indicators.cvss`, `indicators.type`, `keywords_matched` (count), `geographic_match` (bool), `country_code`, `event_type`, `fatalities`.
 
@@ -83,21 +83,24 @@ Fields available: `severity`, `source_id`, `source_category`, `indicators.cvss`,
   - `irrelevant` -> 0.05
 
 **Geographic relevance:**
-- Plans define target geographies (country codes, lat/lon + radius)
-- Exact match -> 1.0
-- Partial match (same country, different region) -> 0.5
+- Plans define target geographies (country codes, lat/lon + radius in km)
+- Within radius -> 1.0
+- Within 2x radius -> 0.7
+- Same country, beyond 2x radius -> 0.5
 - No geo data available -> 0.7 (benefit of doubt)
-- Confirmed irrelevant geography -> 0.2
+- Confirmed different country, no other match -> 0.2
 
 **Source trust:**
 - Per-source reputation defined in plan YAML, range 0.0-1.0
 - Unknown sources default to 0.5
+- **Migration:** existing plan YAMLs have values above 1.0 (e.g., `fbi_press: 1.5`, `austin_statesman: 1.2`). These must be rescaled by dividing by the current max (1.5), so `1.5 -> 1.0`, `1.2 -> 0.8`, `0.8 -> 0.53`. Apply during plan YAML updates.
 
 ### Corroboration Bonus
 
 When near-duplicate detection (Section 6) identifies multiple sources reporting the same event, the canonical event gets a corroboration boost:
 - 1.2x per additional corroborating source, capped at 1.5x
-- Applied after the base relevance_score calculation
+- Applied after the base `relevance_score` calculation, before `recency_factor`
+- `final_score` is clamped to `min(1.0, boosted_relevance * recency_factor)` to preserve the 0.0-1.0 invariant
 
 ---
 
@@ -105,8 +108,8 @@ When near-duplicate detection (Section 6) identifies multiple sources reporting 
 
 ### GDELT Query Tightening
 
-- Add `sourcelang` parameter — plans specify preferred languages as a soft filter (non-preferred languages still ingested but inform scoring)
-- Add geographic bounding via `sourcelocation` or geo keyword terms in query
+- Add `sourcelang` query modifier — plans specify preferred languages as a soft filter (non-preferred languages still ingested but inform scoring)
+- Add geographic bounding via geo keyword terms appended to the query (GDELT does not have a dedicated `sourcelocation` parameter)
 - Configurable `lookback_hours` per source (default 4h for frequent polls, replacing current 25h)
 - Use `mode: ArtList` for deduplicated article lists
 
@@ -123,7 +126,7 @@ When near-duplicate detection (Section 6) identifies multiple sources reporting 
 sources:
   - id: gdelt_austin_terror
     type: gdelt_api
-    extra:
+    params:
       query: "terrorism OR shooter OR attack OR bombing"
       geo_terms: "Austin OR Texas OR Travis County"
       lookback_hours: 4
@@ -159,9 +162,28 @@ New async Celery task `nlp_enrich_task` inserted between ingest and score.
 
 - Uses existing Ollama/LLaMA 3.1:8b stack
 - Single structured prompt per event (summary + classification + entities in one call)
-- Batch processing: 10-20 events per batch for throughput
 - Cache/skip: if event already has summary and entities, skip NLP pass
 - Timeout/fallback: if Ollama unavailable or > 10s per event, fall back to keyword-only scoring. System degrades gracefully.
+
+### Celery Task Topology
+
+The current ingest worker chains `score_event_task`, `vectorize_event_task`, and `correlate_event_task` in parallel after ingest. This must be restructured:
+
+```python
+# Current (parallel group after ingest):
+group(score_event_task.s(eid), vectorize_event_task.s(eid), correlate_event_task.s(eid))
+
+# New (NLP first, then score + vectorize in parallel, then correlate):
+chain(
+    nlp_enrich_task.s(event_id),
+    group(score_event_task.s(event_id), vectorize_event_task.s(event_id)),
+    correlate_event_task.s(event_id),
+)
+```
+
+- `nlp_enrich_task` runs per-event (not batched) to keep the pipeline simple and avoid coordination latency
+- Vectorization runs after NLP so enriched summaries get embedded
+- Correlation runs last so it has scores and entities available
 
 ### Plan YAML
 
@@ -234,11 +256,15 @@ alerts:
     max_events: 50
 ```
 
+### Migration from Existing Notification Config
+
+Existing plans use `notifications.routes[].when.severity_gte` format. The notify worker must support both the legacy `notifications` schema and the new `alerts` schema during transition. Legacy format is mapped internally to equivalent alert rules. All plans should be migrated to the new `alerts` format as part of this work.
+
 ### How It Works
 
 - After scoring, the notify worker evaluates each alert rule against the event
 - Multiple rules can match — each fires independently
-- **Cooldown:** if a rule already fired for a similar event (same source + similar title hash) within cooldown window, suppress
+- **Cooldown:** if a rule already fired for an event with the same SimHash (Section 6) and same source within the cooldown window, suppress. Cooldown state stored in the `alerts` table via existing `fingerprint` column (recomputed as `sha256(rule_name + source_id + simhash)`).
 - **Digest:** aggregates lower-severity events into scheduled summary
 - Channel configs support env var interpolation for secrets
 - Alert history stored in `alerts` table for audit
@@ -261,13 +287,20 @@ alerts:
 - **Indicators extracted:** IP, domain, URL, hash, CVE
 - **Source reputation:** 1.0
 
-### Abuse.ch Feeds (`abusech_api`)
+### Abuse.ch MalwareBazaar (`abusech_malwarebazaar`)
 
-- **MalwareBazaar:** `https://mb-api.abuse.ch/api/v1/` — recent malware samples
-- **FeodoTracker:** `https://feodotracker.abuse.ch/downloads/ipblocklist_recent.json` — C2 IPs
+- **Endpoint:** `https://mb-api.abuse.ch/api/v1/` — recent malware samples
 - **Auth:** None required
 - **Maps to:** cyber-threat-intel plan
-- **Indicators:** File hashes (SHA256), C2 IPs, malware families
+- **Indicators:** File hashes (SHA256), malware families
+- **Source reputation:** 0.9
+
+### Abuse.ch FeodoTracker (`abusech_feodotracker`)
+
+- **Endpoint:** `https://feodotracker.abuse.ch/downloads/ipblocklist_recent.json` — C2 IPs
+- **Auth:** None required
+- **Maps to:** cyber-threat-intel plan
+- **Indicators:** C2 IP addresses, associated malware families
 - **Source reputation:** 0.9
 
 ### ACLED (`acled_api`)
@@ -287,7 +320,7 @@ alerts:
 - **Returns:** Severe weather, flood, tornado warnings with built-in severity
 - **Maps to:** austin-terror-watch (situational awareness), humanitarian-intel
 - **Source reputation:** 1.0
-- **Severity mapping:** Extreme -> critical, Severe -> high, Moderate -> medium, Minor -> low
+- **Severity mapping:** NWS built-in severity is treated as a signal-based severity promotion (not a separate mechanism). Default promotion rules for NWS source: Extreme -> critical, Severe -> high, Moderate -> medium, Minor -> low. These are configured as `severity_promotions` entries in the plan YAML.
 
 ---
 
@@ -333,6 +366,22 @@ The following items from Approach 3 are tracked as separate GitHub issues:
 
 ---
 
+## Database Migrations Required
+
+The following schema changes require Alembic migrations:
+
+1. **Event model additions:**
+   - `simhash` (BigInteger, nullable, indexed) — SimHash of normalized title for near-dedup
+   - `canonical_event_id` (UUID, ForeignKey to events.id, nullable) — links near-duplicates to canonical event
+   - `corroboration_count` (Integer, default 0) — number of corroborating sources
+   - `nlp_relevance` (String, nullable) — NLP classification result: `relevant`, `tangential`, `irrelevant`
+   - `nlp_summary` (Text, nullable) — LLM-generated summary for events with empty summaries
+
+2. **Alert model additions:**
+   - Update `fingerprint` computation to use `sha256(rule_name + source_id + simhash)`
+
+3. **Rescore existing events** after migration via the `/rescore` endpoint with the new formula.
+
 ## Architecture Notes
 
 - All changes follow existing patterns: Celery tasks, SQLAlchemy models, FastAPI routes, plan YAML config
@@ -340,3 +389,5 @@ The following items from Approach 3 are tracked as separate GitHub issues:
 - Scoring changes are backward-compatible — old events can be rescored via existing `/rescore` endpoint
 - New connectors follow the `BaseConnector` / `ConnectorRegistry` pattern
 - Alert rules are evaluated in the existing notify worker, extended with routing logic
+- GDELT connector must be updated to populate `latitude`, `longitude`, `country_code`, and `region` fields on `RawItem` from GDELT's geographic metadata (currently unpopulated)
+- Digest is implemented as a Celery Beat periodic task, following existing scheduling patterns
