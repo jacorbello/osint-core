@@ -171,3 +171,42 @@ def test_build_beat_schedule_from_v2_child():
     schedule = engine.build_beat_schedule(plan)
     assert "ingest-military-intel-gdelt_global" in schedule
     assert "ingest-military-intel-isw" in schedule
+
+
+def test_validate_v2_child_with_enrichment_and_target_geo():
+    """v2 child plan with enrichment and target_geo must pass validation."""
+    engine = PlanEngine()
+    yaml_str = """
+version: 2
+plan_id: austin-terror-watch
+plan_type: child
+sources:
+  - id: gdelt_austin
+    type: gdelt_api
+    url: "https://api.gdeltproject.org/api/v2/doc/doc"
+scoring:
+  recency_half_life_hours: 168
+  source_reputation:
+    gdelt_austin: 0.53
+  ioc_match_boost: 2.0
+notifications:
+  routes:
+    - name: alerts
+      channels:
+        - type: gotify
+enrichment:
+  nlp_enabled: true
+  mission: "Monitor terror threats in Austin"
+target_geo:
+  country_codes: ["USA"]
+  lat: 30.2672
+  lon: -97.7431
+  radius_km: 100
+keywords:
+  - terrorism
+  - attack
+"""
+    result = engine.validate_yaml(yaml_str)
+    assert result.is_valid, f"Errors: {result.errors}"
+    assert result.parsed["enrichment"]["nlp_enabled"] is True
+    assert result.parsed["target_geo"]["lat"] == 30.2672
