@@ -602,7 +602,7 @@ class TestBriefRoutes:
             title="Latest CVE threats",
             content_md="# Brief\nGenerated content.",
             target_query="Latest CVE threats",
-            generated_by="ollama",
+            generated_by="llm",
             requested_by="admin",
         )
 

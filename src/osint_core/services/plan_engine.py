@@ -68,9 +68,10 @@ class PlanEngine:
         for err in validator.iter_errors(parsed):
             errors.append(f"{err.json_path}: {err.message}")
 
-        # Secret scan
+        # Secret scan — strip env-var placeholders (${...}) before checking
+        sanitised = re.sub(r"""[\"']?\$\{[^}]+\}[\"']?""", '""', yaml_str)
         for pattern in SECRET_PATTERNS:
-            if pattern.search(yaml_str):
+            if pattern.search(sanitised):
                 errors.append("Safety: potential secret or API key detected in plan file")
                 break
 

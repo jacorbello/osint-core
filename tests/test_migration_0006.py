@@ -29,6 +29,11 @@ EXPECTED_COLUMNS = [
 def mock_op(monkeypatch):
     op = MagicMock()
     monkeypatch.setattr(_mod, "op", op)
+    # Simulate offline mode so helpers return False (no DB connection)
+    # and all DDL operations are emitted unconditionally.
+    mock_ctx = MagicMock()
+    mock_ctx.is_offline_mode.return_value = True
+    monkeypatch.setattr(_mod, "context", mock_ctx)
     return op
 
 

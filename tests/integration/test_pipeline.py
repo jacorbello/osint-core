@@ -172,7 +172,7 @@ async def test_full_pipeline(
     assert severity.upper() in msg["body"]
 
     # ---- Step h: Brief generation ----
-    generator = BriefGenerator(ollama_available=False)
+    generator = BriefGenerator(llm_available=False)
     events_for_brief = [
         {
             "title": item.title,
@@ -384,7 +384,7 @@ def test_scoring_to_alert_pipeline():
 @pytest.mark.integration
 def test_brief_generation_with_pipeline_data():
     """Generate a brief from scored events and extracted indicators."""
-    generator = BriefGenerator(ollama_available=False)
+    generator = BriefGenerator(llm_available=False)
 
     events = [
         {
