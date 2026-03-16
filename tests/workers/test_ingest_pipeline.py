@@ -161,6 +161,9 @@ async def test_ingest_creates_events():
 
     mock_db.add = MagicMock(side_effect=side_effect_add)
 
+    mock_chain = MagicMock()
+    mock_chain.return_value.apply_async = MagicMock()
+
     with (
         patch("osint_core.workers.ingest.async_session", patches["async_session"]),
         patch("osint_core.workers.ingest.plan_store", patches["plan_store"]),
@@ -168,6 +171,9 @@ async def test_ingest_creates_events():
         patch("osint_core.workers.ingest.score_event_task", patches["score_event_task"]),
         patch("osint_core.workers.ingest.vectorize_event_task", patches["vectorize_event_task"]),
         patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
+        patch("osint_core.workers.ingest.nlp_enrich_task", MagicMock()),
+        patch("osint_core.workers.ingest.chain", mock_chain),
+        patch("osint_core.workers.ingest.group", MagicMock()),
         patch(
             "osint_core.workers.ingest.extract_indicators",
             return_value=[{"type": "cve", "value": "CVE-2025-0001"}],
@@ -180,10 +186,9 @@ async def test_ingest_creates_events():
     assert result["errors"] == 0
     assert result["status"] == "succeeded"
 
-    # Downstream tasks should be called for each event
-    assert patches["score_event_task"].delay.call_count == 2
-    assert patches["vectorize_event_task"].delay.call_count == 2
-    assert patches["correlate_event_task"].delay.call_count == 2
+    # Downstream tasks should be chained for each event
+    assert mock_chain.call_count == 2
+    assert mock_chain.return_value.apply_async.call_count == 2
 
 
 @pytest.mark.asyncio
