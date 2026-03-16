@@ -7,6 +7,7 @@ Create Date: 2026-03-03
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0005"
@@ -15,23 +16,55 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-def upgrade() -> None:
-    op.drop_index("ix_events_dedupe_fingerprint", table_name="events", schema="osint")
-    op.create_index(
-        "ix_events_dedupe_fingerprint",
-        "events",
-        ["dedupe_fingerprint"],
-        unique=True,
-        schema="osint",
+def _index_exists(bind, index: str) -> bool:
+    result = bind.execute(
+        sa.text(
+            "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+            " WHERE c.relname = :name AND c.relkind = 'i'"
+        ),
+        {"name": index},
     )
+    return result.fetchone() is not None
+
+
+def _index_is_unique(bind, index: str) -> bool:
+    result = bind.execute(
+        sa.text("SELECT indisunique FROM pg_index WHERE indexrelid = :name::regclass"),
+        {"name": f"osint.{index}"},
+    )
+    row = result.fetchone()
+    return row is not None and row[0]
+
+
+def upgrade() -> None:
+    bind = op.get_bind()
+
+    # Drop only if the existing index is non-unique (safe to skip if already unique)
+    if _index_exists(bind, "ix_events_dedupe_fingerprint") and not _index_is_unique(bind, "ix_events_dedupe_fingerprint"):
+        op.drop_index("ix_events_dedupe_fingerprint", table_name="events", schema="osint")
+
+    if not _index_exists(bind, "ix_events_dedupe_fingerprint"):
+        op.create_index(
+            "ix_events_dedupe_fingerprint",
+            "events",
+            ["dedupe_fingerprint"],
+            unique=True,
+            schema="osint",
+        )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_events_dedupe_fingerprint", table_name="events", schema="osint")
-    op.create_index(
-        "ix_events_dedupe_fingerprint",
-        "events",
-        ["dedupe_fingerprint"],
-        unique=False,
-        schema="osint",
-    )
+    bind = op.get_bind()
+
+    # Drop only if the existing index is unique
+    if _index_exists(bind, "ix_events_dedupe_fingerprint") and _index_is_unique(bind, "ix_events_dedupe_fingerprint"):
+        op.drop_index("ix_events_dedupe_fingerprint", table_name="events", schema="osint")
+
+    if not _index_exists(bind, "ix_events_dedupe_fingerprint"):
+        op.create_index(
+            "ix_events_dedupe_fingerprint",
+            "events",
+            ["dedupe_fingerprint"],
+            unique=False,
+            schema="osint",
+        )
