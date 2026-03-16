@@ -41,7 +41,7 @@ def upgrade() -> None:
         sa.Column(
             "corroboration_count",
             sa.Integer(),
-            server_default="0",
+            server_default=sa.text("0"),
             nullable=False,
         ),
         schema="osint",

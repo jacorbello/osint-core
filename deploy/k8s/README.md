@@ -14,11 +14,14 @@ deployment that introduces schema changes.
 ### Manual rollout
 
 ```bash
-# Tag must match the image being deployed
-kubectl -n osint set image job/osint-migrate \
-  migrate=harbor.corbello.io/osint/osint-core-api:<SHA>
+# Delete any previous Job (may not exist – ignore errors)
+kubectl -n osint delete job osint-migrate --ignore-not-found
 
-kubectl -n osint apply -f migration-job.yaml
+# Apply with the desired image tag (Job pod templates are immutable, so
+# the image must be set before creation)
+sed "s|harbor.corbello.io/osint/osint-core-api:latest|harbor.corbello.io/osint/osint-core-api:<SHA>|" \
+  migration-job.yaml | kubectl -n osint apply -f -
+
 kubectl -n osint wait --for=condition=complete --timeout=120s job/osint-migrate
 ```
 

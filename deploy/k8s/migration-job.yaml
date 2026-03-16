@@ -41,8 +41,8 @@ spec:
           image: harbor.corbello.io/osint/osint-core-api:latest  # overridden by kustomize
           command: ["alembic", "upgrade", "head"]
           env:
-            - name: DATABASE_URL
+            - name: OSINT_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: osint-secrets
-                  key: DATABASE_URL
+                  key: OSINT_DATABASE_URL
