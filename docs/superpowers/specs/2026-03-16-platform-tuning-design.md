@@ -382,6 +382,17 @@ The following schema changes require Alembic migrations:
 
 3. **Rescore existing events** after migration via the `/rescore` endpoint with the new formula.
 
+## Code Cleanup
+
+- **Remove `score_event_v2`** from `services/scoring.py` — the new formula replaces both `score_event` and `score_event_v2`. The NATO reliability system (`RELIABILITY_FACTORS` dict) is unused and should be deleted.
+- **Deprecate `weight` field** on source configs in plan YAMLs. The new scoring formula uses `source_reputation` (in the `scoring` block) instead. Remove `weight` from `SourceConfig` dataclass and plan YAMLs during implementation.
+
+## GDELT Connector Contract for New Parameters
+
+**`geo_terms`:** Appended to the GDELT query string with `AND`. Example: if `query` is `"terrorism OR shooter"` and `geo_terms` is `"Austin OR Texas"`, the final GDELT query becomes `"(terrorism OR shooter) AND (Austin OR Texas)"`. This filters at the API level before results are returned.
+
+**`preferred_languages`:** Mapped to GDELT's `sourcelang` query modifier. Example: `preferred_languages: ["English", "Spanish"]` appends `sourcelang:english OR sourcelang:spanish` to the query. Articles in non-preferred languages that match the query are still returned by GDELT (it's a soft boost, not a hard filter), but the connector does not post-filter them — scoring handles language-based relevance via NLP classification.
+
 ## Architecture Notes
 
 - All changes follow existing patterns: Celery tasks, SQLAlchemy models, FastAPI routes, plan YAML config
