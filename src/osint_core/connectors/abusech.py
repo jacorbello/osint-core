@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -28,7 +29,7 @@ class MalwareBazaarConnector(BaseConnector):
         max_items = self.config.extra.get("max_items", 100)
         return [self._parse(s) for s in samples[:max_items]]
 
-    def _parse(self, sample: dict) -> RawItem:
+    def _parse(self, sample: dict[str, Any]) -> RawItem:
         sig = sample.get("signature") or "Unknown"
         sha = sample.get("sha256_hash", "")
         seen = sample.get("first_seen", "")
@@ -60,7 +61,7 @@ class FeodoTrackerConnector(BaseConnector):
         max_items = self.config.extra.get("max_items", 100)
         return [self._parse(e) for e in entries[:max_items]]
 
-    def _parse(self, entry: dict) -> RawItem:
+    def _parse(self, entry: dict[str, Any]) -> RawItem:
         ip = entry.get("ip_address", "")
         malware = entry.get("malware", "Unknown")
         seen = entry.get("first_seen", "")

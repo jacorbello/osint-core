@@ -278,18 +278,20 @@ def _evaluate_condition(
         return actual == value
     if op == "neq":
         return actual != value
+    if value is None:
+        return False
     if op == "gte":
-        return actual >= value
+        return bool(actual >= value)
     if op == "lte":
-        return actual <= value
+        return bool(actual <= value)
     if op == "gt":
-        return actual > value
+        return bool(actual > value)
     if op == "lt":
-        return actual < value
+        return bool(actual < value)
     if op == "contains":
         return str(value).lower() in str(actual).lower()
     if op == "in":
-        return actual in value
+        return bool(actual in value)
     return False
 
 

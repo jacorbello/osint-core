@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 
 @dataclass
@@ -26,7 +27,7 @@ class ScoringConfig:
     source_reputation: dict[str, float] = field(default_factory=dict)
     keywords: list[str] = field(default_factory=list)
     keyword_miss_penalty: float = 0.05
-    target_geo: dict | None = None
+    target_geo: dict[str, Any] | None = None
 
 
 NLP_RELEVANCE_MAP: dict[str, float] = {
@@ -81,7 +82,7 @@ def compute_geographic_relevance(
     country_code: str | None,
     lat: float | None,
     lon: float | None,
-    target_geo: dict | None,
+    target_geo: dict[str, Any] | None,
 ) -> float:
     """Compute geographic relevance factor (0.0-1.0)."""
     if target_geo is None:
@@ -162,7 +163,7 @@ def score_event(
     else:
         recency = 0.5  # unknown time, middle ground
 
-    return min(1.0, relevance * recency)
+    return float(min(1.0, relevance * recency))
 
 
 def score_to_severity(score: float) -> str:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -35,7 +36,7 @@ class NwsConnector(BaseConnector):
         max_items = self.config.extra.get("max_items", 100)
         return [self._parse(f) for f in features[:max_items]]
 
-    def _parse(self, feature: dict) -> RawItem:
+    def _parse(self, feature: dict[str, Any]) -> RawItem:
         props = feature.get("properties", {})
         onset = props.get("onset", "")
         occurred_at = None

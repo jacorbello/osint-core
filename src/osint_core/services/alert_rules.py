@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 _SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"]
 
@@ -9,7 +10,7 @@ _SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"]
 @dataclass
 class AlertRule:
     name: str
-    condition: dict
+    condition: dict[str, Any]
     channels: list[str]
     cooldown_minutes: int
 
@@ -21,7 +22,7 @@ def _severity_index(s: str) -> int:
         return -1
 
 
-def _match_condition_field(event, field_name: str, expected) -> bool:
+def _match_condition_field(event: Any, field_name: str, expected: Any) -> bool:
     actual = getattr(event, field_name, None)
     if actual is None:
         return False
@@ -33,20 +34,20 @@ def _match_condition_field(event, field_name: str, expected) -> bool:
                 if ai == -1 or ei == -1:
                     return False
                 return ai >= ei
-            return actual >= expected["gte"]
+            return bool(actual >= expected["gte"])
         if "lte" in expected:
             if field_name == "severity":
                 ai, ei = _severity_index(actual), _severity_index(expected["lte"])
                 if ai == -1 or ei == -1:
                     return False
                 return ai <= ei
-            return actual <= expected["lte"]
+            return bool(actual <= expected["lte"])
         return False
 
-    return actual == expected
+    return bool(actual == expected)
 
 
-def evaluate_rules(event, rules: list[AlertRule]) -> list[AlertRule]:
+def evaluate_rules(event: Any, rules: list[AlertRule]) -> list[AlertRule]:
     """Return list of rules whose conditions match the event."""
     matched = []
     for rule in rules:
@@ -58,7 +59,7 @@ def evaluate_rules(event, rules: list[AlertRule]) -> list[AlertRule]:
     return matched
 
 
-def parse_rules_from_plan(plan_content: dict) -> list[AlertRule]:
+def parse_rules_from_plan(plan_content: dict[str, Any]) -> list[AlertRule]:
     """Parse alert rules from plan YAML content."""
     alerts = plan_content.get("alerts", {})
     raw_rules = alerts.get("rules", [])

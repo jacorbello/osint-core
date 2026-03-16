@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 from collections import Counter
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -74,9 +75,9 @@ class GdeltConnector(BaseConnector):
             lang_parts = " OR ".join(f"sourcelang:{lang}" for lang in langs)
             query = f"({query}) AND ({lang_parts})"
 
-        return query
+        return str(query)
 
-    def _cap_per_domain(self, articles: list[dict], cap: int) -> list[dict]:
+    def _cap_per_domain(self, articles: list[dict[str, Any]], cap: int) -> list[dict[str, Any]]:
         counts: Counter[str] = Counter()
         result = []
         for article in articles:
@@ -86,7 +87,7 @@ class GdeltConnector(BaseConnector):
                 counts[domain] += 1
         return result
 
-    def _parse_article(self, article: dict) -> RawItem:
+    def _parse_article(self, article: dict[str, Any]) -> RawItem:
         seen = article.get("seendate", "")
         occurred_at = None
         if seen:

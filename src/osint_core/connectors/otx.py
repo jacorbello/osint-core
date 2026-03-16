@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -21,7 +22,7 @@ class OtxConnector(BaseConnector):
         max_items = self.config.extra.get("max_items", 100)
         return [self._parse_pulse(p) for p in pulses[:max_items]]
 
-    def _parse_pulse(self, pulse: dict) -> RawItem:
+    def _parse_pulse(self, pulse: dict[str, Any]) -> RawItem:
         created = pulse.get("created", "")
         occurred_at = None
         if created:

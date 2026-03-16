@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -26,7 +27,7 @@ class AcledConnector(BaseConnector):
         events = resp.json().get("data", [])
         return [self._parse(e) for e in events if e.get("notes")]
 
-    def _parse(self, event: dict) -> RawItem:
+    def _parse(self, event: dict[str, Any]) -> RawItem:
         date_str = event.get("event_date", "")
         occurred_at = None
         if date_str:

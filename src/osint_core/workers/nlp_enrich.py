@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Any
 
 import httpx
 from sqlalchemy import NullPool
@@ -34,7 +35,7 @@ Respond with exactly this JSON structure:
 """
 
 
-async def _call_ollama(prompt: str) -> dict:
+async def _call_ollama(prompt: str) -> dict[str, Any]:
     url = f"{settings.ollama_url}/api/generate"
     payload = {
         "model": settings.ollama_model,
@@ -46,10 +47,11 @@ async def _call_ollama(prompt: str) -> dict:
         resp = await client.post(url, json=payload)
         resp.raise_for_status()
     raw = resp.json().get("response", "{}")
-    return json.loads(raw)
+    result: dict[str, Any] = json.loads(raw)
+    return result
 
 
-async def _enrich_event_async(event_id: str) -> dict:
+async def _enrich_event_async(event_id: str) -> dict[str, Any]:
     engine = create_async_engine(settings.database_url, poolclass=NullPool)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -63,7 +65,7 @@ async def _enrich_event_async(event_id: str) -> dict:
             await engine.dispose()
             return {"event_id": event_id, "status": "skipped"}
 
-        plan_content = {}
+        plan_content: dict[str, Any] = {}
         if event.plan_version:
             plan_content = event.plan_version.content or {}
 
@@ -103,7 +105,7 @@ async def _enrich_event_async(event_id: str) -> dict:
 
 
 @celery_app.task(bind=True, name="osint.nlp_enrich_event", max_retries=1)  # type: ignore[untyped-decorator]
-def nlp_enrich_task(self, event_id: str) -> dict:
+def nlp_enrich_task(self: Any, event_id: str) -> dict[str, Any]:
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(_enrich_event_async(event_id))
