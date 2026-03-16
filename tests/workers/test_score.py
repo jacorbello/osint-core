@@ -183,7 +183,6 @@ def test_score_event_high_severity():
         "scoring": {
             "recency_half_life_hours": 48,
             "source_reputation": {"cisa_kev": 1.0},
-            "ioc_match_boost": 1.0,
         }
     }
     event.plan_version_id = uuid.uuid4()
@@ -257,7 +256,6 @@ def test_score_event_chains_notification_on_alert_rule():
         "scoring": {
             "recency_half_life_hours": 48,
             "source_reputation": {"cisa_kev": 1.0},
-            "ioc_match_boost": 1.0,
         },
         "alerts": {
             "rules": [

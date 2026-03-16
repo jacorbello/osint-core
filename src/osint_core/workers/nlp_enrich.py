@@ -102,11 +102,11 @@ async def _enrich_event_async(event_id: str) -> dict:
 
 @celery_app.task(bind=True, name="osint.nlp_enrich_event", max_retries=1)  # type: ignore[untyped-decorator]
 def nlp_enrich_task(self, event_id: str) -> dict:
+    loop = asyncio.new_event_loop()
     try:
-        loop = asyncio.new_event_loop()
         return loop.run_until_complete(_enrich_event_async(event_id))
     except Exception as exc:
         logger.exception("NLP enrichment failed for %s", event_id)
-        raise self.retry(exc=exc, countdown=30)
+        raise self.retry(exc=exc, countdown=min(2 ** self.request.retries * 30, 900))
     finally:
         loop.close()

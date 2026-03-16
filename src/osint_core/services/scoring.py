@@ -24,7 +24,6 @@ from datetime import datetime, timezone
 class ScoringConfig:
     recency_half_life_hours: float
     source_reputation: dict[str, float] = field(default_factory=dict)
-    ioc_match_boost: float = 1.0
     keywords: list[str] = field(default_factory=list)
     keyword_miss_penalty: float = 0.05
     target_geo: dict | None = None
@@ -127,7 +126,6 @@ def compute_geographic_relevance(
 def score_event(
     source_id: str,
     occurred_at: datetime | None,
-    indicator_count: int,
     matched_keywords: int,
     total_keywords: int,
     config: ScoringConfig,

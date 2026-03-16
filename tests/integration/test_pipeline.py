@@ -101,13 +101,12 @@ async def test_full_pipeline(
     scoring_cfg = ScoringConfig(
         recency_half_life_hours=plan["scoring"]["recency_half_life_hours"],
         source_reputation=plan["scoring"]["source_reputation"],
-        ioc_match_boost=plan["scoring"]["ioc_match_boost"],
+        
     )
     # Score a recent event with indicators
     score = score_event(
         source_id="cisa_kev",
         occurred_at=datetime.now(UTC),
-        indicator_count=len(indicators),
         matched_keywords=0,
         total_keywords=0,
         config=scoring_cfg,
@@ -297,7 +296,6 @@ def test_scoring_to_alert_pipeline():
     config = ScoringConfig(
         recency_half_life_hours=48,
         source_reputation={"cisa_kev": 1.5, "rss_threatpost": 1.0},
-        ioc_match_boost=3.0,
     )
     alert_threshold = 0.5
 
@@ -305,7 +303,6 @@ def test_scoring_to_alert_pipeline():
     high_score = score_event(
         source_id="cisa_kev",
         occurred_at=datetime.now(UTC),
-        indicator_count=5,
         matched_keywords=0,
         total_keywords=0,
         config=config,
@@ -328,7 +325,6 @@ def test_scoring_to_alert_pipeline():
     low_score = score_event(
         source_id="rss_threatpost",
         occurred_at=old_time,
-        indicator_count=0,
         matched_keywords=0,
         total_keywords=0,
         config=config,
@@ -342,12 +338,10 @@ def test_scoring_to_alert_pipeline():
     critical_config = ScoringConfig(
         recency_half_life_hours=48,
         source_reputation={"src": 5.0},
-        ioc_match_boost=3.0,
     )
     critical_score = score_event(
         source_id="src",
         occurred_at=datetime.now(UTC),
-        indicator_count=10,
         matched_keywords=0,
         total_keywords=0,
         config=critical_config,

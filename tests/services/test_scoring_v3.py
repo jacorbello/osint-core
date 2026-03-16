@@ -102,7 +102,6 @@ class TestScoreEvent:
         score = score_event(
             source_id="cisa_kev",
             occurred_at=_now(),
-            indicator_count=0,
             matched_keywords=2,
             total_keywords=2,
             config=config,
@@ -118,7 +117,6 @@ class TestScoreEvent:
         score = score_event(
             source_id="src",
             occurred_at=_now() - timedelta(hours=24),
-            indicator_count=0,
             matched_keywords=0,
             total_keywords=0,
             config=config,
@@ -134,7 +132,6 @@ class TestScoreEvent:
         score = score_event(
             source_id="src",
             occurred_at=_now() - timedelta(hours=1000),
-            indicator_count=0,
             matched_keywords=0,
             total_keywords=0,
             config=config,
@@ -150,7 +147,6 @@ class TestScoreEvent:
         score = score_event(
             source_id="unknown",
             occurred_at=_now(),
-            indicator_count=0,
             matched_keywords=0,
             total_keywords=0,
             config=config,
@@ -166,7 +162,6 @@ class TestScoreEvent:
         score = score_event(
             source_id="src",
             occurred_at=_now(),
-            indicator_count=0,
             matched_keywords=1,
             total_keywords=1,
             config=config,

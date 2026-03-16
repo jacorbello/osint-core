@@ -29,11 +29,17 @@ def _match_condition_field(event, field_name: str, expected) -> bool:
     if isinstance(expected, dict):
         if "gte" in expected:
             if field_name == "severity":
-                return _severity_index(actual) >= _severity_index(expected["gte"])
+                ai, ei = _severity_index(actual), _severity_index(expected["gte"])
+                if ai == -1 or ei == -1:
+                    return False
+                return ai >= ei
             return actual >= expected["gte"]
         if "lte" in expected:
             if field_name == "severity":
-                return _severity_index(actual) <= _severity_index(expected["lte"])
+                ai, ei = _severity_index(actual), _severity_index(expected["lte"])
+                if ai == -1 or ei == -1:
+                    return False
+                return ai <= ei
             return actual <= expected["lte"]
         return False
 

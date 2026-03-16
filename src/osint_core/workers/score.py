@@ -30,7 +30,6 @@ _SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"]
 # Default scoring config when no plan config is available
 _DEFAULT_SCORING_CONFIG = ScoringConfig(
     recency_half_life_hours=48,
-    ioc_match_boost=2.0,
 )
 
 _RESCORE_BATCH_SIZE = 500
@@ -78,14 +77,10 @@ def _build_scoring_config(plan_content: dict[str, Any]) -> ScoringConfig:
         half_life = _DEFAULT_HALF_LIFE
 
     source_reputation = _resolve(scoring_section, defaults, "source_reputation", {})
-    ioc_match_boost = float(
-        _resolve(scoring_section, defaults, "ioc_match_boost", _DEFAULT_IOC_BOOST)
-    )
 
     return ScoringConfig(
         recency_half_life_hours=half_life,
         source_reputation=source_reputation,
-        ioc_match_boost=ioc_match_boost,
         keywords=plan_content.get("keywords", []),
         keyword_miss_penalty=_resolve(scoring_section, defaults, "keyword_miss_penalty", 0.05),
         target_geo=plan_content.get("target_geo"),
@@ -176,7 +171,6 @@ async def _score_event_async(event_id: str) -> dict[str, Any]:
 
         # Step 3: Compute score
         occurred_at = event.occurred_at or event.ingested_at
-        indicator_count = len(event.indicators) if event.indicators else 0
 
         event_text = " ".join(
             s
@@ -188,7 +182,6 @@ async def _score_event_async(event_id: str) -> dict[str, Any]:
         computed_score = score_event(
             source_id=event.source_id,
             occurred_at=occurred_at,
-            indicator_count=indicator_count,
             matched_keywords=len(matched),
             total_keywords=len(scoring_config.keywords),
             config=scoring_config,
@@ -247,24 +240,32 @@ async def _score_event_async(event_id: str) -> dict[str, Any]:
     }
 
 
-def _apply_promotions(event: Any, base_severity: str, plan_content: dict[str, Any]) -> str:
+def _apply_promotions(
+    event: Any, base_severity: str, plan_content: dict[str, Any],
+) -> str:
     """Apply severity promotion rules from plan, returning the highest promoted severity."""
     promotions = plan_content.get("scoring", {}).get("severity_promotions", [])
     best = base_severity
     for rule in promotions:
         cond = rule.get("condition", {})
         target = rule.get("promote_to", base_severity)
-        if _evaluate_condition(event, cond) and _severity_gte(target, best):
+        if _evaluate_condition(event, cond, base_severity=base_severity) and _severity_gte(target, best):
             best = target
     return best
 
 
-def _evaluate_condition(event: Any, condition: dict[str, Any]) -> bool:
+def _evaluate_condition(
+    event: Any, condition: dict[str, Any], *, base_severity: str | None = None,
+) -> bool:
     """Evaluate a single promotion condition against an event."""
     field = condition.get("field", "")
     op = condition.get("op", "eq")
     value = condition.get("value")
-    actual = _get_field_value(event, field)
+    # Use the just-computed severity, not the stale DB value
+    if field == "severity" and base_severity is not None:
+        actual = base_severity
+    else:
+        actual = _get_field_value(event, field)
     if actual is None:
         return False
     if op == "eq":
@@ -362,11 +363,13 @@ async def _rescore_all_async(plan_id: str | None = None) -> dict[str, Any]:
     from osint_core.models.plan import PlanVersion  # noqa: PLC0415
 
     total_enqueued = 0
-    offset = 0
+    last_id = None
 
     while True:
         async with async_session() as db:
-            stmt = select(Event.id).order_by(Event.id).offset(offset).limit(_RESCORE_BATCH_SIZE)
+            stmt = select(Event.id).order_by(Event.id).limit(_RESCORE_BATCH_SIZE)
+            if last_id is not None:
+                stmt = stmt.where(Event.id > last_id)
             if plan_id is not None:
                 stmt = stmt.join(
                     PlanVersion, Event.plan_version_id == PlanVersion.id
@@ -382,7 +385,7 @@ async def _rescore_all_async(plan_id: str | None = None) -> dict[str, Any]:
             score_event_task.delay(eid)
 
         total_enqueued += len(batch)
-        offset += len(batch)
+        last_id = batch[-1]
 
         if len(batch) < _RESCORE_BATCH_SIZE:
             break
