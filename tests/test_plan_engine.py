@@ -169,5 +169,5 @@ def test_build_beat_schedule_from_v2_child():
         ],
     }
     schedule = engine.build_beat_schedule(plan)
-    assert "ingest-gdelt_global" in schedule
-    assert "ingest-isw" in schedule
+    assert "ingest-military-intel-gdelt_global" in schedule
+    assert "ingest-military-intel-isw" in schedule

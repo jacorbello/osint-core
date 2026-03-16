@@ -7,6 +7,8 @@ import pytest
 from osint_core.services.scoring import (
     ReliabilityProfile,
     ScoringConfig,
+    compute_topic_relevance,
+    match_keywords,
     reliability_factor,
     score_event,
     score_event_v2,
@@ -159,6 +161,86 @@ def test_score_event_v2_includes_reliability():
     )
     # A reliability = 1.5x multiplier, freshly occurred = ~1.0 decay
     assert score > 1.0
+
+
+def test_topic_relevance_no_keywords_configured():
+    """No keywords in config → no penalty (backward compatible)."""
+    config = ScoringConfig(recency_half_life_hours=48)
+    assert compute_topic_relevance([], config) == 1.0
+
+
+def test_topic_relevance_zero_matches_penalized():
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        keywords=["terrorism", "attack"],
+    )
+    assert compute_topic_relevance([], config) == pytest.approx(0.1)
+
+
+def test_topic_relevance_one_match():
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        keywords=["terrorism", "attack"],
+    )
+    assert compute_topic_relevance(["attack"], config) == pytest.approx(1.2)
+
+
+def test_topic_relevance_two_matches():
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        keywords=["terrorism", "attack"],
+    )
+    assert compute_topic_relevance(["terrorism", "attack"], config) == pytest.approx(1.4)
+
+
+def test_topic_relevance_capped_at_three():
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        keywords=["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
+    )
+    matched = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]
+    result = compute_topic_relevance(matched, config)
+    assert result == pytest.approx(3.0)
+
+
+def test_match_keywords_case_insensitive():
+    matches = match_keywords("Terrorism threat in Austin TX", ["terrorism", "Austin", "bombing"])
+    assert set(matches) == {"terrorism", "Austin"}
+
+
+def test_match_keywords_empty_text():
+    assert match_keywords("", ["attack", "threat"]) == []
+
+
+def test_match_keywords_no_keywords():
+    assert match_keywords("some event text", []) == []
+
+
+def test_score_event_zero_keyword_matches_penalized():
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        source_reputation={"src": 1.0},
+        ioc_match_boost=1.0,
+        keywords=["terrorism", "attack"],
+    )
+    penalized = score_event("src", datetime.now(UTC), 0, [], config)
+    no_penalty = score_event("src", datetime.now(UTC), 0, ["attack"], config)
+    assert penalized < no_penalty
+    assert penalized == pytest.approx(no_penalty * 0.1 / 1.2, rel=0.01)
+
+
+def test_score_event_keyword_boost():
+    config = ScoringConfig(
+        recency_half_life_hours=48,
+        source_reputation={"src": 1.0},
+        ioc_match_boost=1.0,
+        keywords=["terrorism", "attack", "threat"],
+    )
+    one_match = score_event("src", datetime.now(UTC), 0, ["attack"], config)
+    topics = ["terrorism", "attack", "threat"]
+    three_matches = score_event("src", datetime.now(UTC), 0, topics, config)
+    assert three_matches > one_match
+    assert three_matches == pytest.approx(one_match * (1.6 / 1.2), rel=0.01)
 
 
 def test_score_event_v2_corroboration_bonus():

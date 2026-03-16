@@ -51,12 +51,13 @@ def ingest_source(self: Any, source_id: str, plan_id: str) -> dict[str, Any]:
     Config errors (ValueError, KeyError) are not retried.
     Transient errors are retried with capped exponential backoff.
     """
+    loop = asyncio.new_event_loop()
     try:
-        return asyncio.run(_ingest_source_async(self, source_id, plan_id))
+        return loop.run_until_complete(_ingest_source_async(self, source_id, plan_id))
     except (ValueError, KeyError) as exc:
         logger.error("Ingest config error for %s: %s", source_id, exc)
         try:
-            asyncio.run(_record_failed_job(self, plan_id, source_id, str(exc)))
+            loop.run_until_complete(_record_failed_job(self, plan_id, source_id, str(exc)))
         except Exception:
             logger.exception("Failed to record failed job for %s", source_id)
         return {
@@ -71,6 +72,8 @@ def ingest_source(self: Any, source_id: str, plan_id: str) -> dict[str, Any]:
     except Exception as exc:
         countdown = min(2 ** self.request.retries * 30, 900)
         raise self.retry(exc=exc, countdown=countdown) from exc
+    finally:
+        loop.close()
 
 
 async def _ingest_source_async(

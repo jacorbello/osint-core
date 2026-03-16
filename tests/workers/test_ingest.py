@@ -36,8 +36,8 @@ def test_build_beat_schedule_basic():
     }
     engine = PlanEngine()
     schedule = engine.build_beat_schedule(plan)
-    assert "ingest-cisa_kev" in schedule
-    entry = schedule["ingest-cisa_kev"]
+    assert "ingest-test-plan-cisa_kev" in schedule
+    entry = schedule["ingest-test-plan-cisa_kev"]
     assert entry["task"] == "osint.ingest_source"
     assert entry["args"] == ["cisa_kev", "test-plan"]
     assert isinstance(entry["schedule"], crontab)
@@ -68,9 +68,9 @@ def test_build_beat_schedule_multiple_sources():
     engine = PlanEngine()
     schedule = engine.build_beat_schedule(plan)
     assert len(schedule) == 3
-    assert "ingest-cisa_kev" in schedule
-    assert "ingest-nvd_feed" in schedule
-    assert "ingest-threatfox" in schedule
+    assert "ingest-test-plan-cisa_kev" in schedule
+    assert "ingest-test-plan-nvd_feed" in schedule
+    assert "ingest-test-plan-threatfox" in schedule
 
 
 def test_build_beat_schedule_skips_sources_without_cron():
@@ -93,8 +93,8 @@ def test_build_beat_schedule_skips_sources_without_cron():
     engine = PlanEngine()
     schedule = engine.build_beat_schedule(plan)
     assert len(schedule) == 1
-    assert "ingest-scheduled_source" in schedule
-    assert "ingest-manual_source" not in schedule
+    assert "ingest-test-plan-scheduled_source" in schedule
+    assert "ingest-test-plan-manual_source" not in schedule
 
 
 def test_build_beat_schedule_empty_sources():
@@ -119,7 +119,7 @@ def test_build_beat_schedule_cron_parsing():
     }
     engine = PlanEngine()
     schedule = engine.build_beat_schedule(plan)
-    entry = schedule["ingest-test_src"]
+    entry = schedule["ingest-test-plan-test_src"]
     cron = entry["schedule"]
     assert isinstance(cron, crontab)
 
@@ -138,7 +138,7 @@ def test_build_beat_schedule_options_queue():
     }
     engine = PlanEngine()
     schedule = engine.build_beat_schedule(plan)
-    entry = schedule["ingest-src1"]
+    entry = schedule["ingest-test-plan-src1"]
     assert entry["options"]["queue"] == "ingest"
 
 
@@ -157,5 +157,5 @@ def test_build_beat_schedule_includes_plan_id():
     }
     engine = PlanEngine()
     schedule = engine.build_beat_schedule(plan)
-    entry = schedule["ingest-cisa_kev"]
+    entry = schedule["ingest-military-intel-cisa_kev"]
     assert entry["args"] == ["cisa_kev", "military-intel"]

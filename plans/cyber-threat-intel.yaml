@@ -1,0 +1,82 @@
+version: 1
+plan_id: cyber-threat-intel
+description: >-
+  Cyber threat intelligence collection plan covering vulnerability feeds,
+  malware IOCs, and security news.  Designed for continuous monitoring
+  with cron-scheduled ingest across six open-source connectors.
+retention_class: standard
+
+sources:
+  - id: cisa_kev
+    type: cisa_kev
+    url: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    weight: 1.3
+    schedule_cron: "0 */4 * * *"           # every 4 hours
+
+  - id: nvd_recent
+    type: nvd_json_feed
+    url: "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    weight: 1.0
+    schedule_cron: "15 */2 * * *"          # every 2 hours at :15
+
+  - id: osv_pypi
+    type: osv_api
+    url: "https://api.osv.dev/v1/query"
+    weight: 0.9
+    schedule_cron: "30 */6 * * *"          # every 6 hours at :30
+    params:
+      ecosystem: PyPI
+
+  - id: urlhaus_recent
+    type: urlhaus_api
+    url: "https://urlhaus-api.abuse.ch/v1/"
+    weight: 1.1
+    schedule_cron: "0 */3 * * *"           # every 3 hours
+
+  - id: threatfox_iocs
+    type: threatfox_api
+    url: "https://threatfox-api.abuse.ch/api/v1/"
+    weight: 1.2
+    schedule_cron: "45 */4 * * *"          # every 4 hours at :45
+
+  - id: rss_hackernews
+    type: rss
+    url: "https://feeds.feedburner.com/TheHackersNews"
+    weight: 0.8
+    schedule_cron: "0 */1 * * *"           # every hour
+
+scoring:
+  recency_half_life_hours: 48
+  source_reputation:
+    cisa_kev: 1.3
+    nvd_recent: 1.0
+    osv_pypi: 0.9
+    urlhaus_recent: 1.1
+    threatfox_iocs: 1.2
+    rss_hackernews: 0.8
+  ioc_match_boost: 2.5
+  force_alert:
+    min_severity: high
+    tags_any: ["force_alert", "critical_vuln"]
+
+notifications:
+  default_dedupe_window_minutes: 90
+  quiet_hours:
+    timezone: "America/Chicago"
+    start: "22:00"
+    end: "07:00"
+  routes:
+    - name: critical_alerts
+      when:
+        severity_gte: high
+      channels:
+        - type: gotify
+          application: "osint-alerts"
+          priority: 8
+    - name: daily_digest
+      when:
+        severity_gte: low
+      channels:
+        - type: gotify
+          application: "osint-digest"
+          priority: 4

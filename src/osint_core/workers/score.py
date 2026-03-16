@@ -3,22 +3,47 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
 
 from osint_core.db import async_session
+from osint_core.models.alert import Alert
 from osint_core.models.event import Event
-from osint_core.models.plan import PlanVersion
-from osint_core.services.scoring import ScoringConfig, score_event, score_to_severity
+from osint_core.services.scoring import (
+    ScoringConfig,
+    match_keywords,
+    score_event,
+    score_to_severity,
+)
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
+# Severity levels ordered by ascending severity
+_SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"]
 
+# Default scoring config when no plan config is available
+_DEFAULT_SCORING_CONFIG = ScoringConfig(
+    recency_half_life_hours=48,
+    ioc_match_boost=2.0,
+)
+
+_RESCORE_BATCH_SIZE = 500
 _DEFAULT_HALF_LIFE = 24.0
 _DEFAULT_IOC_BOOST = 1.0
+
+
+def _severity_gte(a: str, b: str) -> bool:
+    """Return True if severity a >= severity b."""
+    try:
+        return _SEVERITY_ORDER.index(a) >= _SEVERITY_ORDER.index(b)
+    except ValueError:
+        return False
 
 
 def _resolve(section: dict[str, Any], fallback: dict[str, Any], key: str, default: Any) -> Any:
@@ -52,33 +77,68 @@ def _build_scoring_config(plan_content: dict[str, Any]) -> ScoringConfig:
 
     source_reputation = _resolve(scoring_section, defaults, "source_reputation", {})
     ioc_match_boost = float(_resolve(scoring_section, defaults, "ioc_match_boost", _DEFAULT_IOC_BOOST))
+    keywords = plan_content.get("keywords", [])
 
     return ScoringConfig(
         recency_half_life_hours=half_life,
         source_reputation=source_reputation,
         ioc_match_boost=ioc_match_boost,
+        keywords=keywords,
     )
 
 
+@celery_app.task(bind=True, name="osint.score_event", max_retries=3)  # type: ignore[untyped-decorator]
+def score_event_task(self: Any, event_id: str) -> dict[str, Any]:
+    """Score a single event by its ID.
+
+    Pipeline steps:
+      1. Load the event from the database
+      2. Load the active plan's scoring config
+      3. Call score_event() with event metadata
+      4. Map score to severity via score_to_severity()
+      5. Update the event record with score + severity
+      6. If severity meets force_alert threshold, create an Alert and chain
+         the send_notification task
+
+    Returns a dict with event_id, score, and severity.
+    """
+    logger.info("Scoring event: %s", event_id)
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_score_event_async(event_id))
+    except Exception as exc:
+        countdown = min(2 ** self.request.retries * 30, 900)
+        raise self.retry(exc=exc, countdown=countdown) from exc
+    finally:
+        loop.close()
+
+
 async def _score_event_async(event_id: str) -> dict[str, Any]:
-    """Score a single event against the active plan for that event's plan version."""
+    """Async implementation of the scoring pipeline."""
     async with async_session() as db:
-        # Load the event
-        result = await db.execute(select(Event).where(Event.id == event_id))
+        # Step 1: Load event
+        result = await db.execute(select(Event).where(Event.id == uuid.UUID(event_id)))
         event: Event | None = result.scalar_one_or_none()
+
         if event is None:
             logger.warning("score_event: event not found: %s", event_id)
-            return {"event_id": event_id, "status": "not_found"}
+            return {
+                "event_id": event_id,
+                "score": None,
+                "severity": None,
+                "status": "not_found",
+            }
 
-        # Prefer the currently active plan version for the event's plan so that
-        # rescore operations reflect the latest scoring config.  Only fall back
-        # to the stored plan_version_id when no active version exists for that
-        # plan, and fall back to any active plan as a last resort.
+        # Step 2: Resolve scoring config from the active plan version.
+        # Prefer the currently active version of the event's associated plan so
+        # that rescore operations reflect the latest config.  Fall back to the
+        # stored plan_version_id, then any active plan as a last resort.
+        from osint_core.models.plan import PlanVersion  # noqa: PLC0415
+
         plan: PlanVersion | None = None
+        force_alert_min_severity: str | None = None
 
         if event.plan_version_id is not None:
-            # Find the plan_id this event's version belongs to, then load the
-            # active version of that same plan.
             pv_result = await db.execute(
                 select(PlanVersion).where(PlanVersion.id == event.plan_version_id)
             )
@@ -93,71 +153,114 @@ async def _score_event_async(event_id: str) -> dict[str, Any]:
                     .limit(1)
                 )
                 plan = active_result.scalar_one_or_none()
-                # If the plan has no active version, fall back to the stored one
                 if plan is None:
                     plan = stored_version
 
         if plan is None:
-            # Fall back to any active plan
             pv_result = await db.execute(
                 select(PlanVersion).where(PlanVersion.is_active.is_(True)).limit(1)
             )
             plan = pv_result.scalar_one_or_none()
 
-        if plan is None:
+        if plan is not None:
+            scoring_config = _build_scoring_config(plan.content)
+            force_alert_cfg = plan.content.get("scoring", {}).get("force_alert", {})
+            force_alert_min_severity = force_alert_cfg.get("min_severity")
+        else:
             logger.warning("score_event: no active plan found for event %s", event_id)
-            return {"event_id": event_id, "status": "no_plan"}
+            scoring_config = _DEFAULT_SCORING_CONFIG
 
-        config = _build_scoring_config(plan.content)
-
-        indicator_count = len(event.indicators) if event.indicators else 0
+        # Step 3: Compute score
         occurred_at = event.occurred_at or event.ingested_at
+        indicator_count = len(event.indicators) if event.indicators else 0
+
+        event_text = " ".join(
+            s for s in [event.title, event.summary] if isinstance(s, str) and s
+        )
+        matched_topics = match_keywords(event_text, scoring_config.keywords)
 
         computed_score = score_event(
             source_id=event.source_id,
             occurred_at=occurred_at,
             indicator_count=indicator_count,
-            matched_topics=[],
-            config=config,
+            matched_topics=matched_topics,
+            config=scoring_config,
         )
 
+        # Step 4: Map to severity label
         severity = score_to_severity(computed_score)
 
+        # Step 5: Persist score and severity
         event.score = computed_score
         event.severity = severity
         await db.commit()
 
         logger.info(
             "scored_event event_id=%s score=%.4f severity=%s",
-            event_id, computed_score, severity,
+            event_id,
+            computed_score,
+            severity,
         )
-        return {
-            "event_id": event_id,
-            "score": computed_score,
-            "severity": severity,
-            "status": "scored",
-        }
+
+        # Step 6: Create alert and chain notify if severity meets threshold
+        alert_id: str | None = None
+        if force_alert_min_severity and _severity_gte(severity, force_alert_min_severity):
+            alert_id = await _create_alert(db, event, severity, computed_score)
+
+    if alert_id:
+        from osint_core.workers.notify import send_notification  # avoid circular import
+        send_notification.delay(alert_id)
+        logger.info("Chained send_notification for alert %s", alert_id)
+
+    return {
+        "event_id": event_id,
+        "score": computed_score,
+        "severity": severity,
+    }
 
 
-@celery_app.task(bind=True, name="osint.score_event", max_retries=3)  # type: ignore[untyped-decorator]
-def score_event_task(self: Any, event_id: str) -> dict[str, Any]:
-    """Score a single event by its ID.
+async def _create_alert(
+    db: Any,
+    event: Event,
+    severity: str,
+    score: float,
+) -> str:
+    """Create an Alert record for a high-severity event.
 
-    Pipeline steps:
-      1. Load the event from the database
-      2. Load the active plan's scoring config
-      3. Call score_event() with event metadata
-      4. Map score to severity via score_to_severity()
-      5. Update the event record with score + severity
+    Returns the alert's string ID.
     """
-    try:
-        return asyncio.run(_score_event_async(event_id))
-    except Exception as exc:
-        countdown = min(2 ** self.request.retries * 30, 900)
-        raise self.retry(exc=exc, countdown=countdown) from exc
+    fingerprint = hashlib.sha256(
+        f"score_event:{event.id}:{severity}".encode()
+    ).hexdigest()
 
+    # Check for an existing open alert with the same fingerprint
+    result = await db.execute(
+        select(Alert).where(Alert.fingerprint == fingerprint, Alert.status == "open")
+    )
+    existing: Alert | None = result.scalar_one_or_none()
+    if existing is not None:
+        existing.last_fired_at = datetime.now(UTC)
+        existing.occurrences = existing.occurrences + 1
+        await db.commit()
+        return str(existing.id)
 
-_RESCORE_BATCH_SIZE = 500
+    alert = Alert(
+        fingerprint=fingerprint,
+        severity=severity,
+        title=event.title or f"Scored event: {event.source_id}",
+        summary=(
+            f"Event scored {score:.2f} ({severity}) from source {event.source_id}."
+        ),
+        event_ids=[event.id],
+        indicator_ids=[ind.id for ind in (event.indicators or [])],
+        entity_ids=[ent.id for ent in (event.entities or [])],
+        plan_version_id=event.plan_version_id,
+        first_fired_at=datetime.now(UTC),
+        last_fired_at=datetime.now(UTC),
+    )
+    db.add(alert)
+    await db.commit()
+    return str(alert.id)
 
 
 async def _rescore_all_async(plan_id: str | None = None) -> dict[str, Any]:
@@ -166,6 +269,8 @@ async def _rescore_all_async(plan_id: str | None = None) -> dict[str, Any]:
     Events are fetched in batches of ``_RESCORE_BATCH_SIZE`` to avoid loading
     the entire events table into memory at once.
     """
+    from osint_core.models.plan import PlanVersion  # noqa: PLC0415
+
     total_enqueued = 0
     offset = 0
 
@@ -183,8 +288,8 @@ async def _rescore_all_async(plan_id: str | None = None) -> dict[str, Any]:
         if not batch:
             break
 
-        for event_id in batch:
-            score_event_task.delay(event_id)
+        for eid in batch:
+            score_event_task.delay(eid)
 
         total_enqueued += len(batch)
         offset += len(batch)

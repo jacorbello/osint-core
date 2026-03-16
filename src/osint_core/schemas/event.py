@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from osint_core.schemas.common import PaginatedResponse, SeverityEnum
 
@@ -12,7 +12,7 @@ from osint_core.schemas.common import PaginatedResponse, SeverityEnum
 class EventResponse(BaseModel):
     """Serialized event for API responses."""
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
     id: uuid.UUID
     event_type: str
@@ -38,7 +38,7 @@ class EventResponse(BaseModel):
     region: str | None = None
     source_category: str | None = None
 
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict, alias="metadata_")
 
 
 class EventList(PaginatedResponse[EventResponse]):

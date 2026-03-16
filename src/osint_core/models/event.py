@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import (
     CheckConstraint,
     Column,
+    Computed,
     Float,
     ForeignKey,
     Index,
@@ -108,9 +109,17 @@ class Event(UUIDMixin, TimestampMixin, Base):
         "metadata", JSONB, server_default="{}", nullable=False
     )
 
-    # FTS vector — the actual GENERATED ALWAYS AS expression is applied in the
-    # Alembic migration.  We define the column here so SQLAlchemy knows about it.
-    search_vector: Mapped[Any | None] = mapped_column(TSVECTOR, nullable=True)
+    _SEARCH_EXPR = (
+        "to_tsvector('english',"
+        " coalesce(title, '') || ' '"
+        " || coalesce(summary, '') || ' '"
+        " || coalesce(raw_excerpt, ''))"
+    )
+    search_vector: Mapped[Any | None] = mapped_column(
+        TSVECTOR,
+        Computed(_SEARCH_EXPR, persisted=True),
+        nullable=True,
+    )
 
     # --- relationships ---
     plan_version = relationship("PlanVersion", lazy="selectin")
