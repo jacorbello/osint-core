@@ -59,14 +59,22 @@ def _make_event(
     return event
 
 
-def _make_db_session(event: Any | None) -> AsyncMock:
-    """Return a mock async session that yields the provided event on first execute."""
+def _make_db_session(event: Any | None, plan: Any | None = None) -> AsyncMock:
+    """Return a mock async session.
+
+    The first execute returns the event; subsequent executes return plan (None by
+    default so that plan-version lookups don't inject unexpected MagicMocks).
+    """
     db = AsyncMock()
 
-    scalar_result = MagicMock()
-    scalar_result.scalar_one_or_none.return_value = event
+    event_result = MagicMock()
+    event_result.scalar_one_or_none.return_value = event
 
-    db.execute = AsyncMock(return_value=scalar_result)
+    plan_result = MagicMock()
+    plan_result.scalar_one_or_none.return_value = plan
+
+    # First call -> event; all subsequent calls -> plan (usually None)
+    db.execute = AsyncMock(side_effect=[event_result, plan_result, plan_result, plan_result])
     db.commit = AsyncMock()
     db.add = MagicMock()
 

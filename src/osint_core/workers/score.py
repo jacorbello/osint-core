@@ -65,7 +65,9 @@ def _build_scoring_config(plan_content: dict[str, Any]) -> ScoringConfig:
     scoring_section = plan_content.get("scoring", {})
     defaults = plan_content.get("defaults", {}).get("scoring", {})
 
-    half_life = float(_resolve(scoring_section, defaults, "recency_half_life_hours", _DEFAULT_HALF_LIFE))
+    half_life = float(
+        _resolve(scoring_section, defaults, "recency_half_life_hours", _DEFAULT_HALF_LIFE)
+    )
     if half_life <= 0:
         logger.warning(
             "build_scoring_config: recency_half_life_hours=%s is not positive; "
@@ -76,7 +78,9 @@ def _build_scoring_config(plan_content: dict[str, Any]) -> ScoringConfig:
         half_life = _DEFAULT_HALF_LIFE
 
     source_reputation = _resolve(scoring_section, defaults, "source_reputation", {})
-    ioc_match_boost = float(_resolve(scoring_section, defaults, "ioc_match_boost", _DEFAULT_IOC_BOOST))
+    ioc_match_boost = float(
+        _resolve(scoring_section, defaults, "ioc_match_boost", _DEFAULT_IOC_BOOST)
+    )
     keywords = plan_content.get("keywords", [])
 
     return ScoringConfig(
