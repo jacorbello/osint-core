@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from osint_core.services.plan_engine import PlanEngine
 
 VALID_PLAN_YAML = """
@@ -210,3 +212,14 @@ keywords:
     assert result.is_valid, f"Errors: {result.errors}"
     assert result.parsed["enrichment"]["nlp_enabled"] is True
     assert result.parsed["target_geo"]["lat"] == 30.2672
+
+
+def test_validate_cyber_threat_intel_yaml():
+    """cyber-threat-intel.yaml must pass validation."""
+    engine = PlanEngine()
+    plan_path = Path(__file__).resolve().parents[1] / "plans" / "cyber-threat-intel.yaml"
+    yaml_str = plan_path.read_text()
+    result = engine.validate_yaml(yaml_str)
+    assert result.is_valid, f"Errors: {result.errors}"
+    assert result.parsed["version"] == 2
+    assert result.parsed["plan_type"] == "child"

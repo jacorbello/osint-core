@@ -1,5 +1,6 @@
-version: 1
+version: 2
 plan_id: cyber-threat-intel
+plan_type: child
 description: >-
   Cyber threat intelligence collection plan covering vulnerability feeds,
   malware IOCs, and security news.  Designed for continuous monitoring
