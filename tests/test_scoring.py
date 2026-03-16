@@ -198,7 +198,8 @@ def test_topic_relevance_capped_at_three():
         recency_half_life_hours=48,
         keywords=["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
     )
-    result = compute_topic_relevance(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"], config)
+    matched = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]
+    result = compute_topic_relevance(matched, config)
     assert result == pytest.approx(3.0)
 
 
@@ -236,7 +237,8 @@ def test_score_event_keyword_boost():
         keywords=["terrorism", "attack", "threat"],
     )
     one_match = score_event("src", datetime.now(UTC), 0, ["attack"], config)
-    three_matches = score_event("src", datetime.now(UTC), 0, ["terrorism", "attack", "threat"], config)
+    topics = ["terrorism", "attack", "threat"]
+    three_matches = score_event("src", datetime.now(UTC), 0, topics, config)
     assert three_matches > one_match
     assert three_matches == pytest.approx(one_match * (1.6 / 1.2), rel=0.01)
 

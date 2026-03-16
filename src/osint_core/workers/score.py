@@ -14,7 +14,12 @@ from sqlalchemy import select
 from osint_core.db import async_session
 from osint_core.models.alert import Alert
 from osint_core.models.event import Event
-from osint_core.services.scoring import ScoringConfig, match_keywords, score_event, score_to_severity
+from osint_core.services.scoring import (
+    ScoringConfig,
+    match_keywords,
+    score_event,
+    score_to_severity,
+)
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
