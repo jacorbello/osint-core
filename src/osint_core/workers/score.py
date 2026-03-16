@@ -14,7 +14,7 @@ from sqlalchemy import select
 from osint_core.db import async_session
 from osint_core.models.alert import Alert
 from osint_core.models.event import Event
-from osint_core.services.scoring import ScoringConfig, score_event, score_to_severity
+from osint_core.services.scoring import ScoringConfig, match_keywords, score_event, score_to_severity
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -107,6 +107,7 @@ async def _score_event_async(event_id: str) -> dict[str, Any]:
                         ),
                         source_reputation=plan_scoring.get("source_reputation", {}),
                         ioc_match_boost=plan_scoring.get("ioc_match_boost", 2.0),
+                        keywords=plan.content.get("keywords", []),
                     )
                     force_alert_cfg = plan_scoring.get("force_alert", {})
                     force_alert_min_severity = force_alert_cfg.get("min_severity")
@@ -115,11 +116,16 @@ async def _score_event_async(event_id: str) -> dict[str, Any]:
         occurred_at = event.occurred_at or event.ingested_at
         indicator_count = len(event.indicators) if event.indicators else 0
 
+        event_text = " ".join(
+            s for s in [event.title, event.summary] if isinstance(s, str) and s
+        )
+        matched_topics = match_keywords(event_text, scoring_config.keywords)
+
         computed_score = score_event(
             source_id=event.source_id,
             occurred_at=occurred_at,
             indicator_count=indicator_count,
-            matched_topics=[],
+            matched_topics=matched_topics,
             config=scoring_config,
         )
 

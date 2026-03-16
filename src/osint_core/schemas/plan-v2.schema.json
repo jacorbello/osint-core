@@ -86,6 +86,11 @@
     "notifications": {
       "$ref": "#/$defs/notifications"
     },
+    "keywords": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Topic keywords for relevance scoring. Events matching more keywords score higher."
+    },
     "source_profiles": {
       "type": "object",
       "description": "Map of source IDs to reliability/credibility profiles (child plans only).",

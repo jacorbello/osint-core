@@ -5,6 +5,24 @@ parent_plan_id: cortech-osint-master
 retention_class: standard
 description: "Monitor for terrorism, extremism, and mass violence signals in the Austin, TX / Travis County area."
 
+keywords:
+  - terrorism
+  - terrorist
+  - extremist
+  - extremism
+  - bombing
+  - bomber
+  - shooter
+  - shooting
+  - mass shooting
+  - attack
+  - threat
+  - weapon
+  - explosive
+  - hostage
+  - Austin
+  - Travis County
+
 source_profiles:
   gdelt_austin_terror:
     reliability: C
