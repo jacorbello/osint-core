@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -23,7 +24,7 @@ _SORT_FIELDS = {
 }
 
 
-def _parse_sort(sort: str | None):
+def _parse_sort(sort: str | None) -> Any:
     """Parse a sort parameter like '-score' or 'ingested_at' into an ORDER BY clause."""
     if sort is None:
         return Event.ingested_at.desc()
