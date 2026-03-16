@@ -1,6 +1,8 @@
 """Tests for NLP enrichment task."""
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from osint_core.workers.nlp_enrich import _enrich_event_async
 
 

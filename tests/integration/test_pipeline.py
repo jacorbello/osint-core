@@ -101,7 +101,7 @@ async def test_full_pipeline(
     scoring_cfg = ScoringConfig(
         recency_half_life_hours=plan["scoring"]["recency_half_life_hours"],
         source_reputation=plan["scoring"]["source_reputation"],
-        
+
     )
     # Score a recent event with indicators
     score = score_event(
@@ -116,7 +116,9 @@ async def test_full_pipeline(
     assert severity in ("low", "medium", "high", "critical")
 
     # With source_reputation and recent event, score should be high enough
-    assert severity in ("medium", "high"), f"Expected 'medium' or 'high' severity, got '{severity}' (score={score})"
+    assert severity in ("medium", "high"), (
+        f"Expected 'medium' or 'high' severity, got '{severity}' (score={score})"
+    )
 
     # ---- Step f: Alert evaluation ----
     alert_threshold = 0.5

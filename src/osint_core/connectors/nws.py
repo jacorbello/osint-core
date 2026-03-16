@@ -1,8 +1,9 @@
 """NWS (National Weather Service) alerts connector."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -23,7 +24,10 @@ class NwsConnector(BaseConnector):
         zone = self.config.extra.get("zone")
         if zone:
             params["zone"] = zone
-        headers = {"User-Agent": "(osint-core, admin@corbello.io)", "Accept": "application/geo+json"}
+        headers = {
+            "User-Agent": "(osint-core, admin@corbello.io)",
+            "Accept": "application/geo+json",
+        }
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(self.config.url, params=params, headers=headers)
             resp.raise_for_status()
@@ -36,10 +40,8 @@ class NwsConnector(BaseConnector):
         onset = props.get("onset", "")
         occurred_at = None
         if onset:
-            try:
-                occurred_at = datetime.fromisoformat(onset).astimezone(timezone.utc)
-            except ValueError:
-                pass
+            with contextlib.suppress(ValueError):
+                occurred_at = datetime.fromisoformat(onset).astimezone(UTC)
         nws_severity = props.get("severity", "Unknown")
         return RawItem(
             title=props.get("headline", props.get("event", "")),

@@ -11,11 +11,11 @@ import logging
 
 import httpx
 from sqlalchemy import NullPool
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from osint_core.workers.celery_app import celery_app
 from osint_core.config import settings
 from osint_core.models.event import Event
+from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,9 @@ Plan mission: {mission}
 Plan keywords: {keywords}
 
 Respond with exactly this JSON structure:
-{{"summary": "1-2 sentence English summary of the event", "relevance": "relevant|tangential|irrelevant", "entities": [{{"name": "...", "type": "person|organization|location|indicator"}}]}}
+{{"summary": "1-2 sentence English summary of the event",
+"relevance": "relevant|tangential|irrelevant",
+"entities": [{{"name": "...", "type": "person|organization|location|indicator"}}]}}
 """
 
 
@@ -107,6 +109,8 @@ def nlp_enrich_task(self, event_id: str) -> dict:
         return loop.run_until_complete(_enrich_event_async(event_id))
     except Exception as exc:
         logger.exception("NLP enrichment failed for %s", event_id)
-        raise self.retry(exc=exc, countdown=min(2 ** self.request.retries * 30, 900))
+        raise self.retry(
+            exc=exc, countdown=min(2 ** self.request.retries * 30, 900)
+        ) from exc
     finally:
         loop.close()

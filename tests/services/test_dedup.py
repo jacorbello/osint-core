@@ -1,6 +1,5 @@
 """Tests for near-duplicate detection via SimHash."""
-import pytest
-from osint_core.services.dedup import compute_simhash, simhash_distance, normalize_title
+from osint_core.services.dedup import compute_simhash, normalize_title, simhash_distance
 
 
 class TestNormalizeTitle:

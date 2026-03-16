@@ -209,7 +209,10 @@ async def _score_event_async(event_id: str) -> dict[str, Any]:
         )
 
         # Step 6: Evaluate alert rules and chain notify for matched rules
-        from osint_core.services.alert_rules import evaluate_rules, parse_rules_from_plan  # noqa: PLC0415
+        from osint_core.services.alert_rules import (  # noqa: PLC0415
+            evaluate_rules,
+            parse_rules_from_plan,
+        )
 
         rules = parse_rules_from_plan(plan_content)
         matched_rules = evaluate_rules(event, rules)
@@ -249,7 +252,10 @@ def _apply_promotions(
     for rule in promotions:
         cond = rule.get("condition", {})
         target = rule.get("promote_to", base_severity)
-        if _evaluate_condition(event, cond, base_severity=base_severity) and _severity_gte(target, best):
+        if (
+            _evaluate_condition(event, cond, base_severity=base_severity)
+            and _severity_gte(target, best)
+        ):
             best = target
     return best
 

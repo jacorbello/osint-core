@@ -1,8 +1,9 @@
 """AlienVault OTX pulse feed connector."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -24,10 +25,8 @@ class OtxConnector(BaseConnector):
         created = pulse.get("created", "")
         occurred_at = None
         if created:
-            try:
-                occurred_at = datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
-            except ValueError:
-                pass
+            with contextlib.suppress(ValueError):
+                occurred_at = datetime.fromisoformat(created).replace(tzinfo=UTC)
         indicators = [
             {"type": i["type"], "value": i["indicator"]}
             for i in pulse.get("indicators", [])

@@ -1,9 +1,10 @@
 """Tests for GDELT connector filtering enhancements."""
-import pytest
 import httpx
+import pytest
 import respx
-from osint_core.connectors.gdelt import GdeltConnector
+
 from osint_core.connectors.base import SourceConfig
+from osint_core.connectors.gdelt import GdeltConnector
 
 
 @respx.mock

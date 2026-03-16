@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -156,7 +156,7 @@ def score_event(
 
     # Recency decay with floor
     if occurred_at is not None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         hours_old = max(0.0, (now - occurred_at).total_seconds() / 3600)
         recency = max(0.1, 0.5 ** (hours_old / config.recency_half_life_hours))
     else:

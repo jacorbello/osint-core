@@ -9,6 +9,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from celery import chain, group
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -20,8 +21,6 @@ from osint_core.models.indicator import Indicator
 from osint_core.models.job import Job
 from osint_core.services.indicators import extract_indicators
 from osint_core.services.plan_store import PlanStore
-from celery import chain, group
-
 from osint_core.workers.celery_app import celery_app
 from osint_core.workers.enrich import correlate_event_task, vectorize_event_task
 from osint_core.workers.nlp_enrich import nlp_enrich_task

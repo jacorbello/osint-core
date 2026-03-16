@@ -1,7 +1,8 @@
 """Tests for ACLED conflict data connector."""
-import pytest
 import httpx
+import pytest
 import respx
+
 from osint_core.connectors.acled import AcledConnector
 from osint_core.connectors.base import SourceConfig
 

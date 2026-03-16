@@ -1,17 +1,19 @@
 """Tests for the new normalized 0-1 scoring formula."""
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from datetime import datetime, timezone, timedelta
+
 from osint_core.services.scoring import (
     ScoringConfig,
+    compute_geographic_relevance,
+    compute_keyword_relevance,
     score_event,
     score_to_severity,
-    compute_keyword_relevance,
-    compute_geographic_relevance,
 )
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class TestKeywordRelevance:
@@ -87,7 +89,10 @@ class TestGeographicRelevance:
     def test_same_country_beyond_2x_radius(self):
         result = compute_geographic_relevance(
             country_code="USA", lat=40.71, lon=-74.01,
-            target_geo={"lat": 30.2672, "lon": -97.7431, "radius_km": 150, "country_codes": ["USA"]},
+            target_geo={
+                "lat": 30.2672, "lon": -97.7431,
+                "radius_km": 150, "country_codes": ["USA"],
+            },
         )
         assert result == 0.5
 

@@ -1,9 +1,10 @@
 """GDELT DOC 2.0 API connector with geographic and language filtering."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -89,10 +90,8 @@ class GdeltConnector(BaseConnector):
         seen = article.get("seendate", "")
         occurred_at = None
         if seen:
-            try:
-                occurred_at = datetime.strptime(seen, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
-            except ValueError:
-                pass
+            with contextlib.suppress(ValueError):
+                occurred_at = datetime.strptime(seen, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
 
         country_name = article.get("sourcecountry", "")
         country_code = _COUNTRY_MAP.get(country_name)

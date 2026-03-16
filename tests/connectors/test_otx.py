@@ -1,9 +1,10 @@
 """Tests for AlienVault OTX connector."""
-import pytest
 import httpx
+import pytest
 import respx
-from osint_core.connectors.otx import OtxConnector
+
 from osint_core.connectors.base import SourceConfig
+from osint_core.connectors.otx import OtxConnector
 
 
 @respx.mock

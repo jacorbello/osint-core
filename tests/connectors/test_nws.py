@@ -1,9 +1,10 @@
 """Tests for NWS weather alert connector."""
-import pytest
 import httpx
+import pytest
 import respx
-from osint_core.connectors.nws import NwsConnector
+
 from osint_core.connectors.base import SourceConfig
+from osint_core.connectors.nws import NwsConnector
 
 
 @respx.mock

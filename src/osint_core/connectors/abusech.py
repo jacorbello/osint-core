@@ -1,8 +1,9 @@
 """Abuse.ch connectors: MalwareBazaar and FeodoTracker."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -33,10 +34,8 @@ class MalwareBazaarConnector(BaseConnector):
         seen = sample.get("first_seen", "")
         occurred_at = None
         if seen:
-            try:
-                occurred_at = datetime.strptime(seen, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-            except ValueError:
-                pass
+            with contextlib.suppress(ValueError):
+                occurred_at = datetime.strptime(seen, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
         return RawItem(
             title=f"Malware sample: {sig} ({sample.get('file_type', '')})",
             url=f"https://bazaar.abuse.ch/sample/{sha}/",
@@ -67,10 +66,8 @@ class FeodoTrackerConnector(BaseConnector):
         seen = entry.get("first_seen", "")
         occurred_at = None
         if seen:
-            try:
-                occurred_at = datetime.strptime(seen, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            except ValueError:
-                pass
+            with contextlib.suppress(ValueError):
+                occurred_at = datetime.strptime(seen, "%Y-%m-%d").replace(tzinfo=UTC)
         country_iso2 = entry.get("country", "")
         country_code = _COUNTRY_ISO2_TO_ISO3.get(country_iso2, country_iso2)
         return RawItem(

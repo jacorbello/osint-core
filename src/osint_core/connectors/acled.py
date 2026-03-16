@@ -1,8 +1,9 @@
 """ACLED conflict event data connector."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -29,16 +30,17 @@ class AcledConnector(BaseConnector):
         date_str = event.get("event_date", "")
         occurred_at = None
         if date_str:
-            try:
-                occurred_at = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            except ValueError:
-                pass
+            with contextlib.suppress(ValueError):
+                occurred_at = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=UTC)
         lat = event.get("latitude")
         lon = event.get("longitude")
         fatalities_raw = event.get("fatalities", "0")
         return RawItem(
             title=f"{event.get('event_type', '')}: {event.get('notes', '')[:100]}",
-            url=f"https://acleddata.com/data-export-tool/?event_id={event.get('event_id_cnty', '')}",
+            url=(
+                "https://acleddata.com/data-export-tool/"
+                f"?event_id={event.get('event_id_cnty', '')}"
+            ),
             raw_data=event,
             summary=event.get("notes", ""),
             occurred_at=occurred_at,
@@ -48,7 +50,11 @@ class AcledConnector(BaseConnector):
             source_category="geopolitical",
             event_type=event.get("event_type"),
             fatalities=int(fatalities_raw) if fatalities_raw else 0,
-            actors=[{"name": event.get("actor1", ""), "role": "primary"}] if event.get("actor1") else [],
+            actors=(
+                [{"name": event.get("actor1", ""), "role": "primary"}]
+                if event.get("actor1")
+                else []
+            ),
         )
 
     def dedupe_key(self, item: RawItem) -> str:

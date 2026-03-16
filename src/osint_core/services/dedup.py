@@ -5,7 +5,10 @@ import hashlib
 import re
 
 _STOPWORDS = frozenset(
-    "a an the and or but in on at to for of is it this that with from by as".split()
+    [
+        "a", "an", "the", "and", "or", "but", "in", "on", "at", "to",
+        "for", "of", "is", "it", "this", "that", "with", "from", "by", "as",
+    ]
 )
 
 

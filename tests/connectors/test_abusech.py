@@ -1,8 +1,9 @@
 """Tests for Abuse.ch connectors."""
-import pytest
 import httpx
+import pytest
 import respx
-from osint_core.connectors.abusech import MalwareBazaarConnector, FeodoTrackerConnector
+
+from osint_core.connectors.abusech import FeodoTrackerConnector, MalwareBazaarConnector
 from osint_core.connectors.base import SourceConfig
 
 
