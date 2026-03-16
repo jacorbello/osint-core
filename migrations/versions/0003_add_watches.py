@@ -8,7 +8,7 @@ Create Date: 2026-03-03
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0003"
@@ -17,11 +17,19 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-def _table_exists(bind, schema: str, table: str) -> bool:
+def _table_exists(
+    bind, schema: str, table: str, *, assume: bool = False
+) -> bool:
+    if bind is None:  # offline mode
+        return assume
     return bind.dialect.has_table(bind, table, schema=schema)
 
 
-def _index_exists(bind, index: str, schema: str = "osint") -> bool:
+def _index_exists(
+    bind, index: str, schema: str = "osint", *, assume: bool = False
+) -> bool:
+    if bind is None:  # offline mode
+        return assume
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
@@ -33,7 +41,7 @@ def _index_exists(bind, index: str, schema: str = "osint") -> bool:
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
+    bind = None if context.is_offline_mode() else op.get_bind()
 
     if not _table_exists(bind, "osint", "watches"):
         op.create_table(

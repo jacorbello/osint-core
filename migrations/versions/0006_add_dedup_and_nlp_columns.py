@@ -12,7 +12,7 @@ This revision adds the missing columns.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 revision: str = "0006"
 down_revision: str | None = "0005"
@@ -20,7 +20,11 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-def _column_exists(bind, schema: str, table: str, column: str) -> bool:
+def _column_exists(
+    bind, schema: str, table: str, column: str, *, assume: bool = False
+) -> bool:
+    if bind is None:  # offline mode — no connection available
+        return assume
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM information_schema.columns"
@@ -31,7 +35,11 @@ def _column_exists(bind, schema: str, table: str, column: str) -> bool:
     return result.fetchone() is not None
 
 
-def _index_exists(bind, index: str, schema: str = "osint") -> bool:
+def _index_exists(
+    bind, index: str, schema: str = "osint", *, assume: bool = False
+) -> bool:
+    if bind is None:  # offline mode
+        return assume
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
@@ -42,7 +50,11 @@ def _index_exists(bind, index: str, schema: str = "osint") -> bool:
     return result.fetchone() is not None
 
 
-def _constraint_exists(bind, schema: str, table: str, constraint: str) -> bool:
+def _constraint_exists(
+    bind, schema: str, table: str, constraint: str, *, assume: bool = False
+) -> bool:
+    if bind is None:  # offline mode
+        return assume
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM information_schema.table_constraints"
@@ -55,7 +67,7 @@ def _constraint_exists(bind, schema: str, table: str, constraint: str) -> bool:
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
+    bind = None if context.is_offline_mode() else op.get_bind()
 
     if not _column_exists(bind, "osint", "events", "simhash"):
         op.add_column(
@@ -129,18 +141,18 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
+    bind = None if context.is_offline_mode() else op.get_bind()
 
-    if _index_exists(bind, "ix_events_simhash"):
+    if _index_exists(bind, "ix_events_simhash", assume=True):
         op.drop_index("ix_events_simhash", table_name="events", schema="osint")
 
     for col in ("fatalities", "nlp_summary", "nlp_relevance", "corroboration_count"):
-        if _column_exists(bind, "osint", "events", col):
+        if _column_exists(bind, "osint", "events", col, assume=True):
             op.drop_column("events", col, schema="osint")
 
-    if _constraint_exists(bind, "osint", "events", "fk_events_canonical_event_id"):
+    if _constraint_exists(bind, "osint", "events", "fk_events_canonical_event_id", assume=True):
         op.drop_constraint("fk_events_canonical_event_id", "events", schema="osint")
 
     for col in ("canonical_event_id", "simhash"):
-        if _column_exists(bind, "osint", "events", col):
+        if _column_exists(bind, "osint", "events", col, assume=True):
             op.drop_column("events", col, schema="osint")

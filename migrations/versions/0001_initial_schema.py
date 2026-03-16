@@ -8,7 +8,7 @@ Create Date: 2026-03-01
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
@@ -18,11 +18,19 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-def _table_exists(bind, schema: str, table: str) -> bool:
+def _table_exists(
+    bind, schema: str, table: str, *, assume: bool = False
+) -> bool:
+    if bind is None:  # offline mode — no connection available
+        return assume
     return bind.dialect.has_table(bind, table, schema=schema)
 
 
-def _index_exists(bind, index: str, schema: str = "osint") -> bool:
+def _index_exists(
+    bind, index: str, schema: str = "osint", *, assume: bool = False
+) -> bool:
+    if bind is None:  # offline mode
+        return assume
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
@@ -34,7 +42,7 @@ def _index_exists(bind, index: str, schema: str = "osint") -> bool:
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
+    bind = None if context.is_offline_mode() else op.get_bind()
 
     # Create the osint schema
     op.execute("CREATE SCHEMA IF NOT EXISTS osint")
@@ -43,7 +51,7 @@ def upgrade() -> None:
     if not _table_exists(bind, "osint", "plan_versions"):
         op.create_table(
             "plan_versions",
-            sa.Column("id", sa.UUID(), nullable=False, default=sa.text("gen_random_uuid()")),
+            sa.Column("id", sa.UUID(), nullable=False, server_default=sa.text("gen_random_uuid()")),
             sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
             sa.Column("plan_id", sa.Text(), nullable=False),
             sa.Column("version", sa.Integer(), nullable=False),
@@ -72,7 +80,7 @@ def upgrade() -> None:
     if not _table_exists(bind, "osint", "entities"):
         op.create_table(
             "entities",
-            sa.Column("id", sa.UUID(), nullable=False, default=sa.text("gen_random_uuid()")),
+            sa.Column("id", sa.UUID(), nullable=False, server_default=sa.text("gen_random_uuid()")),
             sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
             sa.Column("entity_type", sa.Text(), nullable=False),
             sa.Column("name", sa.Text(), nullable=False),
@@ -118,7 +126,7 @@ def upgrade() -> None:
     if not _table_exists(bind, "osint", "indicators"):
         op.create_table(
             "indicators",
-            sa.Column("id", sa.UUID(), nullable=False, default=sa.text("gen_random_uuid()")),
+            sa.Column("id", sa.UUID(), nullable=False, server_default=sa.text("gen_random_uuid()")),
             sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
             sa.Column("indicator_type", sa.Text(), nullable=False),
             sa.Column("value", sa.Text(), nullable=False),
@@ -158,7 +166,7 @@ def upgrade() -> None:
     if not _table_exists(bind, "osint", "artifacts"):
         op.create_table(
             "artifacts",
-            sa.Column("id", sa.UUID(), nullable=False, default=sa.text("gen_random_uuid()")),
+            sa.Column("id", sa.UUID(), nullable=False, server_default=sa.text("gen_random_uuid()")),
             sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
             sa.Column("artifact_type", sa.Text(), nullable=False),
             sa.Column("minio_uri", sa.Text(), nullable=True),
@@ -189,7 +197,7 @@ def upgrade() -> None:
     if not _table_exists(bind, "osint", "events"):
         op.create_table(
             "events",
-            sa.Column("id", sa.UUID(), nullable=False, default=sa.text("gen_random_uuid()")),
+            sa.Column("id", sa.UUID(), nullable=False, server_default=sa.text("gen_random_uuid()")),
             sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
             sa.Column("event_type", sa.Text(), nullable=False),
             sa.Column("source_id", sa.Text(), nullable=False),
@@ -262,40 +270,55 @@ def upgrade() -> None:
     # FTS generated column — SQLAlchemy cannot model GENERATED ALWAYS AS directly,
     # so we convert the plain tsvector column into a stored generated column.
     # Guard: only proceed if search_vector column exists and is not already generated.
-    sv_result = bind.execute(
-        sa.text(
-            "SELECT is_generated FROM information_schema.columns"
-            " WHERE table_schema = 'osint' AND table_name = 'events'"
-            " AND column_name = 'search_vector'"
-        )
+    # If the column is missing entirely (sv_row is None), create it directly as generated.
+    _fts_expr = (
+        "to_tsvector('english',"
+        " coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(raw_excerpt, ''))"
     )
-    sv_row = sv_result.fetchone()
-    if sv_row is not None and sv_row[0] != "ALWAYS":
-        op.execute(
-            """
-            ALTER TABLE osint.events
-              ALTER COLUMN search_vector
-              SET DATA TYPE tsvector
-              USING to_tsvector('english',
-                coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(raw_excerpt, '')
-              );
-            """
+    if bind is not None:
+        sv_result = bind.execute(
+            sa.text(
+                "SELECT is_generated FROM information_schema.columns"
+                " WHERE table_schema = 'osint' AND table_name = 'events'"
+                " AND column_name = 'search_vector'"
+            )
         )
+        sv_row = sv_result.fetchone()
+        if sv_row is None:
+            # Column does not exist — create it directly as a generated column
+            op.execute(
+                f"""
+                ALTER TABLE osint.events
+                  ADD COLUMN search_vector tsvector
+                  GENERATED ALWAYS AS ({_fts_expr}) STORED;
+                """
+            )
+        elif sv_row[0] != "ALWAYS":
+            # Column exists but is not generated — drop and re-create
+            op.execute("ALTER TABLE osint.events DROP COLUMN search_vector;")
+            op.execute(
+                f"""
+                ALTER TABLE osint.events
+                  ADD COLUMN search_vector tsvector
+                  GENERATED ALWAYS AS ({_fts_expr}) STORED;
+                """
+            )
+        # else: already a generated column — nothing to do
+    else:
+        # Offline mode: emit idempotent DDL
         op.execute(
-            """
-            ALTER TABLE osint.events
-              DROP COLUMN search_vector;
-            """
-        )
-        op.execute(
-            """
-            ALTER TABLE osint.events
-              ADD COLUMN search_vector tsvector
-              GENERATED ALWAYS AS (
-                to_tsvector('english',
-                  coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(raw_excerpt, '')
-                )
-              ) STORED;
+            f"""
+            DO $$ BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'osint' AND table_name = 'events'
+                  AND column_name = 'search_vector'
+              ) THEN
+                ALTER TABLE osint.events
+                  ADD COLUMN search_vector tsvector
+                  GENERATED ALWAYS AS ({_fts_expr}) STORED;
+              END IF;
+            END $$;
             """
         )
 
@@ -360,7 +383,7 @@ def upgrade() -> None:
     if not _table_exists(bind, "osint", "alerts"):
         op.create_table(
             "alerts",
-            sa.Column("id", sa.UUID(), nullable=False, default=sa.text("gen_random_uuid()")),
+            sa.Column("id", sa.UUID(), nullable=False, server_default=sa.text("gen_random_uuid()")),
             sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
             sa.Column("fingerprint", sa.Text(), nullable=False),
             sa.Column("severity", sa.Text(), nullable=False),
@@ -437,7 +460,7 @@ def upgrade() -> None:
     if not _table_exists(bind, "osint", "briefs"):
         op.create_table(
             "briefs",
-            sa.Column("id", sa.UUID(), nullable=False, default=sa.text("gen_random_uuid()")),
+            sa.Column("id", sa.UUID(), nullable=False, server_default=sa.text("gen_random_uuid()")),
             sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
             sa.Column("title", sa.Text(), nullable=False),
             sa.Column("content_md", sa.Text(), nullable=False),
@@ -483,7 +506,7 @@ def upgrade() -> None:
     if not _table_exists(bind, "osint", "jobs"):
         op.create_table(
             "jobs",
-            sa.Column("id", sa.UUID(), nullable=False, default=sa.text("gen_random_uuid()")),
+            sa.Column("id", sa.UUID(), nullable=False, server_default=sa.text("gen_random_uuid()")),
             sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
             sa.Column("job_type", sa.Text(), nullable=False),
             sa.Column(
@@ -551,7 +574,7 @@ def upgrade() -> None:
     if not _table_exists(bind, "osint", "audit_log"):
         op.create_table(
             "audit_log",
-            sa.Column("id", sa.UUID(), nullable=False, default=sa.text("gen_random_uuid()")),
+            sa.Column("id", sa.UUID(), nullable=False, server_default=sa.text("gen_random_uuid()")),
             sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
             sa.Column("action", sa.Text(), nullable=False),
             sa.Column("actor", sa.Text(), nullable=True),

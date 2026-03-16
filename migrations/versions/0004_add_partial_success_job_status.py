@@ -8,7 +8,7 @@ Create Date: 2026-03-03
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 revision: str = "0004"
 down_revision: str | None = "0001"
@@ -19,7 +19,11 @@ _NEW_CONSTRAINT = "status IN ('queued', 'running', 'succeeded', 'failed', 'parti
 _OLD_CONSTRAINT = "status IN ('queued', 'running', 'succeeded', 'failed', 'dead_letter')"
 
 
-def _constraint_exists(bind, schema: str, table: str, constraint: str) -> bool:
+def _constraint_exists(
+    bind, schema: str, table: str, constraint: str, *, assume: bool = False
+) -> bool:
+    if bind is None:  # offline mode
+        return assume
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM information_schema.table_constraints"
@@ -32,7 +36,7 @@ def _constraint_exists(bind, schema: str, table: str, constraint: str) -> bool:
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
+    bind = None if context.is_offline_mode() else op.get_bind()
     constraint_name = op.f("ck_jobs_status_check")
 
     # Drop the old constraint only if it exists
@@ -50,10 +54,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
+    bind = None if context.is_offline_mode() else op.get_bind()
     constraint_name = op.f("ck_jobs_status_check")
 
-    if _constraint_exists(bind, "osint", "jobs", constraint_name):
+    if _constraint_exists(bind, "osint", "jobs", constraint_name, assume=True):
         op.drop_constraint(constraint_name, "jobs", schema="osint")
 
     if not _constraint_exists(bind, "osint", "jobs", constraint_name):
