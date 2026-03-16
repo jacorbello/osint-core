@@ -63,8 +63,8 @@ async def generate_brief(
 ) -> BriefResponse:
     """Generate a new intelligence brief using the BriefGenerator."""
     generator = BriefGenerator(
-        ollama_url=settings.ollama_url,
-        ollama_model=settings.ollama_model,
+        llm_url=settings.llm_url,
+        llm_model=settings.llm_model,
     )
 
     content_md = await generator.generate(
@@ -78,8 +78,8 @@ async def generate_brief(
         title=body.query,
         content_md=content_md,
         target_query=body.query,
-        generated_by="ollama",
-        model_id=settings.ollama_model,
+        generated_by="llm",
+        model_id=settings.llm_model,
         requested_by=current_user.username,
     )
     db.add(brief)
