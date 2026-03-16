@@ -17,31 +17,46 @@ from osint_core.workers.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
+_DEFAULT_HALF_LIFE = 24.0
+_DEFAULT_IOC_BOOST = 1.0
+
+
+def _resolve(section: dict[str, Any], fallback: dict[str, Any], key: str, default: Any) -> Any:
+    """Return the first non-None value from section, fallback, then default."""
+    if section.get(key) is not None:
+        return section[key]
+    if fallback.get(key) is not None:
+        return fallback[key]
+    return default
+
+
 def _build_scoring_config(plan_content: dict[str, Any]) -> ScoringConfig:
-    """Build a ScoringConfig from a plan's content dict."""
+    """Build a ScoringConfig from a plan's content dict.
+
+    Uses explicit ``is not None`` checks so that valid falsy values (e.g.
+    ``ioc_match_boost: 0.0``, empty ``source_reputation: {}``) are preserved
+    rather than silently replaced by defaults.
+    """
     scoring_section = plan_content.get("scoring", {})
     defaults = plan_content.get("defaults", {}).get("scoring", {})
 
-    half_life = (
-        scoring_section.get("recency_half_life_hours")
-        or defaults.get("recency_half_life_hours")
-        or 24.0
-    )
-    source_reputation = (
-        scoring_section.get("source_reputation")
-        or defaults.get("source_reputation")
-        or {}
-    )
-    ioc_match_boost = (
-        scoring_section.get("ioc_match_boost")
-        or defaults.get("ioc_match_boost")
-        or 1.0
-    )
+    half_life = float(_resolve(scoring_section, defaults, "recency_half_life_hours", _DEFAULT_HALF_LIFE))
+    if half_life <= 0:
+        logger.warning(
+            "build_scoring_config: recency_half_life_hours=%s is not positive; "
+            "falling back to default %s",
+            half_life,
+            _DEFAULT_HALF_LIFE,
+        )
+        half_life = _DEFAULT_HALF_LIFE
+
+    source_reputation = _resolve(scoring_section, defaults, "source_reputation", {})
+    ioc_match_boost = float(_resolve(scoring_section, defaults, "ioc_match_boost", _DEFAULT_IOC_BOOST))
 
     return ScoringConfig(
-        recency_half_life_hours=float(half_life),
+        recency_half_life_hours=half_life,
         source_reputation=source_reputation,
-        ioc_match_boost=float(ioc_match_boost),
+        ioc_match_boost=ioc_match_boost,
     )
 
 
@@ -55,13 +70,32 @@ async def _score_event_async(event_id: str) -> dict[str, Any]:
             logger.warning("score_event: event not found: %s", event_id)
             return {"event_id": event_id, "status": "not_found"}
 
-        # Load the plan version associated with this event, or find the active plan
+        # Prefer the currently active plan version for the event's plan so that
+        # rescore operations reflect the latest scoring config.  Only fall back
+        # to the stored plan_version_id when no active version exists for that
+        # plan, and fall back to any active plan as a last resort.
         plan: PlanVersion | None = None
+
         if event.plan_version_id is not None:
+            # Find the plan_id this event's version belongs to, then load the
+            # active version of that same plan.
             pv_result = await db.execute(
                 select(PlanVersion).where(PlanVersion.id == event.plan_version_id)
             )
-            plan = pv_result.scalar_one_or_none()
+            stored_version: PlanVersion | None = pv_result.scalar_one_or_none()
+            if stored_version is not None:
+                active_result = await db.execute(
+                    select(PlanVersion)
+                    .where(
+                        PlanVersion.plan_id == stored_version.plan_id,
+                        PlanVersion.is_active.is_(True),
+                    )
+                    .limit(1)
+                )
+                plan = active_result.scalar_one_or_none()
+                # If the plan has no active version, fall back to the stored one
+                if plan is None:
+                    plan = stored_version
 
         if plan is None:
             # Fall back to any active plan
@@ -123,24 +157,43 @@ def score_event_task(self: Any, event_id: str) -> dict[str, Any]:
         raise self.retry(exc=exc, countdown=countdown) from exc
 
 
+_RESCORE_BATCH_SIZE = 500
+
+
 async def _rescore_all_async(plan_id: str | None = None) -> dict[str, Any]:
-    """Enqueue score_event_task for all events, optionally filtered by plan."""
-    async with async_session() as db:
-        stmt = select(Event.id)
-        if plan_id is not None:
-            # Filter to events whose plan_version belongs to the given plan_id
-            stmt = stmt.join(
-                PlanVersion, Event.plan_version_id == PlanVersion.id
-            ).where(PlanVersion.plan_id == plan_id)
+    """Enqueue score_event_task for all events, optionally filtered by plan.
 
-        result = await db.execute(stmt)
-        event_ids = [str(row[0]) for row in result.fetchall()]
+    Events are fetched in batches of ``_RESCORE_BATCH_SIZE`` to avoid loading
+    the entire events table into memory at once.
+    """
+    total_enqueued = 0
+    offset = 0
 
-    for event_id in event_ids:
-        score_event_task.delay(event_id)
+    while True:
+        async with async_session() as db:
+            stmt = select(Event.id).order_by(Event.id).offset(offset).limit(_RESCORE_BATCH_SIZE)
+            if plan_id is not None:
+                stmt = stmt.join(
+                    PlanVersion, Event.plan_version_id == PlanVersion.id
+                ).where(PlanVersion.plan_id == plan_id)
 
-    logger.info("rescore_all: enqueued %d events", len(event_ids))
-    return {"enqueued": len(event_ids)}
+            result = await db.execute(stmt)
+            batch = [str(row[0]) for row in result.fetchall()]
+
+        if not batch:
+            break
+
+        for event_id in batch:
+            score_event_task.delay(event_id)
+
+        total_enqueued += len(batch)
+        offset += len(batch)
+
+        if len(batch) < _RESCORE_BATCH_SIZE:
+            break
+
+    logger.info("rescore_all: enqueued %d events", total_enqueued)
+    return {"enqueued": total_enqueued}
 
 
 @celery_app.task(name="osint.rescore_all_events")  # type: ignore[untyped-decorator]
