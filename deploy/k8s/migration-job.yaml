@@ -1,0 +1,48 @@
+---
+# migration-job.yaml
+#
+# One-shot Kubernetes Job that runs `alembic upgrade head` against the
+# production database.  Apply this before rolling out a new image that
+# introduces schema changes.
+#
+# Usage:
+#   kubectl -n osint apply -f migration-job.yaml
+#   kubectl -n osint wait --for=condition=complete --timeout=120s job/osint-migrate
+#
+# The Job is intentionally separate from the Deployment so that:
+#   - migrations run exactly once per deploy, not once per replica;
+#   - a failed migration blocks the rollout before any app pods restart;
+#   - ArgoCD can be configured to run this as a PreSync hook (see annotations).
+#
+# To wire this into ArgoCD as a PreSync hook, uncomment the annotation block
+# in metadata.annotations below.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: osint-migrate
+  namespace: osint
+  labels:
+    app: osint-migrate
+  # annotations:
+  #   argocd.argoproj.io/hook: PreSync
+  #   argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: osint-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: harbor.corbello.io/osint/osint-core-api:latest  # overridden by kustomize
+          command: ["alembic", "upgrade", "head"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: osint-secrets
+                  key: DATABASE_URL
