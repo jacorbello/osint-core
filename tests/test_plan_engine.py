@@ -223,3 +223,13 @@ def test_validate_cyber_threat_intel_yaml():
     assert result.is_valid, f"Errors: {result.errors}"
     assert result.parsed["version"] == 2
     assert result.parsed["plan_type"] == "child"
+
+
+def test_validate_austin_terror_watch_yaml():
+    """austin-terror-watch.yaml must pass validation with updated recency."""
+    engine = PlanEngine()
+    plan_path = Path(__file__).resolve().parents[1] / "plans" / "austin-terror-watch.yaml"
+    yaml_str = plan_path.read_text()
+    result = engine.validate_yaml(yaml_str)
+    assert result.is_valid, f"Errors: {result.errors}"
+    assert result.parsed["scoring"]["recency_half_life_hours"] == 168
