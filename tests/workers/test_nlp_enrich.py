@@ -52,7 +52,7 @@ async def test_generates_summary_for_empty():
     }
     event.metadata_ = {}
 
-    ollama_response = {
+    llm_response = {
         "summary": "A bombing incident occurred in downtown Austin.",
         "relevance": "relevant",
         "entities": [{"name": "Austin", "type": "location"}],
@@ -63,7 +63,7 @@ async def test_generates_summary_for_empty():
 
     with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
          patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf, \
-         patch("osint_core.workers.nlp_enrich._call_ollama", return_value=ollama_response):
+         patch("osint_core.workers.nlp_enrich._call_llm", return_value=llm_response):
         mock_sf.return_value = MagicMock(return_value=session)
         result = await _enrich_event_async("event-123")
         assert result["status"] == "enriched"
@@ -72,7 +72,7 @@ async def test_generates_summary_for_empty():
 
 
 @pytest.mark.asyncio
-async def test_fallback_on_ollama_timeout():
+async def test_fallback_on_llm_timeout():
     event = MagicMock()
     event.id = "event-123"
     event.title = "Some article"
@@ -91,7 +91,7 @@ async def test_fallback_on_ollama_timeout():
 
     with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
          patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf, \
-         patch("osint_core.workers.nlp_enrich._call_ollama", side_effect=TimeoutError):
+         patch("osint_core.workers.nlp_enrich._call_llm", side_effect=TimeoutError):
         mock_sf.return_value = MagicMock(return_value=session)
         result = await _enrich_event_async("event-123")
         assert result["status"] == "fallback"
