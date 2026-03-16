@@ -22,13 +22,13 @@ def _table_exists(bind, schema: str, table: str) -> bool:
     return bind.dialect.has_table(bind, table, schema=schema)
 
 
-def _index_exists(bind, index: str) -> bool:
+def _index_exists(bind, index: str, schema: str = "osint") -> bool:
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
-            " WHERE c.relname = :name AND c.relkind = 'i'"
+            " WHERE c.relname = :name AND n.nspname = :schema AND c.relkind = 'i'"
         ),
-        {"name": index},
+        {"name": index, "schema": schema},
     )
     return result.fetchone() is not None
 
@@ -261,17 +261,16 @@ def upgrade() -> None:
 
     # FTS generated column — SQLAlchemy cannot model GENERATED ALWAYS AS directly,
     # so we convert the plain tsvector column into a stored generated column.
-    # These statements are safe to re-run: the column type set and drop/re-add are
-    # guarded by checking whether the column is already a generated column.
-    result = bind.execute(
+    # Guard: only proceed if search_vector column exists and is not already generated.
+    sv_result = bind.execute(
         sa.text(
-            "SELECT 1 FROM information_schema.columns"
+            "SELECT is_generated FROM information_schema.columns"
             " WHERE table_schema = 'osint' AND table_name = 'events'"
             " AND column_name = 'search_vector'"
-            " AND is_generated = 'ALWAYS'"
         )
     )
-    if result.fetchone() is None:
+    sv_row = sv_result.fetchone()
+    if sv_row is not None and sv_row[0] != "ALWAYS":
         op.execute(
             """
             ALTER TABLE osint.events
