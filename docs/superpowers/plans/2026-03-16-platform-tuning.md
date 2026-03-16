@@ -27,14 +27,19 @@ In `src/osint_core/models/event.py`, add after `metadata_` column (~line 130):
 ```python
     simhash: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     canonical_event_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("events.id"), nullable=True,
+        ForeignKey("osint.events.id"), nullable=True,
     )
     corroboration_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     nlp_relevance: Mapped[str | None] = mapped_column(Text, nullable=True)
     nlp_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fatalities: Mapped[int | None] = mapped_column(Integer, nullable=True)
 ```
 
 Add import for `BigInteger, Integer` from sqlalchemy if not present.
+Also add `event_subtype` to the `RawItem` dataclass in `src/osint_core/connectors/base.py` (after `event_type`):
+```python
+    event_subtype: str | None = None
+```
 
 - [ ] **Step 2: Generate alembic migration**
 
@@ -46,7 +51,7 @@ Verify the generated migration adds the 5 columns and the index on `simhash`.
 
 ```bash
 git add src/osint_core/models/event.py migrations/
-git commit -m "feat(models): add simhash, canonical_event_id, corroboration, NLP columns to Event"
+git commit -m "feat(models): add simhash, canonical_event_id, corroboration, NLP, fatalities columns; add event_subtype to RawItem"
 ```
 
 ---
@@ -616,9 +621,42 @@ def _get_field_value(event, field: str):
     return None
 ```
 
-- [ ] **Step 5: Fix existing score tests for new formula**
+- [ ] **Step 5: Add tests for severity promotions**
 
-Update test expectations in `tests/workers/test_score.py` to expect 0-1 scores and new severity labels. The high-reputation mock values need to produce scores within the new thresholds.
+Add to `tests/workers/test_score.py`:
+
+```python
+def test_apply_promotions_elevates_severity():
+    event = MagicMock(source_id="cisa_kev", severity="medium")
+    event.indicators = []
+    plan = {"scoring": {"severity_promotions": [
+        {"condition": {"field": "source_id", "op": "eq", "value": "cisa_kev"}, "promote_to": "high"},
+    ]}}
+    result = _apply_promotions(event, "medium", plan)
+    assert result == "high"
+
+def test_apply_promotions_never_downgrades():
+    event = MagicMock(source_id="other", severity="high")
+    event.indicators = []
+    plan = {"scoring": {"severity_promotions": [
+        {"condition": {"field": "source_id", "op": "eq", "value": "other"}, "promote_to": "low"},
+    ]}}
+    result = _apply_promotions(event, "high", plan)
+    assert result == "high"
+
+def test_evaluate_condition_operators():
+    event = MagicMock(severity="high", source_id="test")
+    assert _evaluate_condition(event, {"field": "severity", "op": "eq", "value": "high"})
+    assert not _evaluate_condition(event, {"field": "severity", "op": "neq", "value": "high"})
+    assert _evaluate_condition(event, {"field": "source_id", "op": "contains", "value": "tes"})
+    assert _evaluate_condition(event, {"field": "source_id", "op": "in", "value": ["test", "other"]})
+```
+
+- [ ] **Step 6: Fix existing score tests for new formula**
+
+Update test expectations in `tests/workers/test_score.py` to expect 0-1 scores and new severity labels. The high-reputation mock values need to produce scores within the new thresholds. Also grep for any other callers of `score_event` that need updating:
+
+Run: `cd /Users/jacorbello/repos/osint-core && grep -rn "score_event(" src/ tests/ --include="*.py" | grep -v "score_event_task"`
 
 - [ ] **Step 6: Run all score tests**
 
@@ -881,6 +919,10 @@ class GdeltConnector(BaseConnector):
             "maxrecords": str(self.config.extra.get("maxrecords", "100")),
             "format": "json",
         }
+        # lookback_hours -> GDELT timespan parameter (in minutes)
+        lookback_hours = self.config.extra.get("lookback_hours", 4)
+        params["timespan"] = f"{int(lookback_hours * 60)}min"
+        # Allow explicit timespan override
         timespan = self.config.extra.get("timespan")
         if timespan:
             params["timespan"] = timespan
@@ -1003,19 +1045,19 @@ git commit -m "feat(ingest): enforce max_items cap and minimum content threshold
 ### Task 7: NLP Enrich Celery Task
 
 **Files:**
-- Create: `src/osint_core/workers/enrich.py`
-- Create: `tests/workers/test_enrich.py`
+- Create: `src/osint_core/workers/nlp_enrich.py`
+- Create: `tests/workers/test_nlp_enrich.py`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `tests/workers/test_enrich.py`:
+Create `tests/workers/test_nlp_enrich.py`:
 
 ```python
 """Tests for NLP enrichment task."""
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from osint_core.workers.enrich import _enrich_event_async
+from osint_core.workers.nlp_enrich import _enrich_event_async
 
 
 @pytest.mark.asyncio
@@ -1056,7 +1098,7 @@ async def test_generates_summary_for_empty(mock_db_session):
         "entities": [{"name": "Austin", "type": "location"}],
     }
 
-    with patch("osint_core.workers.enrich._call_ollama", return_value=ollama_response):
+    with patch("osint_core.workers.nlp_enrich._call_ollama", return_value=ollama_response):
         result = await _enrich_event_async("event-123")
 
     assert result["status"] == "enriched"
@@ -1080,7 +1122,7 @@ async def test_fallback_on_ollama_timeout(mock_db_session):
     }
     mock_db_session.get = AsyncMock(return_value=event)
 
-    with patch("osint_core.workers.enrich._call_ollama", side_effect=TimeoutError):
+    with patch("osint_core.workers.nlp_enrich._call_ollama", side_effect=TimeoutError):
         result = await _enrich_event_async("event-123")
 
     assert result["status"] == "fallback"
@@ -1088,14 +1130,18 @@ async def test_fallback_on_ollama_timeout(mock_db_session):
 
 - [ ] **Step 2: Run tests to verify failure**
 
-Run: `cd /Users/jacorbello/repos/osint-core && python -m pytest tests/workers/test_enrich.py -v`
+Run: `cd /Users/jacorbello/repos/osint-core && python -m pytest tests/workers/test_nlp_enrich.py -v`
 
 - [ ] **Step 3: Implement enrich worker**
 
-Create `src/osint_core/workers/enrich.py`:
+Create `src/osint_core/workers/nlp_enrich.py`:
 
 ```python
-"""NLP enrichment task using Ollama/LLaMA for summary, relevance, entities."""
+"""NLP enrichment task using Ollama/LLaMA for summary, relevance, entities.
+
+NOTE: This file is src/osint_core/workers/nlp_enrich.py — separate from
+the existing enrich.py which contains vectorize_event_task and correlate_event_task.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -1103,9 +1149,12 @@ import json
 import logging
 
 import httpx
-from celery import shared_task
+from sqlalchemy import NullPool
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from osint_core.config import get_settings
+from osint_core.celery_app import celery_app
+from osint_core.config import settings
+from osint_core.models.event import Event
 
 logger = logging.getLogger(__name__)
 
@@ -1124,10 +1173,9 @@ Respond with exactly this JSON structure:
 
 async def _call_ollama(prompt: str) -> dict:
     """Call Ollama API with timeout."""
-    settings = get_settings()
-    url = f"{settings.OSINT_OLLAMA_URL}/api/generate"
+    url = f"{settings.ollama_url}/api/generate"
     payload = {
-        "model": settings.OSINT_OLLAMA_MODEL,
+        "model": settings.ollama_model,
         "prompt": prompt,
         "stream": False,
         "format": "json",
@@ -1141,22 +1189,18 @@ async def _call_ollama(prompt: str) -> dict:
 
 async def _enrich_event_async(event_id: str) -> dict:
     """Enrich a single event with NLP classification."""
-    from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-    from osint_core.config import get_settings
-    from osint_core.models import Event
-
-    settings = get_settings()
-    engine = create_async_engine(settings.OSINT_DATABASE_URL, pool_class=None)
+    engine = create_async_engine(settings.database_url, poolclass=NullPool)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with session_factory() as db:
-        event = await db.get(Event, event_id, options=[])
+        event = await db.get(Event, event_id)
         if event is None:
+            await engine.dispose()
             return {"event_id": event_id, "status": "not_found"}
 
         # Skip if already enriched
         if event.nlp_relevance and event.nlp_summary:
+            await engine.dispose()
             return {"event_id": event_id, "status": "skipped"}
 
         # Check if plan has enrichment enabled
@@ -1166,6 +1210,7 @@ async def _enrich_event_async(event_id: str) -> dict:
 
         enrichment = plan_content.get("enrichment", {})
         if not enrichment.get("nlp_enabled", False):
+            await engine.dispose()
             return {"event_id": event_id, "status": "nlp_disabled"}
 
         mission = enrichment.get("mission", "")
@@ -1182,6 +1227,7 @@ async def _enrich_event_async(event_id: str) -> dict:
             result = await _call_ollama(prompt)
         except (TimeoutError, httpx.TimeoutException, httpx.HTTPError, json.JSONDecodeError) as e:
             logger.warning("NLP enrichment fallback for %s: %s", event_id, e)
+            await engine.dispose()
             return {"event_id": event_id, "status": "fallback"}
 
         if not event.summary and result.get("summary"):
@@ -1197,7 +1243,7 @@ async def _enrich_event_async(event_id: str) -> dict:
     return {"event_id": event_id, "status": "enriched"}
 
 
-@shared_task(name="osint.nlp_enrich_event", bind=True, max_retries=1)
+@celery_app.task(bind=True, name="osint.nlp_enrich_event", max_retries=1)  # type: ignore[untyped-decorator]
 def nlp_enrich_task(self, event_id: str) -> dict:
     """Celery task wrapper for NLP enrichment."""
     try:
@@ -1212,12 +1258,12 @@ def nlp_enrich_task(self, event_id: str) -> dict:
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd /Users/jacorbello/repos/osint-core && python -m pytest tests/workers/test_enrich.py -v`
+Run: `cd /Users/jacorbello/repos/osint-core && python -m pytest tests/workers/test_nlp_enrich.py -v`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/osint_core/workers/enrich.py tests/workers/test_enrich.py
+git add src/osint_core/workers/nlp_enrich.py tests/workers/test_nlp_enrich.py
 git commit -m "feat(enrich): add NLP enrichment task with Ollama for summary, relevance, entities"
 ```
 
@@ -1235,10 +1281,9 @@ Replace the downstream task dispatch (currently 3 independent `.delay()` calls) 
 
 ```python
 from celery import chain, group
-from osint_core.workers.enrich import nlp_enrich_task
+from osint_core.workers.nlp_enrich import nlp_enrich_task
 from osint_core.workers.score import score_event_task
-from osint_core.workers.vectorize import vectorize_event_task
-from osint_core.workers.correlate import correlate_event_task
+from osint_core.workers.enrich import vectorize_event_task, correlate_event_task
 
 for eid in new_event_ids:
     chain(
@@ -1421,6 +1466,48 @@ git commit -m "feat(dedup): add SimHash near-duplicate detection with corroborat
 
 ---
 
+### Task 9b: Indicator-Based Dedup (CVE/IOC Linking)
+
+**Files:**
+- Modify: `src/osint_core/workers/ingest.py`
+
+- [ ] **Step 1: After SimHash check, add indicator-based dedup**
+
+In `_ingest_source_async`, after the SimHash near-dedup block:
+
+```python
+# Indicator-based dedup: link events sharing CVE/IOC values
+if not event.canonical_event_id and event_indicators:
+    for ind in event_indicators:
+        if ind.type in ("cve", "ip", "domain", "sha256"):
+            existing_stmt = (
+                select(event_indicators_table.c.event_id)
+                .where(event_indicators_table.c.indicator_id == ind.id)
+                .where(event_indicators_table.c.event_id != event.id)
+                .limit(1)
+            )
+            row = (await db.execute(existing_stmt)).first()
+            if row:
+                event.canonical_event_id = row[0]
+                canonical = await db.get(Event, row[0])
+                if canonical:
+                    canonical.corroboration_count = (canonical.corroboration_count or 0) + 1
+                break
+```
+
+- [ ] **Step 2: Run tests**
+
+Run: `cd /Users/jacorbello/repos/osint-core && python -m pytest tests/workers/test_ingest.py -v`
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/osint_core/workers/ingest.py
+git commit -m "feat(dedup): add indicator-based dedup for CVE/IOC linking"
+```
+
+---
+
 ## Chunk 5: Alert Routing & Rules Engine
 
 ### Task 10: Alert Rules Evaluation Engine
@@ -1437,7 +1524,7 @@ Create `tests/services/test_alert_rules.py`:
 """Tests for alert rule evaluation."""
 import pytest
 from unittest.mock import MagicMock
-from osint_core.services.alert_rules import evaluate_rules, AlertRule
+from osint_core.services.alert_rules import evaluate_rules, parse_rules_from_plan, AlertRule
 
 
 def _make_event(severity="high", source_id="cisa_kev", **kwargs):
@@ -1504,6 +1591,37 @@ class TestEvaluateRules:
         ]
         event = _make_event(severity="critical")
         assert len(evaluate_rules(event, rules)) == 2
+
+
+class TestParseRulesFromPlan:
+    def test_parses_new_format(self):
+        plan = {"alerts": {"rules": [
+            {"name": "r1", "condition": {"severity": "high"}, "channels": ["gotify"], "cooldown_minutes": 15},
+        ]}}
+        rules = parse_rules_from_plan(plan)
+        assert len(rules) == 1
+        assert rules[0].name == "r1"
+
+    def test_parses_legacy_notifications_format(self):
+        plan = {"notifications": {"routes": [
+            {"name": "legacy-high", "when": {"severity_gte": "high"}, "dedupe_window_minutes": 60},
+        ]}}
+        rules = parse_rules_from_plan(plan)
+        assert len(rules) == 1
+        assert rules[0].condition == {"severity": {"gte": "high"}}
+        assert rules[0].cooldown_minutes == 60
+
+    def test_combines_new_and_legacy(self):
+        plan = {
+            "alerts": {"rules": [
+                {"name": "new-r", "condition": {"severity": "critical"}, "channels": ["email"], "cooldown_minutes": 10},
+            ]},
+            "notifications": {"routes": [
+                {"name": "old-r", "when": {"severity_gte": "medium"}},
+            ]},
+        }
+        rules = parse_rules_from_plan(plan)
+        assert len(rules) == 2
 ```
 
 - [ ] **Step 2: Implement alert rules engine**
@@ -2300,21 +2418,21 @@ git commit -m "feat(connectors): add NWS weather alert connector with severity m
     params:
       api_key: "${OSINT_OTX_API_KEY}"
       max_items: 50
-    schedule: "0 */4 * * *"
+    schedule_cron: "0 */4 * * *"
 
   - id: mb_recent
     type: abusech_malwarebazaar
     url: https://mb-api.abuse.ch/api/v1/
     params:
       max_items: 50
-    schedule: "30 */4 * * *"
+    schedule_cron: "30 */4 * * *"
 
   - id: feodo_recent
     type: abusech_feodotracker
     url: https://feodotracker.abuse.ch/downloads/ipblocklist_recent.json
     params:
       max_items: 50
-    schedule: "0 */6 * * *"
+    schedule_cron: "0 */6 * * *"
 ```
 
 Add to scoring.source_reputation:
@@ -2331,7 +2449,7 @@ Add to scoring.source_reputation:
     url: https://api.weather.gov/alerts/active
     params:
       zone: TXC453
-    schedule: "*/15 * * * *"
+    schedule_cron: "*/15 * * * *"
 
   - id: acled_us
     type: acled_api
@@ -2341,7 +2459,7 @@ Add to scoring.source_reputation:
       email: "${OSINT_ACLED_EMAIL}"
       country: "United States"
       max_items: 50
-    schedule: "0 */4 * * *"
+    schedule_cron: "0 */4 * * *"
 ```
 
 Add to scoring.source_reputation:
@@ -2359,7 +2477,7 @@ Add to scoring.source_reputation:
       api_key: "${OSINT_ACLED_API_KEY}"
       email: "${OSINT_ACLED_EMAIL}"
       max_items: 100
-    schedule: "0 */4 * * *"
+    schedule_cron: "0 */4 * * *"
 ```
 
 Add to scoring.source_reputation:
@@ -2505,3 +2623,18 @@ Verify:
 - GDELT noise articles score low (info tier)
 
 - [ ] **Step 3: Commit any config adjustments**
+
+---
+
+## Deferred Items (Explicitly Out of Scope)
+
+The following spec items are deferred to avoid scope creep. They can be added as follow-on tasks:
+
+- **RSS `If-Modified-Since` / ETag support** — optimization, not blocking. Feeds work without it.
+- **Structured error reporting via jobs API** — the jobs API already records success/failure. Richer error detail is a polish item.
+- **Digest periodic task** — an existing `compile_digest` task exists in `src/osint_core/workers/digest.py`. The new alert routing config adds a `digest` block but wiring it to Celery Beat is a follow-on.
+
+## Design Deviations
+
+- **NWS severity mapping** — the spec says NWS severity should use `severity_promotions` in plan YAML. The plan instead maps severity directly in the NWS connector (simpler, self-contained). If plan-configurable NWS severity is needed later, this can be refactored.
+- **Corroboration bonus formula** — the plan uses `1.0 + 0.2 * n` (linear, capped at 1.5). The spec said "1.2x per additional source" which could be interpreted as `1.2^n` (exponential). Linear is simpler and the cap at 1.5 makes the practical difference minimal.
