@@ -167,13 +167,27 @@ jobs:
             *)      echo "::error::Unknown matrix.target: ${{ matrix.target }}"; exit 1 ;;
           esac
 
+      - name: Pull image locally (avoids Trivy HTTP/2 stream errors on large layers)
+        run: docker pull "${{ steps.img.outputs.ref }}"
+
       - name: Run Trivy vulnerability scanner (containerized)
         env:
           TRIVY_DB_REPOSITORY: "ghcr.io/aquasecurity/trivy-db"
-          TRIVY_USERNAME: "${{ secrets.HARBOR_USERNAME }}"
-          TRIVY_PASSWORD: "${{ secrets.HARBOR_PASSWORD }}"
         run: |
-          docker run --rm             -e TRIVY_DB_REPOSITORY             -e TRIVY_USERNAME             -e TRIVY_PASSWORD             -v "$PWD:/workspace"             aquasec/trivy:0.56.1 image             --timeout 15m0s             --skip-dirs "usr/local/lib/python3.12/site-packages/torch"             --format sarif             --output /workspace/trivy-results-${{ matrix.target }}.sarif             --severity HIGH,CRITICAL             --ignore-unfixed             --exit-code 1             --ignorefile /workspace/.trivyignore             "${{ steps.img.outputs.ref }}"
+          docker run --rm \
+            -e TRIVY_DB_REPOSITORY \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/workspace" \
+            aquasec/trivy:0.56.1 image \
+              --timeout 15m0s \
+              --skip-dirs "usr/local/lib/python3.12/site-packages/torch" \
+              --format sarif \
+              --output /workspace/trivy-results-${{ matrix.target }}.sarif \
+              --severity HIGH,CRITICAL \
+              --ignore-unfixed \
+              --exit-code 1 \
+              --ignorefile /workspace/.trivyignore \
+              "${{ steps.img.outputs.ref }}"
 
       - name: Upload Trivy scan to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
