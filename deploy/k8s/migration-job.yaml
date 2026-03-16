@@ -28,6 +28,7 @@ metadata:
   #   argocd.argoproj.io/hook: PreSync
   #   argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
+  activeDeadlineSeconds: 300
   ttlSecondsAfterFinished: 300
   backoffLimit: 2
   template:
@@ -40,6 +41,13 @@ spec:
         - name: migrate
           image: harbor.corbello.io/osint/osint-core-api:latest  # overridden by kustomize
           command: ["alembic", "upgrade", "head"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           env:
             - name: OSINT_DATABASE_URL
               valueFrom:

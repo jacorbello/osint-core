@@ -31,10 +31,18 @@ def upgrade() -> None:
         sa.Column(
             "canonical_event_id",
             sa.UUID(as_uuid=True),
-            sa.ForeignKey("osint.events.id"),
             nullable=True,
         ),
         schema="osint",
+    )
+    op.create_foreign_key(
+        "fk_events_canonical_event_id",
+        "events",
+        "events",
+        ["canonical_event_id"],
+        ["id"],
+        source_schema="osint",
+        referent_schema="osint",
     )
     op.add_column(
         "events",
@@ -75,5 +83,8 @@ def downgrade() -> None:
     op.drop_column("events", "nlp_summary", schema="osint")
     op.drop_column("events", "nlp_relevance", schema="osint")
     op.drop_column("events", "corroboration_count", schema="osint")
+    op.drop_constraint(
+        "fk_events_canonical_event_id", "events", schema="osint"
+    )
     op.drop_column("events", "canonical_event_id", schema="osint")
     op.drop_column("events", "simhash", schema="osint")
