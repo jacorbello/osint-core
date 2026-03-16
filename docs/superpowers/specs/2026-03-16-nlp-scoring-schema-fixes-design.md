@@ -62,11 +62,23 @@ The prompt content stays identical — just restructured from a single `prompt` 
 
 All internal references renamed: `_call_ollama` to `_call_llm`, `settings.ollama_*` to `settings.llm_*`.
 
+**`src/osint_core/services/brief_generator.py`**
+
+The BriefGenerator class also calls Ollama's `/api/generate` directly (line 117) and takes `ollama_url`/`ollama_model`/`ollama_available` constructor args. Rename to `llm_url`/`llm_model`/`llm_available` and rewrite `generate_from_ollama` → `generate_from_llm` to use the same OpenAI-compatible chat completions format. The template fallback path is unchanged.
+
+**`src/osint_core/api/routes/briefs.py`**
+
+Update the generate endpoint to pass `settings.llm_url`/`settings.llm_model` to BriefGenerator and set `generated_by="llm"` instead of `"ollama"`.
+
 **`tests/workers/test_nlp_enrich.py`**
 
 Update mocks to match:
 - New URL path (`/v1/chat/completions` instead of `/api/generate`)
 - New response format (OpenAI chat completions instead of Ollama native)
+
+**Brief generator tests** (`tests/test_brief_generator.py`, `tests/test_api_routes.py`, `tests/integration/test_pipeline.py`)
+
+Update constructor calls and mocks to use renamed `llm_*` parameters and the new API format.
 
 ### 3. Celery configuration fix
 
@@ -86,8 +98,13 @@ Routes NLP tasks to the `enrich` queue alongside vectorize/correlate. The existi
 | 3 | `plans/austin-terror-watch.yaml` | Edit — recency 12 to 168 |
 | 4 | `src/osint_core/config.py` | Edit — replace ollama settings with llm settings |
 | 5 | `src/osint_core/workers/nlp_enrich.py` | Edit — rewrite to OpenAI chat completions format |
-| 6 | `src/osint_core/workers/celery_app.py` | Edit — add nlp_enrich include + route |
-| 7 | `tests/workers/test_nlp_enrich.py` | Edit — update mocked URL and response format |
+| 6 | `src/osint_core/services/brief_generator.py` | Edit — rename ollama refs to llm, rewrite to OpenAI format |
+| 7 | `src/osint_core/api/routes/briefs.py` | Edit — use llm settings, update generated_by |
+| 8 | `src/osint_core/workers/celery_app.py` | Edit — add nlp_enrich include + route |
+| 9 | `tests/workers/test_nlp_enrich.py` | Edit — update mocked URL and response format |
+| 10 | `tests/test_brief_generator.py` | Edit — update constructor args and mocks |
+| 11 | `tests/test_api_routes.py` | Edit — update ollama references |
+| 12 | `tests/integration/test_pipeline.py` | Edit — update BriefGenerator constructor |
 
 ## Out of scope (post-deploy operational tasks)
 
