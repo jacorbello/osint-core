@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,6 +17,27 @@ from osint_core.schemas.event import EventList, EventResponse
 
 router = APIRouter(prefix="/api/v1/events", tags=["events"])
 
+_SORT_FIELDS = {
+    "ingested_at": Event.ingested_at,
+    "occurred_at": Event.occurred_at,
+    "score": Event.score,
+}
+
+
+def _parse_sort(sort: str | None) -> Any:
+    """Parse a sort parameter like '-score' or 'ingested_at' into an ORDER BY clause."""
+    if sort is None:
+        return Event.ingested_at.desc()
+
+    descending = sort.startswith("-")
+    field_name = sort.lstrip("-")
+    column = _SORT_FIELDS.get(field_name)
+    if column is None:
+        # Unknown sort field — fall back to default
+        return Event.ingested_at.desc()
+
+    return column.desc().nullslast() if descending else column.asc().nullsfirst()
+
 
 @router.get("", response_model=EventList)
 async def list_events(
@@ -25,6 +47,12 @@ async def list_events(
     severity: str | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
+    sort: str | None = Query(
+        default=None,
+        description="Sort field. Prefix with '-' for descending. "
+                    "Supported: ingested_at, occurred_at, score. "
+                    "Example: -score returns highest scores first.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
 ) -> EventList:
@@ -45,7 +73,7 @@ async def list_events(
         stmt = stmt.where(Event.ingested_at <= date_to)
         count_stmt = count_stmt.where(Event.ingested_at <= date_to)
 
-    stmt = stmt.order_by(Event.ingested_at.desc()).limit(limit).offset(offset)
+    stmt = stmt.order_by(_parse_sort(sort)).limit(limit).offset(offset)
 
     result = await db.execute(stmt)
     items = list(result.scalars().all())

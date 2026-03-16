@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from osint_core.workers.score import _severity_gte, score_event_task
+from osint_core.workers.score import _severity_gte, rescore_all_events_task, score_event_task
 
 # ---------------------------------------------------------------------------
 # _severity_gte helper
@@ -59,14 +59,22 @@ def _make_event(
     return event
 
 
-def _make_db_session(event: Any | None) -> AsyncMock:
-    """Return a mock async session that yields the provided event on first execute."""
+def _make_db_session(event: Any | None, plan: Any | None = None) -> AsyncMock:
+    """Return a mock async session.
+
+    The first execute returns the event; subsequent executes return plan (None by
+    default so that plan-version lookups don't inject unexpected MagicMocks).
+    """
     db = AsyncMock()
 
-    scalar_result = MagicMock()
-    scalar_result.scalar_one_or_none.return_value = event
+    event_result = MagicMock()
+    event_result.scalar_one_or_none.return_value = event
 
-    db.execute = AsyncMock(return_value=scalar_result)
+    plan_result = MagicMock()
+    plan_result.scalar_one_or_none.return_value = plan
+
+    # First call -> event; all subsequent calls -> plan (usually None)
+    db.execute = AsyncMock(side_effect=[event_result, plan_result, plan_result, plan_result])
     db.commit = AsyncMock()
     db.add = MagicMock()
 
@@ -93,6 +101,10 @@ def test_score_event_task_is_bound():
     assert score_event_task.__bound__ is True
 
 
+def test_rescore_all_events_task_registered():
+    assert rescore_all_events_task.name == "osint.rescore_all_events"
+
+
 # ---------------------------------------------------------------------------
 # Missing event
 # ---------------------------------------------------------------------------
@@ -117,7 +129,7 @@ def test_score_event_missing_event():
 
 def test_score_event_low_severity():
     """A very old event with no IOCs from an unknown source should score low."""
-    old_time = datetime(2020, 1, 1, tzinfo=UTC)  # many years ago → near-zero score
+    old_time = datetime(2020, 1, 1, tzinfo=UTC)  # many years ago -> near-zero score
     event = _make_event(occurred_at=old_time, source_id="obscure_feed")
 
     db = _make_db_session(event=event)
@@ -156,12 +168,14 @@ def test_score_event_high_severity():
     event.plan_version_id = uuid.uuid4()
 
     db = AsyncMock()
-    # First call: event lookup; second call: plan version lookup
+    # Calls: event lookup, stored_version lookup, active_version lookup
     event_result = MagicMock()
     event_result.scalar_one_or_none.return_value = event
-    plan_result = MagicMock()
-    plan_result.scalar_one_or_none.return_value = plan
-    db.execute = AsyncMock(side_effect=[event_result, plan_result])
+    stored_version_result = MagicMock()
+    stored_version_result.scalar_one_or_none.return_value = plan
+    active_version_result = MagicMock()
+    active_version_result.scalar_one_or_none.return_value = plan
+    db.execute = AsyncMock(side_effect=[event_result, stored_version_result, active_version_result])
     db.commit = AsyncMock()
     db.add = MagicMock()
     db.__aenter__ = AsyncMock(return_value=db)
@@ -214,6 +228,7 @@ def test_score_event_chains_notification_on_force_alert():
     event.entities = []
 
     plan = MagicMock()
+    plan.plan_id = uuid.uuid4()
     plan.content = {
         "scoring": {
             "recency_half_life_hours": 48,
@@ -226,12 +241,16 @@ def test_score_event_chains_notification_on_force_alert():
     db = AsyncMock()
     event_result = MagicMock()
     event_result.scalar_one_or_none.return_value = event
-    plan_result = MagicMock()
-    plan_result.scalar_one_or_none.return_value = plan
+    stored_version_result = MagicMock()
+    stored_version_result.scalar_one_or_none.return_value = plan
+    active_version_result = MagicMock()
+    active_version_result.scalar_one_or_none.return_value = plan
     alert_result = MagicMock()
     alert_result.scalar_one_or_none.return_value = None
 
-    db.execute = AsyncMock(side_effect=[event_result, plan_result, alert_result])
+    db.execute = AsyncMock(
+        side_effect=[event_result, stored_version_result, active_version_result, alert_result]
+    )
     db.commit = AsyncMock()
     db.add = MagicMock()
     db.__aenter__ = AsyncMock(return_value=db)

@@ -9,12 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from osint_core.api.deps import get_db
+from osint_core.api.deps import get_current_user, get_db
+from osint_core.api.middleware.auth import UserInfo
 from osint_core.config import settings
 from osint_core.models.plan import PlanVersion
 from osint_core.schemas.plan import PlanValidationResult, PlanVersionResponse
 from osint_core.services.plan_engine import PlanEngine
 from osint_core.services.plan_store import PlanStore
+from osint_core.workers.score import rescore_all_events_task
 
 logger = structlog.get_logger()
 
@@ -141,6 +143,26 @@ async def activate_plan(
         "plan_id": activated.plan_id,
         "activated_version": activated.version,
     }
+
+
+@router.post("/rescore")
+async def rescore_events(
+    plan_id: str | None = Query(
+        default=None,
+        description="Restrict rescore to events from a specific plan_id. "
+                    "If omitted, all events are re-scored.",
+    ),
+    current_user: UserInfo = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Enqueue re-scoring of all existing events against the active plan's scoring config.
+
+    Dispatches a Celery task that iterates all events in the database and
+    enqueues a score_event_task for each one.  Useful after activating a new
+    plan version with updated keyword/scoring configuration.
+    """
+    task = rescore_all_events_task.delay(plan_id)
+    logger.info("rescore_enqueued", task_id=task.id, plan_id=plan_id)
+    return {"task_id": task.id, "status": "enqueued", "plan_id": plan_id}
 
 
 @router.get("/versions", response_model=list[PlanVersionResponse])
