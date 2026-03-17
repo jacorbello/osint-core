@@ -72,7 +72,7 @@ def test_brief_response_defaults():
             "id": "00000000-0000-0000-0000-000000000005",
             "title": "Weekly Threat Summary",
             "content_md": "# Summary\n\nNo critical threats.",
-            "generated_by": "ollama",
+            "generated_by": "llm",
             "created_at": "2026-03-01T00:00:00Z",
         }
     )
@@ -163,7 +163,9 @@ def test_alert_response():
             "created_at": "2026-03-01T00:00:00Z",
         }
     )
+    assert alert.severity == SeverityEnum.critical
     assert alert.status == StatusEnum.open
+    assert alert.occurrences == 5
 
 
 def test_event_response_includes_geo_fields():

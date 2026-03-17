@@ -1,4 +1,4 @@
-"""NLP enrichment task using Ollama/LLaMA for summary, relevance, entities.
+"""NLP enrichment task using OpenAI-compatible LLM for summary, relevance, entities.
 
 NOTE: This file is separate from enrich.py which contains vectorize_event_task
 and correlate_event_task.
@@ -20,33 +20,35 @@ from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
-_ENRICH_PROMPT = """You are an intelligence analyst. Given this event, respond with JSON only.
+_SYSTEM_MESSAGE = (
+    "You are an intelligence analyst. Respond with JSON only.\n"
+    'Respond with exactly this JSON structure:\n'
+    '{"summary": "1-2 sentence English summary of the event",\n'
+    '"relevance": "relevant|tangential|irrelevant",\n'
+    '"entities": [{"name": "...", "type": "person|organization|location|indicator"}]}'
+)
 
-Event title: {title}
+_USER_TEMPLATE = """Event title: {title}
 Event metadata: {metadata}
 
 Plan mission: {mission}
-Plan keywords: {keywords}
-
-Respond with exactly this JSON structure:
-{{"summary": "1-2 sentence English summary of the event",
-"relevance": "relevant|tangential|irrelevant",
-"entities": [{{"name": "...", "type": "person|organization|location|indicator"}}]}}
-"""
+Plan keywords: {keywords}"""
 
 
-async def _call_ollama(prompt: str) -> dict[str, Any]:
-    url = f"{settings.ollama_url}/api/generate"
+async def _call_llm(system: str, user: str) -> dict[str, Any]:
+    url = f"{settings.llm_url}/v1/chat/completions"
     payload = {
-        "model": settings.ollama_model,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
+        "model": settings.llm_model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "response_format": {"type": "json_object"},
     }
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(url, json=payload)
         resp.raise_for_status()
-    raw = resp.json().get("response", "{}")
+    raw = resp.json()["choices"][0]["message"]["content"]
     result: dict[str, Any] = json.loads(raw)
     return result
 
@@ -77,7 +79,7 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
         mission = enrichment.get("mission", "")
         keywords = plan_content.get("keywords", [])
 
-        prompt = _ENRICH_PROMPT.format(
+        user_msg = _USER_TEMPLATE.format(
             title=event.title or "",
             metadata=json.dumps(event.metadata_ or {}, default=str)[:500],
             mission=mission,
@@ -85,7 +87,7 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
         )
 
         try:
-            result = await _call_ollama(prompt)
+            result = await _call_llm(_SYSTEM_MESSAGE, user_msg)
         except (TimeoutError, httpx.TimeoutException, httpx.HTTPError, json.JSONDecodeError) as e:
             logger.warning("NLP enrichment fallback for %s: %s", event_id, e)
             await engine.dispose()

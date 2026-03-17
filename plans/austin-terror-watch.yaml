@@ -106,7 +106,7 @@ target_geo:
   radius_km: 100
 
 scoring:
-  recency_half_life_hours: 12
+  recency_half_life_hours: 168
   source_reputation:
     gdelt_austin_terror: 0.53
     reliefweb_us: 0.67

@@ -85,8 +85,8 @@ async def create_brief(
 ) -> BriefResponse:
     """Generate and persist a new intelligence brief."""
     generator = BriefGenerator(
-        ollama_url=settings.ollama_url,
-        ollama_model=settings.ollama_model,
+        llm_url=settings.llm_url,
+        llm_model=settings.llm_model,
     )
 
     try:
@@ -108,8 +108,8 @@ async def create_brief(
         title=body.query,
         content_md=content_md,
         target_query=body.query,
-        generated_by="ollama",
-        model_id=settings.ollama_model,
+        generated_by="llm",
+        model_id=settings.llm_model,
         requested_by=current_user.username,
     )
     db.add(brief)
