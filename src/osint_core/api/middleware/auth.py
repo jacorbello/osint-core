@@ -8,21 +8,20 @@ from typing import Any
 
 import httpx
 import structlog
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from osint_core.config import settings
 
 logger = structlog.get_logger()
 
-_bearer_scheme = HTTPBearer(auto_error=False)
-
 # JWKS cache
 _jwks_cache: dict[str, Any] | None = None
 _jwks_cache_expiry: float = 0.0
 _JWKS_CACHE_TTL = 300  # 5 minutes
+_bearer_scheme = HTTPBearer(auto_error=False, scheme_name="BearerAuth")
 
 
 class UserInfo(BaseModel):
@@ -30,7 +29,7 @@ class UserInfo(BaseModel):
 
     sub: str
     username: str
-    roles: list[str] = []
+    roles: list[str] = Field(default_factory=list)
 
 
 _DEFAULT_ADMIN = UserInfo(
@@ -70,7 +69,7 @@ def _extract_roles(payload: dict[str, Any]) -> list[str]:
 
 async def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
 ) -> UserInfo:
     """FastAPI dependency that extracts and validates the Bearer JWT token.
 
@@ -82,14 +81,29 @@ async def get_current_user(
     if settings.auth_disabled:
         return _DEFAULT_ADMIN
 
-    if credentials is None:
+    auth_header = request.headers.get("authorization")
+    if not auth_header:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Authorization header (expected Bearer token)",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    scheme = credentials.scheme
     token = credentials.credentials
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Authorization header (expected Bearer token)",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     try:
         jwks = await _fetch_jwks()

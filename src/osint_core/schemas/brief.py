@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from osint_core.schemas.common import PaginatedResponse
+from osint_core.schemas.common import CollectionResponse
 
 
 class BriefResponse(BaseModel):
@@ -19,9 +19,9 @@ class BriefResponse(BaseModel):
     content_pdf_uri: str | None = None
     target_query: str | None = None
 
-    event_ids: list[uuid.UUID] = []
-    entity_ids: list[uuid.UUID] = []
-    indicator_ids: list[uuid.UUID] = []
+    event_ids: list[uuid.UUID] = Field(default_factory=list)
+    entity_ids: list[uuid.UUID] = Field(default_factory=list)
+    indicator_ids: list[uuid.UUID] = Field(default_factory=list)
 
     generated_by: str
     model_id: str | None = None
@@ -32,11 +32,12 @@ class BriefResponse(BaseModel):
     created_at: datetime
 
 
-class BriefList(PaginatedResponse[BriefResponse]):
+class BriefList(CollectionResponse):
     """Paginated list of briefs."""
+    items: list[BriefResponse]
 
 
-class BriefGenerateRequest(BaseModel):
+class BriefCreateRequest(BaseModel):
     """Request body for generating a new intelligence brief."""
 
     query: str = Field(description="Natural language query describing what the brief should cover")
