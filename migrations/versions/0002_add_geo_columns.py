@@ -4,10 +4,11 @@ Revision ID: 0002
 Revises: 0001
 Create Date: 2026-03-03
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0002"
@@ -38,7 +39,7 @@ def _index_exists(bind, index: str, schema: str = "osint") -> bool:
     return result.fetchone() is not None
 
 
-def upgrade() -> None:
+def _upgrade_online() -> None:
     bind = op.get_bind()
 
     cols = [
@@ -62,12 +63,45 @@ def upgrade() -> None:
         op.create_index("ix_events_source_category", "events", ["source_category"], schema="osint")
 
 
+def _upgrade_offline() -> None:
+    """Emit unconditional DDL for ``alembic upgrade --sql`` mode."""
+    for col_name, col_type in [
+        ("latitude", "FLOAT"),
+        ("longitude", "FLOAT"),
+        ("country_code", "TEXT"),
+        ("region", "TEXT"),
+        ("source_category", "TEXT"),
+        ("actors", "JSONB"),
+        ("event_subtype", "TEXT"),
+    ]:
+        op.execute(f"ALTER TABLE osint.events ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
+
+    op.create_index("ix_events_country_code", "events", ["country_code"], schema="osint")
+    op.create_index("ix_events_region", "events", ["region"], schema="osint")
+    op.create_index("ix_events_source_category", "events", ["source_category"], schema="osint")
+
+
+def upgrade() -> None:
+    if context.is_offline_mode():
+        _upgrade_offline()
+    else:
+        _upgrade_online()
+
+
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS osint.ix_events_source_category")
     op.execute("DROP INDEX IF EXISTS osint.ix_events_region")
     op.execute("DROP INDEX IF EXISTS osint.ix_events_country_code")
 
     bind = op.get_bind()
-    for col in ("event_subtype", "actors", "source_category", "region", "country_code", "longitude", "latitude"):
+    for col in (
+        "event_subtype",
+        "actors",
+        "source_category",
+        "region",
+        "country_code",
+        "longitude",
+        "latitude",
+    ):
         if _column_exists(bind, "osint", "events", col):
             op.drop_column("events", col, schema="osint")

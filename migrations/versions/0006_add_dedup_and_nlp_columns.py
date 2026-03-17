@@ -12,7 +12,7 @@ This revision adds the missing columns.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 revision: str = "0006"
 down_revision: str | None = "0005"
@@ -54,7 +54,7 @@ def _constraint_exists(bind, schema: str, table: str, constraint: str) -> bool:
     return result.fetchone() is not None
 
 
-def upgrade() -> None:
+def _upgrade_online() -> None:
     bind = op.get_bind()
 
     if not _column_exists(bind, "osint", "events", "simhash"):
@@ -126,6 +126,40 @@ def upgrade() -> None:
             ["simhash"],
             schema="osint",
         )
+
+
+def _upgrade_offline() -> None:
+    """Emit unconditional DDL for ``alembic upgrade --sql`` mode."""
+    for col_name, col_type in [
+        ("simhash", "BIGINT"),
+        ("canonical_event_id", "UUID"),
+        ("corroboration_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("nlp_relevance", "TEXT"),
+        ("nlp_summary", "TEXT"),
+        ("fatalities", "INTEGER"),
+    ]:
+        op.execute(f"ALTER TABLE osint.events ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
+
+    op.execute(
+        "ALTER TABLE osint.events"
+        " ADD CONSTRAINT fk_events_canonical_event_id"
+        " FOREIGN KEY (canonical_event_id) REFERENCES osint.events(id)"
+        " NOT VALID"
+    )
+
+    op.create_index(
+        "ix_events_simhash",
+        "events",
+        ["simhash"],
+        schema="osint",
+    )
+
+
+def upgrade() -> None:
+    if context.is_offline_mode():
+        _upgrade_offline()
+    else:
+        _upgrade_online()
 
 
 def downgrade() -> None:

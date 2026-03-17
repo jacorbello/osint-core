@@ -25,11 +25,35 @@ EXPECTED_COLUMNS = [
 ]
 
 
+def _make_mock_op(monkeypatch, *, objects_exist: bool):
+    """Create a mock ``op`` with bind that simulates object (non-)existence."""
+    op = MagicMock()
+
+    bind = MagicMock()
+    fetchone_val = (1,) if objects_exist else None
+    bind.execute.return_value.fetchone.return_value = fetchone_val
+    op.get_bind.return_value = bind
+
+    monkeypatch.setattr(_mod, "op", op)
+
+    # Mock context.is_offline_mode() to return False (online mode)
+    ctx = MagicMock()
+    ctx.is_offline_mode.return_value = False
+    monkeypatch.setattr(_mod, "context", ctx)
+
+    return op
+
+
 @pytest.fixture()
 def mock_op(monkeypatch):
-    op = MagicMock()
-    monkeypatch.setattr(_mod, "op", op)
-    return op
+    """Mock op where all objects are treated as **not existing** (for upgrade)."""
+    return _make_mock_op(monkeypatch, objects_exist=False)
+
+
+@pytest.fixture()
+def mock_op_existing(monkeypatch):
+    """Mock op where all objects are treated as **existing** (for downgrade)."""
+    return _make_mock_op(monkeypatch, objects_exist=True)
 
 
 def test_upgrade_adds_all_columns(mock_op: MagicMock) -> None:
@@ -60,18 +84,18 @@ def test_upgrade_creates_simhash_index(mock_op: MagicMock) -> None:
     )
 
 
-def test_downgrade_drops_constraint_before_column(mock_op: MagicMock) -> None:
+def test_downgrade_drops_constraint_before_column(mock_op_existing: MagicMock) -> None:
     _mod.downgrade()
 
-    mock_op.drop_constraint.assert_called_once_with(
+    mock_op_existing.drop_constraint.assert_called_once_with(
         "fk_events_canonical_event_id", "events", schema="osint"
     )
 
-    dropped = [c.args[1] for c in mock_op.drop_column.call_args_list]
+    dropped = [c.args[1] for c in mock_op_existing.drop_column.call_args_list]
     assert "canonical_event_id" in dropped
 
     # constraint must be dropped before the column
-    all_calls = mock_op.method_calls
+    all_calls = mock_op_existing.method_calls
     constraint_idx = next(
         i for i, c in enumerate(all_calls) if c[0] == "drop_constraint"
     )
@@ -83,9 +107,9 @@ def test_downgrade_drops_constraint_before_column(mock_op: MagicMock) -> None:
     assert constraint_idx < column_idx
 
 
-def test_downgrade_drops_all_columns(mock_op: MagicMock) -> None:
+def test_downgrade_drops_all_columns(mock_op_existing: MagicMock) -> None:
     _mod.downgrade()
 
-    dropped = [c.args[1] for c in mock_op.drop_column.call_args_list]
+    dropped = [c.args[1] for c in mock_op_existing.drop_column.call_args_list]
     for col in EXPECTED_COLUMNS:
         assert col in dropped
