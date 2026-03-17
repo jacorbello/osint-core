@@ -243,8 +243,12 @@ jobs:
   # ── Stage 4: Deploy to K8s via GitOps (main only) ──────────────
   deploy:
     runs-on: [self-hosted, linux, osint-deploy]
-    needs: [build, scan]
-    if: github.ref == 'refs/heads/main' && needs.scan.result == 'success'
+    needs: [build, scan, migrate]
+    if: >-
+      github.ref == 'refs/heads/main'
+      && needs.scan.result == 'success'
+      && needs.migrate.result == 'success'
+      && !inputs.run_migrations
     concurrency:
       group: osint-infra-deploy
       cancel-in-progress: false
