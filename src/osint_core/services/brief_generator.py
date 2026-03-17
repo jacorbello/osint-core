@@ -124,7 +124,18 @@ class BriefGenerator:
             response.raise_for_status()
 
         data = response.json()
-        text: str = data["choices"][0]["message"]["content"]
+        choices = data.get("choices")
+        if not choices or not isinstance(choices, list):
+            raise ValueError(
+                f"Unexpected vLLM response shape: missing or empty 'choices' (got: {list(data.keys())})"
+            )
+        message = choices[0].get("message", {})
+        content = message.get("content")
+        if content is None:
+            raise ValueError(
+                "Unexpected vLLM response shape: 'choices[0].message.content' is absent"
+            )
+        text: str = content
 
         logger.info(
             "brief_generated_from_vllm",
@@ -162,7 +173,7 @@ class BriefGenerator:
             try:
                 context = self._build_context(events, indicators, entities)
                 return await self.generate_from_vllm(query=query, context=context)
-            except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException) as exc:
+            except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException, ValueError) as exc:
                 logger.warning(
                     "vllm_generation_failed_falling_back_to_template",
                     error=str(exc),

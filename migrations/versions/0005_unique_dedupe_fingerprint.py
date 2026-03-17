@@ -16,21 +16,27 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-def _index_exists(bind, index: str) -> bool:
+def _index_exists(bind, index: str, schema: str = "osint") -> bool:
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
-            " WHERE c.relname = :name AND c.relkind = 'i'"
+            " WHERE c.relname = :name AND c.relkind = 'i' AND n.nspname = :schema"
         ),
-        {"name": index},
+        {"name": index, "schema": schema},
     )
     return result.fetchone() is not None
 
 
-def _index_is_unique(bind, index: str) -> bool:
+def _index_is_unique(bind, index: str, schema: str = "osint") -> bool:
     result = bind.execute(
-        sa.text("SELECT indisunique FROM pg_index WHERE indexrelid = :name::regclass"),
-        {"name": f"osint.{index}"},
+        sa.text(
+            "SELECT i.indisunique"
+            " FROM pg_index i"
+            " JOIN pg_class c ON c.oid = i.indexrelid"
+            " JOIN pg_namespace n ON n.oid = c.relnamespace"
+            " WHERE c.relname = :name AND c.relkind = 'i' AND n.nspname = :schema"
+        ),
+        {"name": index, "schema": schema},
     )
     row = result.fetchone()
     return row is not None and row[0]

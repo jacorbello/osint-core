@@ -31,13 +31,13 @@ def _column_exists(bind, schema: str, table: str, column: str) -> bool:
     return result.fetchone() is not None
 
 
-def _index_exists(bind, index: str) -> bool:
+def _index_exists(bind, index: str, schema: str = "osint") -> bool:
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
-            " WHERE c.relname = :name AND c.relkind = 'i'"
+            " WHERE c.relname = :name AND c.relkind = 'i' AND n.nspname = :schema"
         ),
-        {"name": index},
+        {"name": index, "schema": schema},
     )
     return result.fetchone() is not None
 

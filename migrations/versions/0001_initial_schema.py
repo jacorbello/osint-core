@@ -22,13 +22,13 @@ def _table_exists(bind, schema: str, table: str) -> bool:
     return bind.dialect.has_table(bind, table, schema=schema)
 
 
-def _index_exists(bind, index: str) -> bool:
+def _index_exists(bind, index: str, schema: str = "osint") -> bool:
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
-            " WHERE c.relname = :name AND c.relkind = 'i'"
+            " WHERE c.relname = :name AND c.relkind = 'i' AND n.nspname = :schema"
         ),
-        {"name": index},
+        {"name": index, "schema": schema},
     )
     return result.fetchone() is not None
 
@@ -250,19 +250,13 @@ def upgrade() -> None:
             [sa.text("score DESC NULLS LAST")],
             schema="osint",
         )
-    if not _index_exists(bind, "ix_events_search_vector"):
-        op.create_index(
-            "ix_events_search_vector",
-            "events",
-            ["search_vector"],
-            schema="osint",
-            postgresql_using="gin",
-        )
-
     # FTS generated column — SQLAlchemy cannot model GENERATED ALWAYS AS directly,
     # so we convert the plain tsvector column into a stored generated column.
     # These statements are safe to re-run: the column type set and drop/re-add are
     # guarded by checking whether the column is already a generated column.
+    # NOTE: The GIN index on search_vector is created AFTER the column is rebuilt
+    # as a generated column, because DROP COLUMN implicitly drops the index and we
+    # need to recreate it on the final generated column.
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM information_schema.columns"
@@ -298,6 +292,18 @@ def upgrade() -> None:
                 )
               ) STORED;
             """
+        )
+
+    # GIN index on the (re)built generated column — must come after the column
+    # drop/re-add above so we don't create the index on the pre-generated column
+    # only to have it implicitly dropped when the column is recreated.
+    if not _index_exists(bind, "ix_events_search_vector"):
+        op.create_index(
+            "ix_events_search_vector",
+            "events",
+            ["search_vector"],
+            schema="osint",
+            postgresql_using="gin",
         )
 
     # --- event_entities ---
@@ -465,7 +471,7 @@ def upgrade() -> None:
             sa.Column(
                 "generated_by",
                 sa.Text(),
-                server_default=sa.text("'ollama'"),
+                server_default=sa.text("'vllm'"),
                 nullable=False,
             ),
             sa.Column("model_id", sa.Text(), nullable=True),
