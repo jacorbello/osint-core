@@ -9,6 +9,12 @@ on:
       - "**/*.md"
       - "docs/**"
       - "LICENSE"
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: "Run only the migrate job (skip build/scan/deploy)"
+        type: boolean
+        default: false
 
 env:
   IMAGE: harbor.corbello.io/osint/osint-core
@@ -68,7 +74,7 @@ jobs:
   build:
     runs-on: [self-hosted, linux, osint-deploy]
     needs: [lint, test]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !inputs.run_migrations
     outputs:
       digest_api: ${{ steps.build_api.outputs.digest }}
       digest_worker: ${{ steps.build_worker.outputs.digest }}
@@ -150,7 +156,7 @@ jobs:
       fail-fast: false
       matrix:
         target: [api, worker, beat]
-    if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
+    if: github.ref == 'refs/heads/main' && needs.build.result == 'success' && !inputs.run_migrations
     permissions:
       contents: read
       security-events: write
