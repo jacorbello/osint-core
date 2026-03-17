@@ -96,6 +96,20 @@ class PlanStore:
         result = await db.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_version(
+        self,
+        db: AsyncSession,
+        plan_id: str,
+        version_id: UUID,
+    ) -> PlanVersion | None:
+        """Return a specific plan version by plan id and version UUID."""
+        stmt = select(PlanVersion).where(
+            PlanVersion.plan_id == plan_id,
+            PlanVersion.id == version_id,
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def activate(
         self,
         db: AsyncSession,

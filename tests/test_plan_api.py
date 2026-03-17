@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import Response
-from starlette.requests import Request
 
-from osint_core.api.middleware.auth import UserInfo
 from osint_core.api.routes import plan
+from tests.helpers import make_request, make_user, run_async
 
 VALID_PLAN = """
 version: 1
@@ -40,38 +38,6 @@ notifications:
           application: test
           priority: 5
 """
-
-
-def _run(awaitable):
-    return asyncio.run(awaitable)
-
-
-def _request(path: str, body: bytes = b"", method: str = "GET") -> Request:
-    async def receive():
-        return {"type": "http.request", "body": body, "more_body": False}
-
-    return Request(
-        {
-            "type": "http",
-            "asgi": {"version": "3.0"},
-            "http_version": "1.1",
-            "scheme": "http",
-            "method": method,
-            "path": path,
-            "raw_path": path.encode(),
-            "query_string": b"",
-            "headers": [],
-            "client": ("testclient", 50000),
-            "server": ("testserver", 80),
-        },
-        receive=receive,
-    )
-
-
-def _user() -> UserInfo:
-    return UserInfo(sub="u-1", username="admin", roles=["admin"])
-
-
 def _mock_plan(**overrides):
     now = datetime.now(UTC)
     defaults = {
@@ -104,31 +70,31 @@ def _db():
 
 
 def test_validate_plan_endpoint():
-    request = _request("/api/v1/plans:validate", body=VALID_PLAN.encode(), method="POST")
-    result = _run(plan.validate_plan(request))
+    request = make_request("/api/v1/plans:validate", body=VALID_PLAN.encode(), method="POST")
+    result = run_async(plan.validate_plan(request))
     assert result["is_valid"] is True
 
 
 def test_validate_plan_endpoint_invalid_yaml():
-    request = _request("/api/v1/plans:validate", body=b"not: valid: yaml: [[", method="POST")
-    result = _run(plan.validate_plan(request))
+    request = make_request("/api/v1/plans:validate", body=b"not: valid: yaml: [[", method="POST")
+    result = run_async(plan.validate_plan(request))
     assert result["is_valid"] is False
 
 
 def test_list_active_plans():
     with patch("osint_core.api.routes.plan.store.get_all_active", AsyncMock(return_value=[_mock_plan()])):
-        result = _run(plan.list_active_plans(limit=50, offset=0, db=_db(), current_user=_user()))
+        result = run_async(plan.list_active_plans(limit=50, offset=0, db=_db(), current_user=make_user()))
     assert result.items[0].plan_id == "test-plan"
 
 
 def test_get_active_plan():
     with patch("osint_core.api.routes.plan.store.get_active", AsyncMock(return_value=_mock_plan())):
-        result = _run(
+        result = run_async(
             plan.get_active_plan(
                 "test-plan",
-                request=_request("/api/v1/plans/test-plan/active-version"),
+                request=make_request("/api/v1/plans/test-plan/active-version"),
                 db=_db(),
-                current_user=_user(),
+                current_user=make_user(),
             )
         )
     assert result.plan_id == "test-plan"
@@ -138,13 +104,28 @@ def test_update_active_plan_with_version_id():
     plan_version = _mock_plan()
     db = _db()
     with patch("osint_core.api.routes.plan.store.activate", AsyncMock(return_value=plan_version)):
-        result = _run(
+        result = run_async(
             plan.update_active_plan(
                 "test-plan",
                 body=plan.PlanActivationRequest(version_id=plan_version.id),
-                request=_request("/api/v1/plans/test-plan/active-version", method="PATCH"),
+                request=make_request("/api/v1/plans/test-plan/active-version", method="PATCH"),
                 db=db,
-                current_user=_user(),
+                current_user=make_user(),
+            )
+        )
+    assert result.id == plan_version.id
+
+
+def test_get_plan_version_uses_direct_lookup():
+    plan_version = _mock_plan()
+    with patch("osint_core.api.routes.plan.store.get_version", AsyncMock(return_value=plan_version)):
+        result = run_async(
+            plan.get_plan_version(
+                "test-plan",
+                plan_version.id,
+                request=make_request(f"/api/v1/plans/test-plan/versions/{plan_version.id}"),
+                db=_db(),
+                current_user=make_user(),
             )
         )
     assert result.id == plan_version.id
@@ -157,13 +138,13 @@ def test_create_plan_version():
     with patch("osint_core.api.routes.plan.store.get_next_version", AsyncMock(return_value=1)):
         with patch("osint_core.api.routes.plan.store.store_version", AsyncMock(return_value=plan_version)):
             with patch("osint_core.api.routes.plan.store.activate", AsyncMock(return_value=plan_version)):
-                result = _run(
+                result = run_async(
                     plan.create_plan(
                         body=plan.PlanCreateRequest(yaml=VALID_PLAN, activate=True),
-                        request=_request("/api/v1/plans", method="POST"),
+                        request=make_request("/api/v1/plans", method="POST"),
                         response=response,
                         db=db,
-                        current_user=_user(),
+                current_user=make_user(),
                     )
                 )
     assert result.id == plan_version.id

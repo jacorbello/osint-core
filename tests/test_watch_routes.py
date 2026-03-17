@@ -2,44 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import Response
-from starlette.requests import Request
 
-from osint_core.api.middleware.auth import UserInfo
 from osint_core.api.routes import watches
 from osint_core.models.watch import Watch
-
-
-def _run(awaitable):
-    return asyncio.run(awaitable)
-
-
-def _request(path: str, method: str = "GET") -> Request:
-    return Request(
-        {
-            "type": "http",
-            "asgi": {"version": "3.0"},
-            "http_version": "1.1",
-            "scheme": "http",
-            "method": method,
-            "path": path,
-            "raw_path": path.encode(),
-            "query_string": b"",
-            "headers": [],
-            "client": ("testclient", 50000),
-            "server": ("testserver", 80),
-        }
-    )
-
-
-def _user() -> UserInfo:
-    return UserInfo(sub="u-1", username="admin", roles=["admin"])
+from tests.helpers import make_request, make_user, run_async
 
 
 def _mock_db():
@@ -114,13 +86,13 @@ class TestWatchRoutes:
                 setattr(obj, key, value)
 
         db.refresh = refresh
-        result = _run(
+        result = run_async(
             watches.create_watch(
                 body=watches.WatchCreateRequest(name="new-watch", region="Eastern Europe", severity_threshold="low"),
-                request=_request("/api/v1/watches", method="POST"),
+                request=make_request("/api/v1/watches", method="POST"),
                 response=response,
                 db=db,
-                current_user=_user(),
+                current_user=make_user(),
             )
         )
         assert response.headers["Location"].endswith(str(watch.id))
@@ -129,12 +101,12 @@ class TestWatchRoutes:
     def test_get_watch_not_found(self):
         db = _mock_db()
         db.execute = AsyncMock(return_value=_mock_single_result(None))
-        result = _run(
+        result = run_async(
             watches.get_watch(
                 uuid.uuid4(),
-                request=_request("/api/v1/watches/missing"),
+                request=make_request("/api/v1/watches/missing"),
                 db=db,
-                current_user=_user(),
+                current_user=make_user(),
             )
         )
         assert result.status_code == 404
@@ -144,13 +116,30 @@ class TestWatchRoutes:
         watch = _make_watch()
         db = _mock_db()
         db.execute = AsyncMock(return_value=_mock_single_result(watch))
-        result = _run(
+        result = run_async(
             watches.delete_watch(
                 watch.id,
-                request=_request(f"/api/v1/watches/{watch.id}", method="DELETE"),
+                request=make_request(f"/api/v1/watches/{watch.id}", method="DELETE"),
                 db=db,
-                current_user=_user(),
+                current_user=make_user(),
             )
         )
         assert result is None
         db.delete.assert_awaited_once()
+
+    def test_update_watch_clears_expiry_when_ttl_removed(self):
+        watch = _make_watch(ttl_hours=4, expires_at=datetime.now(UTC))
+        db = _mock_db()
+        db.execute = AsyncMock(return_value=_mock_single_result(watch))
+        db.refresh = AsyncMock()
+
+        result = run_async(
+            watches.update_watch(
+                watch.id,
+                body=watches.WatchUpdateRequest(ttl_hours=None),
+                request=make_request(f"/api/v1/watches/{watch.id}", method="PATCH"),
+                db=db,
+                current_user=make_user(),
+            )
+        )
+        assert result.expires_at is None

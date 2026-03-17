@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import Response
-from starlette.requests import Request
 
-from osint_core.api.middleware.auth import UserInfo
 from osint_core.api.routes import alerts, audit, briefs, entities, events, indicators, jobs, search
 from osint_core.main import app
 from osint_core.models.alert import Alert
@@ -21,32 +18,7 @@ from osint_core.models.entity import Entity
 from osint_core.models.event import Event
 from osint_core.models.indicator import Indicator
 from osint_core.models.job import Job
-
-
-def _run(awaitable):
-    return asyncio.run(awaitable)
-
-
-def _request(path: str, method: str = "GET") -> Request:
-    return Request(
-        {
-            "type": "http",
-            "asgi": {"version": "3.0"},
-            "http_version": "1.1",
-            "scheme": "http",
-            "method": method,
-            "path": path,
-            "raw_path": path.encode(),
-            "query_string": b"",
-            "headers": [],
-            "client": ("testclient", 50000),
-            "server": ("testserver", 80),
-        }
-    )
-
-
-def _user() -> UserInfo:
-    return UserInfo(sub="u-1", username="admin", roles=["admin"])
+from tests.helpers import make_request, make_user, run_async
 
 
 def _mock_db():
@@ -248,7 +220,7 @@ def _make_audit(**overrides):
 def test_list_events_uses_page_envelope():
     db = _mock_db()
     db.execute = AsyncMock(side_effect=_mock_scalars_result([_make_event()], 1))
-    result = _run(events.list_events(limit=10, offset=0, sort=None, db=db, current_user=_user()))
+    result = run_async(events.list_events(limit=10, offset=0, sort=None, db=db, current_user=make_user()))
     assert result.page.total == 1
     assert result.items[0].title == "Test Event"
 
@@ -256,12 +228,12 @@ def test_list_events_uses_page_envelope():
 def test_get_event_not_found_returns_problem_payload():
     db = _mock_db()
     db.execute = AsyncMock(return_value=_mock_single_result(None))
-    response = _run(
+    response = run_async(
         events.get_event(
             uuid.uuid4(),
-            request=_request("/api/v1/events/missing"),
+            request=make_request("/api/v1/events/missing"),
             db=db,
-            current_user=_user(),
+            current_user=make_user(),
         )
     )
     assert response.status_code == 404
@@ -273,12 +245,12 @@ def test_get_indicator_uses_metadata_alias():
     indicator = _make_indicator()
     indicator.metadata = indicator.metadata_
     db.execute = AsyncMock(return_value=_mock_single_result(indicator))
-    result = _run(
+    result = run_async(
         indicators.get_indicator(
             uuid.uuid4(),
-            request=_request("/api/v1/indicators/1"),
+            request=make_request("/api/v1/indicators/1"),
             db=db,
-            current_user=_user(),
+            current_user=make_user(),
         )
     )
     assert result.metadata == {"asn": "AS1"}
@@ -287,12 +259,12 @@ def test_get_indicator_uses_metadata_alias():
 def test_get_entity_found():
     db = _mock_db()
     db.execute = AsyncMock(return_value=_mock_single_result(_make_entity()))
-    result = _run(
+    result = run_async(
         entities.get_entity(
             uuid.uuid4(),
-            request=_request("/api/v1/entities/1"),
+            request=make_request("/api/v1/entities/1"),
             db=db,
-            current_user=_user(),
+            current_user=make_user(),
         )
     )
     assert result.name == "Test Corp"
@@ -303,13 +275,13 @@ def test_patch_alert_acks_with_current_user():
     db = _mock_db()
     db.execute = AsyncMock(return_value=_mock_single_result(alert))
     db.refresh = AsyncMock()
-    result = _run(
+    result = run_async(
         alerts.update_alert(
             alert.id,
             body=alerts.AlertUpdateRequest(status="acked"),
-            request=_request(f"/api/v1/alerts/{alert.id}", method="PATCH"),
+            request=make_request(f"/api/v1/alerts/{alert.id}", method="PATCH"),
             db=db,
-            current_user=_user(),
+            current_user=make_user(),
         )
     )
     assert result.acked_by == "admin"
@@ -320,13 +292,13 @@ def test_patch_alert_rejects_invalid_transition():
     alert = _make_alert(status="open")
     db = _mock_db()
     db.execute = AsyncMock(return_value=_mock_single_result(alert))
-    response = _run(
+    response = run_async(
         alerts.update_alert(
             alert.id,
             body=alerts.AlertUpdateRequest(status="resolved"),
-            request=_request(f"/api/v1/alerts/{alert.id}", method="PATCH"),
+            request=make_request(f"/api/v1/alerts/{alert.id}", method="PATCH"),
             db=db,
-            current_user=_user(),
+            current_user=make_user(),
         )
     )
     assert response.status_code == 409
@@ -343,13 +315,13 @@ def test_create_brief_returns_201_and_location():
         generator.generate = AsyncMock(return_value="# Brief\nGenerated content.")
         generator_cls.return_value = generator
         with patch("osint_core.api.routes.briefs.Brief", return_value=brief):
-            result = _run(
+            result = run_async(
                 briefs.create_brief(
                     body=briefs.BriefCreateRequest(query="Latest CVE threats"),
-                    request=_request("/api/v1/briefs", method="POST"),
+                    request=make_request("/api/v1/briefs", method="POST"),
                     response=response,
                     db=db,
-                    current_user=_user(),
+                    current_user=make_user(),
                 )
             )
     assert response.headers["Location"].endswith(str(brief.id))
@@ -359,13 +331,13 @@ def test_create_brief_returns_201_and_location():
 def test_search_events_new_path_behavior():
     db = _mock_db()
     db.execute = AsyncMock(side_effect=_mock_scalars_result([], 0))
-    result = _run(
+    result = run_async(
         search.search_events(
             q="ransomware",
             limit=10,
             offset=0,
             db=db,
-            current_user=_user(),
+            current_user=make_user(),
         )
     )
     assert result.retrieval_mode == "lexical"
@@ -393,16 +365,16 @@ def test_create_ingest_job():
 
     with patch("osint_core.api.routes.jobs.ingest_source") as mock_ingest:
         mock_ingest.delay.return_value = MagicMock(id="task-abc-123")
-        job_result = _run(
+        job_result = run_async(
             jobs.create_job(
                 body=jobs.JobCreateRequest(
                     kind="ingest",
                     input={"source_id": "cisa_kev", "plan_id": "test-plan"},
                 ),
-                request=_request("/api/v1/jobs", method="POST"),
+                request=make_request("/api/v1/jobs", method="POST"),
                 response=response,
                 db=db,
-                current_user=_user(),
+                current_user=make_user(),
             )
         )
 
@@ -413,13 +385,13 @@ def test_create_ingest_job():
 def test_create_job_requires_input_fields():
     db = _mock_db()
     response = Response()
-    result = _run(
+    result = run_async(
         jobs.create_job(
             body=jobs.JobCreateRequest(kind="ingest", input={"source_id": "cisa_kev"}),
-            request=_request("/api/v1/jobs", method="POST"),
+            request=make_request("/api/v1/jobs", method="POST"),
             response=response,
             db=db,
-            current_user=_user(),
+            current_user=make_user(),
         )
     )
     assert result.status_code == 422
@@ -428,7 +400,7 @@ def test_create_job_requires_input_fields():
 
 def test_list_audit_entries():
     with patch("osint_core.api.routes.audit.list_audit_entries", AsyncMock(return_value=([_make_audit()], 1))):
-        result = _run(audit.list_audit(limit=10, offset=0, action=None, db=_mock_db(), current_user=_user()))
+        result = run_async(audit.list_audit(limit=10, offset=0, action=None, db=_mock_db(), current_user=make_user()))
     assert result.page.total == 1
 
 

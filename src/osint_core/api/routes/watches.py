@@ -171,7 +171,12 @@ async def update_watch(
     for field, value in update_data.items():
         setattr(watch, field, value)
 
-    if watch.ttl_hours:
+    if "ttl_hours" in update_data:
+        if watch.ttl_hours and watch.ttl_hours > 0:
+            watch.expires_at = datetime.now(UTC) + timedelta(hours=watch.ttl_hours)
+        else:
+            watch.expires_at = None
+    elif watch.ttl_hours:
         watch.expires_at = datetime.now(UTC) + timedelta(hours=watch.ttl_hours)
 
     await db.commit()

@@ -38,7 +38,7 @@ class EventResponse(BaseModel):
     region: str | None = None
     source_category: str | None = None
 
-    metadata: dict[str, Any] = Field(default_factory=dict, alias="metadata_")
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
 
 
 class EventList(CollectionResponse):

@@ -2,42 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import Response
-from starlette.requests import Request
 
-from osint_core.api.middleware.auth import UserInfo
 from osint_core.api.routes import jobs
-
-
-def _run(awaitable):
-    return asyncio.run(awaitable)
-
-
-def _request(path: str, method: str = "POST") -> Request:
-    return Request(
-        {
-            "type": "http",
-            "asgi": {"version": "3.0"},
-            "http_version": "1.1",
-            "scheme": "http",
-            "method": method,
-            "path": path,
-            "raw_path": path.encode(),
-            "query_string": b"",
-            "headers": [],
-            "client": ("testclient", 50000),
-            "server": ("testserver", 80),
-        }
-    )
-
-
-def _user() -> UserInfo:
-    return UserInfo(sub="test-user", username="test-user", roles=["admin"])
+from tests.helpers import make_request, make_user, run_async
 
 
 def _db():
@@ -51,13 +23,13 @@ def _db():
 
 @patch("osint_core.api.routes.jobs.ingest_source")
 def test_create_ingest_job_requires_plan_id(mock_task):
-    response = _run(
+    response = run_async(
         jobs.create_job(
             body=jobs.JobCreateRequest(kind="ingest", input={"source_id": "bbc_world"}),
-            request=_request("/api/v1/jobs"),
+            request=make_request("/api/v1/jobs"),
             response=Response(),
             db=_db(),
-            current_user=_user(),
+            current_user=make_user(),
         )
     )
     assert response.status_code == 422
@@ -82,16 +54,16 @@ def test_create_ingest_job_dispatches(mock_task):
     db.refresh = refresh
     mock_task.delay.return_value = MagicMock(id="task-123")
     response = Response()
-    job_result = _run(
+    job_result = run_async(
         jobs.create_job(
             body=jobs.JobCreateRequest(
                 kind="ingest",
                 input={"source_id": "bbc_world", "plan_id": "military-intel"},
             ),
-            request=_request("/api/v1/jobs"),
+            request=make_request("/api/v1/jobs"),
             response=response,
             db=db,
-            current_user=_user(),
+            current_user=make_user(),
         )
     )
     assert jobs.JobResponse.model_validate(job_result).kind == "ingest"

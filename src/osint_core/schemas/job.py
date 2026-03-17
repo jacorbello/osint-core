@@ -25,13 +25,13 @@ class JobResponse(BaseModel):
     model_config = {"from_attributes": True, "populate_by_name": True}
 
     id: uuid.UUID
-    kind: str = Field(alias="job_type")
+    kind: str = Field(validation_alias="job_type")
     status: JobStatusEnum
 
     celery_task_id: str | None = None
     k8s_job_name: str | None = None
-    input: dict[str, Any] = Field(default_factory=dict, alias="input_params")
-    result: dict[str, Any] = Field(default_factory=dict, alias="output")
+    input: dict[str, Any] = Field(default_factory=dict, validation_alias="input_params")
+    result: dict[str, Any] = Field(default_factory=dict, validation_alias="output")
     error: str | None = None
     retry_count: int
     retry_of: uuid.UUID | None = None
@@ -42,7 +42,7 @@ class JobResponse(BaseModel):
     plan_version_id: uuid.UUID | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    submitted_at: datetime = Field(alias="created_at")
+    submitted_at: datetime = Field(validation_alias="created_at")
     submitted_by: str | None = None
 
 

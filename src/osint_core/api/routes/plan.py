@@ -231,10 +231,9 @@ async def get_plan_version(
     current_user: UserInfo = Depends(get_current_user),
 ) -> PlanVersionResponse:
     """Get a specific stored plan version."""
-    versions = await store.get_versions(db, plan_id, limit=200, offset=0)
-    for version in versions:
-        if version.id == version_id:
-            return version  # type: ignore[return-value]
+    version = await store.get_version(db, plan_id, version_id)
+    if version is not None:
+        return version  # type: ignore[return-value]
 
     return problem_response(
         request,
@@ -275,12 +274,16 @@ async def sync_plans_from_disk(
 
         parsed = result.parsed
         plan_id = parsed["plan_id"]
+        content_hash = engine.content_hash(raw)
+        latest_versions = await store.get_versions(db, plan_id, limit=1, offset=0)
+        if latest_versions and latest_versions[0].content_hash == content_hash:
+            continue
         next_version = await store.get_next_version(db, plan_id)
         plan_version = await store.store_version(
             db,
             plan_id=plan_id,
             version=next_version,
-            content_hash=engine.content_hash(raw),
+            content_hash=content_hash,
             content=parsed,
             retention_class=parsed.get("retention_class", "standard"),
             validation_result={

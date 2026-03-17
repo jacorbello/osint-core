@@ -23,7 +23,7 @@ class IndicatorResponse(BaseModel):
     last_seen: datetime
 
     sources: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict, alias="metadata_")
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
 
     created_at: datetime
 

@@ -53,6 +53,7 @@ def test_indicator_response_aliases_metadata():
         }
     )
     assert indicator.metadata == {"asn": "AS12345"}
+    assert "metadata_" not in indicator.model_dump()
 
 
 def test_alert_update_request():
@@ -93,6 +94,7 @@ def test_job_response_aliases():
     assert job.kind == "ingest"
     assert job.status == JobStatusEnum.partial_success
     assert job.result["events_created"] == 42
+    assert "job_type" not in job.model_dump()
 
 
 def test_job_create_request():

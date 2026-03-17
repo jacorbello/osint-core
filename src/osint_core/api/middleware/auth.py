@@ -90,7 +90,7 @@ async def get_current_user(
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authentication token",
+            detail="Invalid Authorization header (expected Bearer token)",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
