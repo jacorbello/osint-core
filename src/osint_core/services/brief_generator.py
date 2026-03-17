@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.resources
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 import structlog
@@ -16,16 +16,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = structlog.get_logger()
 
 
+class BriefContext(NamedTuple):
+    """Serialised context returned by :func:`fetch_brief_context`."""
+
+    events: list[dict[str, Any]]
+    entities: list[dict[str, Any]]
+    indicators: list[dict[str, Any]]
+    event_ids: list[uuid.UUID]
+    entity_ids: list[uuid.UUID]
+    indicator_ids: list[uuid.UUID]
+
+
 def serialize_events_for_context(
     events: list[Any],
-) -> tuple[
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    list[uuid.UUID],
-    list[uuid.UUID],
-    list[uuid.UUID],
-]:
+) -> BriefContext:
     """Convert ORM Event objects (with related entities/indicators) into dicts.
 
     Returns:
@@ -68,7 +72,14 @@ def serialize_events_for_context(
     entity_ids = sorted(seen_entity_ids)
     indicator_ids = sorted(seen_indicator_ids)
 
-    return event_dicts, entity_dicts, indicator_dicts, event_ids, list(entity_ids), list(indicator_ids)
+    return BriefContext(
+        events=event_dicts,
+        entities=entity_dicts,
+        indicators=indicator_dicts,
+        event_ids=event_ids,
+        entity_ids=list(entity_ids),
+        indicator_ids=list(indicator_ids),
+    )
 
 
 async def fetch_brief_context(
@@ -76,14 +87,7 @@ async def fetch_brief_context(
     query: str,
     *,
     limit: int = 50,
-) -> tuple[
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    list[uuid.UUID],
-    list[uuid.UUID],
-    list[uuid.UUID],
-]:
+) -> BriefContext:
     """Query the database for events matching *query* and return serialized context.
 
     Uses Postgres full-text search on the events ``search_vector`` column.
@@ -105,7 +109,10 @@ async def fetch_brief_context(
     events = list(result.scalars().all())
 
     if not events:
-        return [], [], [], [], [], []
+        return BriefContext(
+            events=[], entities=[], indicators=[],
+            event_ids=[], entity_ids=[], indicator_ids=[],
+        )
 
     return serialize_events_for_context(events)
 

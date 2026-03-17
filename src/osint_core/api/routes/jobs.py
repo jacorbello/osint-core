@@ -16,7 +16,7 @@ from osint_core.models.brief import Brief
 from osint_core.models.job import Job
 from osint_core.schemas.common import JobStatusEnum
 from osint_core.schemas.job import JobCreateRequest, JobKindEnum, JobList, JobResponse
-from osint_core.services.brief_generator import BriefGenerator, fetch_brief_context
+from osint_core.services.brief_generator import BriefContext, BriefGenerator, fetch_brief_context
 from osint_core.workers.ingest import ingest_source
 from osint_core.workers.score import rescore_all_events_task
 
@@ -96,9 +96,7 @@ async def create_job(
             )  # type: ignore[return-value]
         query_str = str(input_payload["query"])
 
-        events, indicators, entities, event_ids, entity_ids, indicator_ids = (
-            await fetch_brief_context(db, query_str)
-        )
+        ctx: BriefContext = await fetch_brief_context(db, query_str)
 
         generator = BriefGenerator(
             vllm_url=settings.vllm_url,
@@ -115,9 +113,9 @@ async def create_job(
         try:
             content_md = await generator.generate(
                 query=query_str,
-                events=events,
-                indicators=indicators,
-                entities=entities,
+                events=ctx.events,
+                indicators=ctx.indicators,
+                entities=ctx.entities,
             )
         except Exception as exc:
             job.status = "failed"
@@ -137,9 +135,9 @@ async def create_job(
             generated_by="llm",
             model_id=settings.llm_model,
             requested_by=current_user.username,
-            event_ids=event_ids,
-            entity_ids=entity_ids,
-            indicator_ids=indicator_ids,
+            event_ids=ctx.event_ids,
+            entity_ids=ctx.entity_ids,
+            indicator_ids=ctx.indicator_ids,
         )
         db.add(brief)
         await db.flush()

@@ -314,28 +314,53 @@ def test_patch_alert_rejects_invalid_transition():
 
 
 def test_create_brief_returns_201_and_location():
+    from osint_core.services.brief_generator import BriefContext
+
     brief = _make_brief(title="Latest CVE threats", target_query="Latest CVE threats")
     db = _mock_db()
     response = Response()
 
-    empty_context = ([], [], [], [], [], [])
-    with patch("osint_core.api.routes.briefs.fetch_brief_context", new_callable=AsyncMock, return_value=empty_context):
-        with patch("osint_core.api.routes.briefs.BriefGenerator") as generator_cls:
-            generator = AsyncMock()
-            generator.generate = AsyncMock(return_value="# Brief\nGenerated content.")
-            generator_cls.return_value = generator
-            with patch("osint_core.api.routes.briefs.Brief", return_value=brief):
-                result = run_async(
-                    briefs.create_brief(
-                        body=briefs.BriefCreateRequest(query="Latest CVE threats"),
-                        request=make_request("/api/v1/briefs", method="POST"),
-                        response=response,
-                        db=db,
-                        current_user=make_user(),
-                    )
-                )
+    fake_event = {"title": "CVE-2024-1234", "severity": "high", "score": 9.0,
+                  "source_id": None, "occurred_at": None}
+    fake_entity = {"name": "APT-29", "entity_type": "threat-actor"}
+    fake_indicator = {"value": "10.0.0.1", "type": "ipv4"}
+    mock_ctx = BriefContext(
+        events=[fake_event],
+        entities=[fake_entity],
+        indicators=[fake_indicator],
+        event_ids=[uuid.uuid4()],
+        entity_ids=[uuid.uuid4()],
+        indicator_ids=[uuid.uuid4()],
+    )
+    with (
+        patch(
+            "osint_core.api.routes.briefs.fetch_brief_context",
+            new_callable=AsyncMock,
+            return_value=mock_ctx,
+        ),
+        patch("osint_core.api.routes.briefs.BriefGenerator") as generator_cls,
+        patch("osint_core.api.routes.briefs.Brief", return_value=brief),
+    ):
+        generator = AsyncMock()
+        generator.generate = AsyncMock(return_value="# Brief\nGenerated content.")
+        generator_cls.return_value = generator
+        result = run_async(
+            briefs.create_brief(
+                body=briefs.BriefCreateRequest(query="Latest CVE threats"),
+                request=make_request("/api/v1/briefs", method="POST"),
+                response=response,
+                db=db,
+                current_user=make_user(),
+            )
+        )
     assert response.headers["Location"].endswith(str(brief.id))
     assert result.title == "Latest CVE threats"
+    generator.generate.assert_awaited_once_with(
+        query="Latest CVE threats",
+        events=[fake_event],
+        indicators=[fake_indicator],
+        entities=[fake_entity],
+    )
 
 
 def test_search_events_new_path_behavior():

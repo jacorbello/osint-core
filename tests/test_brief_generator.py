@@ -180,7 +180,10 @@ class _FakeIndicator:
 
 
 class _FakeEvent:
-    def __init__(self, id, title, severity, score, source_id, occurred_at, entities=None, indicators=None):
+    def __init__(
+        self, id, title, severity, score, source_id, occurred_at,
+        entities=None, indicators=None,
+    ):
         self.id = id
         self.title = title
         self.severity = severity

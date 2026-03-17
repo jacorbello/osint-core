@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
-
-import json
 
 import httpx
 import structlog
