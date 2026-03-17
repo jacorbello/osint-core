@@ -84,14 +84,27 @@ def test_validate_plan_endpoint_invalid_yaml():
 
 
 def test_list_active_plans():
-    with patch("osint_core.api.routes.plan.store.list_active", AsyncMock(return_value=([_mock_plan()], 1))):
-        result = run_async(plan.list_active_plans(limit=50, offset=0, db=_db(), current_user=make_user()))
+    with patch(
+        "osint_core.api.routes.plan.store.list_active",
+        AsyncMock(return_value=([_mock_plan()], 1)),
+    ):
+        result = run_async(
+            plan.list_active_plans(
+                limit=50,
+                offset=0,
+                db=_db(),
+                current_user=make_user(),
+            )
+        )
     assert result.items[0].plan_id == "test-plan"
     assert result.page.total == 1
 
 
 def test_list_plan_versions_uses_store_total():
-    with patch("osint_core.api.routes.plan.store.list_versions", AsyncMock(return_value=([_mock_plan()], 7))):
+    with patch(
+        "osint_core.api.routes.plan.store.list_versions",
+        AsyncMock(return_value=([_mock_plan()], 7)),
+    ):
         result = run_async(
             plan.list_plan_versions(
                 "test-plan",
@@ -137,7 +150,10 @@ def test_update_active_plan_with_version_id():
 
 def test_get_plan_version_uses_direct_lookup():
     plan_version = _mock_plan()
-    with patch("osint_core.api.routes.plan.store.get_version", AsyncMock(return_value=plan_version)):
+    with patch(
+        "osint_core.api.routes.plan.store.get_version",
+        AsyncMock(return_value=plan_version),
+    ):
         result = run_async(
             plan.get_plan_version(
                 "test-plan",
@@ -154,17 +170,28 @@ def test_create_plan_version():
     db = _db()
     response = Response()
     plan_version = _mock_plan()
-    with patch("osint_core.api.routes.plan.store.get_next_version", AsyncMock(return_value=1)):
-        with patch("osint_core.api.routes.plan.store.store_version", AsyncMock(return_value=plan_version)):
-            with patch("osint_core.api.routes.plan.store.activate", AsyncMock(return_value=plan_version)):
-                result = run_async(
-                    plan.create_plan(
-                        body=plan.PlanCreateRequest(yaml=VALID_PLAN, activate=True),
-                        request=make_request("/api/v1/plans", method="POST"),
-                        response=response,
-                        db=db,
-                        current_user=make_user(),
-                    )
-                )
+    with (
+        patch(
+            "osint_core.api.routes.plan.store.get_next_version",
+            AsyncMock(return_value=1),
+        ),
+        patch(
+            "osint_core.api.routes.plan.store.store_version",
+            AsyncMock(return_value=plan_version),
+        ),
+        patch(
+            "osint_core.api.routes.plan.store.activate",
+            AsyncMock(return_value=plan_version),
+        ),
+    ):
+        result = run_async(
+            plan.create_plan(
+                body=plan.PlanCreateRequest(yaml=VALID_PLAN, activate=True),
+                request=make_request("/api/v1/plans", method="POST"),
+                response=response,
+                db=db,
+                current_user=make_user(),
+            )
+        )
     assert result.id == plan_version.id
     assert response.headers["Location"].endswith(str(plan_version.id))

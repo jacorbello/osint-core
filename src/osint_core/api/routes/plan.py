@@ -117,7 +117,7 @@ async def create_plan(
         if body.activate:
             await store.activate(db, plan_version.id, activated_by=current_user.username)
         await db.commit()
-    except IntegrityError as exc:
+    except IntegrityError:
         await db.rollback()
         return problem_response(
             request,

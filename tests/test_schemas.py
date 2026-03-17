@@ -118,7 +118,10 @@ def test_collection_response_schema():
     class ExampleCollection(CollectionResponse):
         items: list[str]
 
-    page = ExampleCollection(items=["a", "b"], page={"offset": 0, "limit": 2, "total": 10, "has_more": True})
+    page = ExampleCollection(
+        items=["a", "b"],
+        page={"offset": 0, "limit": 2, "total": 10, "has_more": True},
+    )
     assert page.page.total == 10
     assert page.page.has_more is True
 

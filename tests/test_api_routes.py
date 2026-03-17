@@ -220,7 +220,15 @@ def _make_audit(**overrides):
 def test_list_events_uses_page_envelope():
     db = _mock_db()
     db.execute = AsyncMock(side_effect=_mock_scalars_result([_make_event()], 1))
-    result = run_async(events.list_events(limit=10, offset=0, sort=None, db=db, current_user=make_user()))
+    result = run_async(
+        events.list_events(
+            limit=10,
+            offset=0,
+            sort=None,
+            db=db,
+            current_user=make_user(),
+        )
+    )
     assert result.page.total == 1
     assert result.items[0].title == "Test Event"
 
@@ -399,8 +407,19 @@ def test_create_job_requires_input_fields():
 
 
 def test_list_audit_entries():
-    with patch("osint_core.api.routes.audit.list_audit_entries", AsyncMock(return_value=([_make_audit()], 1))):
-        result = run_async(audit.list_audit(limit=10, offset=0, action=None, db=_mock_db(), current_user=make_user()))
+    with patch(
+        "osint_core.api.routes.audit.list_audit_entries",
+        AsyncMock(return_value=([_make_audit()], 1)),
+    ):
+        result = run_async(
+            audit.list_audit(
+                limit=10,
+                offset=0,
+                action=None,
+                db=_mock_db(),
+                current_user=make_user(),
+            )
+        )
     assert result.page.total == 1
 
 

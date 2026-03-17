@@ -32,4 +32,7 @@ async def list_audit(
         db, limit=limit, offset=offset, action=action
     )
 
-    return AuditLogList(items=entries, page=collection_page(offset=offset, limit=limit, total=total))
+    return AuditLogList(
+        items=entries,
+        page=collection_page(offset=offset, limit=limit, total=total),
+    )

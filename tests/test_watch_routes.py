@@ -88,7 +88,11 @@ class TestWatchRoutes:
         db.refresh = refresh
         result = run_async(
             watches.create_watch(
-                body=watches.WatchCreateRequest(name="new-watch", region="Eastern Europe", severity_threshold="low"),
+                body=watches.WatchCreateRequest(
+                    name="new-watch",
+                    region="Eastern Europe",
+                    severity_threshold="low",
+                ),
                 request=make_request("/api/v1/watches", method="POST"),
                 response=response,
                 db=db,

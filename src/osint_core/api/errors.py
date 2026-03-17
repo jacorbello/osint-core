@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from osint_core.schemas.common import FieldError, ProblemDetails
 
 
-class ProblemException(Exception):
+class ProblemError(Exception):
     """Application exception that serializes into a ProblemDetails payload."""
 
     def __init__(
@@ -87,9 +87,9 @@ def _default_error_code(status_code: int) -> str:
 
 async def problem_exception_handler(
     request: Request,
-    exc: ProblemException,
+    exc: ProblemError,
 ) -> JSONResponse:
-    """Serialize a ProblemException as a standard API error."""
+    """Serialize a ProblemError as a standard API error."""
     payload = _problem_payload(
         request,
         status_code=exc.status_code,

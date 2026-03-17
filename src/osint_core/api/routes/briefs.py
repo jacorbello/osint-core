@@ -96,7 +96,7 @@ async def create_brief(
             indicators=[],
             entities=[],
         )
-    except Exception as exc:
+    except Exception:
         return problem_response(
             request,
             status_code=503,

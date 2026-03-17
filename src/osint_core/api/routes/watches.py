@@ -63,7 +63,7 @@ async def create_watch(
     db.add(watch)
     try:
         await db.commit()
-    except IntegrityError as exc:
+    except IntegrityError:
         await db.rollback()
         return problem_response(
             request,
