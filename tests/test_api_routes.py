@@ -409,3 +409,12 @@ def test_openapi_schema_loads():
     assert "/api/v1/jobs" in schema["paths"]
     assert "/api/v1/plans" in schema["paths"]
     assert "ProblemDetails" in schema["components"]["schemas"]
+    assert schema["components"]["securitySchemes"]["BearerAuth"]["type"] == "http"
+    assert schema["components"]["securitySchemes"]["BearerAuth"]["scheme"] == "bearer"
+    assert {"BearerAuth": []} in schema["paths"]["/api/v1/jobs"]["get"]["security"]
+    kind_parameter = next(
+        parameter
+        for parameter in schema["paths"]["/api/v1/jobs"]["get"]["parameters"]
+        if parameter["name"] == "kind"
+    )
+    assert "JobKindEnum" in json.dumps(kind_parameter["schema"])

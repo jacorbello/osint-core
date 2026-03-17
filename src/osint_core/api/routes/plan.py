@@ -63,9 +63,7 @@ async def list_active_plans(
     current_user: UserInfo = Depends(get_current_user),
 ) -> PlanVersionList:
     """List active plan versions."""
-    active = await store.get_all_active(db)
-    items = active[offset: offset + limit]
-    total = len(active)
+    items, total = await store.list_active(db, limit=limit, offset=offset)
     return PlanVersionList(
         items=items,
         page=collection_page(offset=offset, limit=limit, total=total),
@@ -210,10 +208,10 @@ async def list_plan_versions(
     current_user: UserInfo = Depends(get_current_user),
 ) -> PlanVersionList:
     """List all stored versions for a plan, newest first."""
-    versions = await store.get_versions(db, plan_id, limit=limit, offset=offset)
+    versions, total = await store.list_versions(db, plan_id, limit=limit, offset=offset)
     return PlanVersionList(
         items=versions,
-        page=collection_page(offset=offset, limit=limit, total=offset + len(versions)),
+        page=collection_page(offset=offset, limit=limit, total=total),
     )
 
 

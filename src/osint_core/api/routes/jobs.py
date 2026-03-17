@@ -14,6 +14,7 @@ from osint_core.api.middleware.auth import UserInfo
 from osint_core.config import settings
 from osint_core.models.brief import Brief
 from osint_core.models.job import Job
+from osint_core.schemas.common import JobStatusEnum
 from osint_core.schemas.job import JobCreateRequest, JobKindEnum, JobList, JobResponse
 from osint_core.services.brief_generator import BriefGenerator
 from osint_core.workers.ingest import ingest_source
@@ -163,8 +164,8 @@ async def create_job(
 async def list_jobs(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    kind: str | None = Query(default=None),
-    status: str | None = Query(default=None),
+    kind: JobKindEnum | None = Query(default=None),
+    status: JobStatusEnum | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
 ) -> JobList:

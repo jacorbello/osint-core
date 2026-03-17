@@ -1,11 +1,11 @@
-"""Plan store — persists and retrieves versioned intelligence collection plans."""
+"""Plan store - persists and retrieves versioned intelligence collection plans."""
 
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.models.plan import PlanVersion
@@ -67,6 +67,31 @@ class PlanStore:
         result = await db.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_active(
+        self,
+        db: AsyncSession,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[PlanVersion], int]:
+        """Return one page of active plan versions and the total count."""
+        stmt = (
+            select(PlanVersion)
+            .where(PlanVersion.is_active.is_(True))
+            .order_by(PlanVersion.plan_id, PlanVersion.version)
+            .limit(limit)
+            .offset(offset)
+        )
+        count_stmt = (
+            select(func.count())
+            .select_from(PlanVersion)
+            .where(PlanVersion.is_active.is_(True))
+        )
+
+        result = await db.execute(stmt)
+        count_result = await db.execute(count_stmt)
+        return list(result.scalars().all()), count_result.scalar_one()
+
     async def get_active(self, db: AsyncSession, plan_id: str) -> PlanVersion | None:
         """Return the currently active version of a plan, or None."""
         stmt = (
@@ -95,6 +120,32 @@ class PlanStore:
         )
         result = await db.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_versions(
+        self,
+        db: AsyncSession,
+        plan_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[PlanVersion], int]:
+        """Return one page of versions for a plan and the total count."""
+        stmt = (
+            select(PlanVersion)
+            .where(PlanVersion.plan_id == plan_id)
+            .order_by(PlanVersion.version.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        count_stmt = (
+            select(func.count())
+            .select_from(PlanVersion)
+            .where(PlanVersion.plan_id == plan_id)
+        )
+
+        result = await db.execute(stmt)
+        count_result = await db.execute(count_stmt)
+        return list(result.scalars().all()), count_result.scalar_one()
 
     async def get_version(
         self,
