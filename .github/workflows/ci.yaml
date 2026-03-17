@@ -233,7 +233,7 @@ jobs:
       - name: Run Alembic migrations
         env:
           OSINT_DATABASE_URL: ${{ secrets.OSINT_DATABASE_URL }}
-        run: python -m alembic upgrade head --verbose
+        run: python -m alembic upgrade head
 
       - name: Verify migration state
         env:
