@@ -21,6 +21,7 @@ celery_app = Celery(
         "osint_core.workers.score",
         "osint_core.workers.notify",
         "osint_core.workers.digest",
+        "osint_core.workers.nlp_enrich",
     ],
 )
 
@@ -40,6 +41,7 @@ celery_app.conf.update(
         "osint_core.workers.score.*": {"queue": "score"},
         "osint_core.workers.notify.*": {"queue": "notify"},
         "osint_core.workers.digest.*": {"queue": "digest"},
+        "osint_core.workers.nlp_enrich.*": {"queue": "enrich"},
     },
 )
 

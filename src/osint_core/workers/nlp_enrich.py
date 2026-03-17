@@ -20,19 +20,19 @@ from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
-_ENRICH_PROMPT = """You are an intelligence analyst. Given this event, respond with JSON only.
+_SYSTEM_MESSAGE = (
+    "You are an intelligence analyst. Respond with JSON only.\n"
+    'Respond with exactly this JSON structure:\n'
+    '{"summary": "1-2 sentence English summary of the event",\n'
+    '"relevance": "relevant|tangential|irrelevant",\n'
+    '"entities": [{"name": "...", "type": "person|organization|location|indicator"}]}'
+)
 
-Event title: {title}
+_USER_TEMPLATE = """Event title: {title}
 Event metadata: {metadata}
 
 Plan mission: {mission}
-Plan keywords: {keywords}
-
-Respond with exactly this JSON structure:
-{{"summary": "1-2 sentence English summary of the event",
-"relevance": "relevant|tangential|irrelevant",
-"entities": [{{"name": "...", "type": "person|organization|location|indicator"}}]}}
-"""
+Plan keywords: {keywords}"""
 
 
 async def _call_vllm(prompt: str) -> dict[str, Any]:
@@ -87,7 +87,7 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
         mission = enrichment.get("mission", "")
         keywords = plan_content.get("keywords", [])
 
-        prompt = _ENRICH_PROMPT.format(
+        user_msg = _USER_TEMPLATE.format(
             title=event.title or "",
             metadata=json.dumps(event.metadata_ or {}, default=str)[:500],
             mission=mission,
@@ -95,8 +95,14 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
         )
 
         try:
-            result = await _call_vllm(prompt)
-        except (TimeoutError, httpx.TimeoutException, httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
+            result = await _call_vllm(user_msg)
+        except (
+            TimeoutError,
+            httpx.TimeoutException,
+            httpx.HTTPError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as e:
             logger.warning("NLP enrichment fallback for %s: %s", event_id, e)
             await engine.dispose()
             return {"event_id": event_id, "status": "fallback"}

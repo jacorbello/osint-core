@@ -4,15 +4,15 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from osint_core.schemas.common import PaginatedResponse
+from osint_core.schemas.common import CollectionResponse
 
 
 class IndicatorResponse(BaseModel):
     """Serialized indicator for API responses."""
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
     id: uuid.UUID
     indicator_type: str
@@ -22,11 +22,12 @@ class IndicatorResponse(BaseModel):
     first_seen: datetime
     last_seen: datetime
 
-    sources: list[str] = []
-    metadata: dict[str, Any] = {}
+    sources: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
 
     created_at: datetime
 
 
-class IndicatorList(PaginatedResponse[IndicatorResponse]):
+class IndicatorList(CollectionResponse):
     """Paginated list of indicators."""
+    items: list[IndicatorResponse]

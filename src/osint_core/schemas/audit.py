@@ -4,9 +4,9 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from osint_core.schemas.common import PaginatedResponse
+from osint_core.schemas.common import CollectionResponse
 
 
 class AuditLogResponse(BaseModel):
@@ -23,10 +23,11 @@ class AuditLogResponse(BaseModel):
     resource_type: str | None = None
     resource_id: str | None = None
 
-    details: dict[str, Any] = {}
+    details: dict[str, Any] = Field(default_factory=dict)
 
     created_at: datetime
 
 
-class AuditLogList(PaginatedResponse[AuditLogResponse]):
+class AuditLogList(CollectionResponse):
     """Paginated list of audit log entries."""
+    items: list[AuditLogResponse]

@@ -97,6 +97,12 @@
       "additionalProperties": {
         "$ref": "#/$defs/source_profile"
       }
+    },
+    "enrichment": {
+      "$ref": "#/$defs/enrichment"
+    },
+    "target_geo": {
+      "$ref": "#/$defs/target_geo"
     }
   },
   "if": {
