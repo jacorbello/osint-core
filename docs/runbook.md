@@ -64,7 +64,7 @@ Trigger via GitHub Actions:
 3. Set **Run only the migrate job** to `true`
 4. Click **Run workflow**
 
-This runs only the `migrate` job (build/scan/deploy are skipped).
+This runs only the `migrate` job (lint/test/build/scan/deploy are all skipped).
 
 ### Rolling back a migration
 
