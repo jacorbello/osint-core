@@ -1,4 +1,4 @@
-"""NLP enrichment task using Ollama/LLaMA for summary, relevance, entities.
+"""NLP enrichment task using vLLM for summary, relevance, entities.
 
 NOTE: This file is separate from enrich.py which contains vectorize_event_task
 and correlate_event_task.
@@ -35,18 +35,18 @@ Respond with exactly this JSON structure:
 """
 
 
-async def _call_ollama(prompt: str) -> dict[str, Any]:
-    url = f"{settings.ollama_url}/api/generate"
+async def _call_vllm(prompt: str) -> dict[str, Any]:
+    url = f"{settings.vllm_url}/v1/chat/completions"
     payload = {
-        "model": settings.ollama_model,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
+        "model": settings.llm_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 500,
+        "temperature": 0.1,
     }
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(url, json=payload)
         resp.raise_for_status()
-    raw = resp.json().get("response", "{}")
+    raw = resp.json()["choices"][0]["message"]["content"]
     result: dict[str, Any] = json.loads(raw)
     return result
 
@@ -85,7 +85,7 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
         )
 
         try:
-            result = await _call_ollama(prompt)
+            result = await _call_vllm(prompt)
         except (TimeoutError, httpx.TimeoutException, httpx.HTTPError, json.JSONDecodeError) as e:
             logger.warning("NLP enrichment fallback for %s: %s", event_id, e)
             await engine.dispose()

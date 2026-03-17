@@ -39,18 +39,18 @@ SAMPLE_ENTITIES = [
 
 
 @pytest.fixture()
-def generator_no_ollama() -> BriefGenerator:
-    """BriefGenerator with Ollama explicitly disabled."""
-    return BriefGenerator(ollama_url="", ollama_model="", ollama_available=False)
+def generator_no_vllm() -> BriefGenerator:
+    """BriefGenerator with vLLM explicitly disabled."""
+    return BriefGenerator(vllm_url="", llm_model="", llm_available=False)
 
 
 @pytest.fixture()
-def generator_with_ollama() -> BriefGenerator:
-    """BriefGenerator pointing at a (mocked) Ollama endpoint."""
+def generator_with_vllm() -> BriefGenerator:
+    """BriefGenerator pointing at a (mocked) vLLM endpoint."""
     return BriefGenerator(
-        ollama_url="http://localhost:11434",
-        ollama_model="llama3.1:8b",
-        ollama_available=True,
+        vllm_url="http://localhost:8000",
+        llm_model="meta-llama/Llama-3.2-3B-Instruct",
+        llm_available=True,
     )
 
 
@@ -59,9 +59,9 @@ def generator_with_ollama() -> BriefGenerator:
 # ---------------------------------------------------------------------------
 
 
-def test_template_fallback_produces_markdown(generator_no_ollama: BriefGenerator):
+def test_template_fallback_produces_markdown(generator_no_vllm: BriefGenerator):
     """Template-only generator produces valid markdown."""
-    md = generator_no_ollama.generate_from_template(
+    md = generator_no_vllm.generate_from_template(
         title="Weekly Threat Report",
         events=SAMPLE_EVENTS,
         indicators=SAMPLE_INDICATORS,
@@ -78,19 +78,23 @@ def test_template_fallback_produces_markdown(generator_no_ollama: BriefGenerator
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_ollama_generation(generator_with_ollama: BriefGenerator):
-    """BriefGenerator calls Ollama API and returns the generated text."""
-    ollama_response = {
-        "model": "llama3.1:8b",
-        "response": "## Threat Summary\n\nCritical CVE activity detected.",
-        "done": True,
+async def test_vllm_generation(generator_with_vllm: BriefGenerator):
+    """BriefGenerator calls vLLM API and returns the generated text."""
+    vllm_response = {
+        "choices": [
+            {
+                "message": {
+                    "content": "## Threat Summary\n\nCritical CVE activity detected."
+                }
+            }
+        ]
     }
 
-    respx.post("http://localhost:11434/api/generate").mock(
-        return_value=httpx.Response(200, json=ollama_response)
+    respx.post("http://localhost:8000/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=vllm_response)
     )
 
-    result = await generator_with_ollama.generate_from_ollama(
+    result = await generator_with_vllm.generate_from_vllm(
         query="Summarize recent CVE activity",
         context="CVE-2026-1234 was published with CVSS 9.8",
     )
@@ -101,13 +105,13 @@ async def test_ollama_generation(generator_with_ollama: BriefGenerator):
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_ollama_fallback_on_error(generator_with_ollama: BriefGenerator):
-    """When Ollama returns an error, generate() falls back to template."""
-    respx.post("http://localhost:11434/api/generate").mock(
+async def test_vllm_fallback_on_error(generator_with_vllm: BriefGenerator):
+    """When vLLM returns an error, generate() falls back to template."""
+    respx.post("http://localhost:8000/v1/chat/completions").mock(
         return_value=httpx.Response(500, json={"error": "model not found"})
     )
 
-    result = await generator_with_ollama.generate(
+    result = await generator_with_vllm.generate(
         query="Summarize threats",
         events=SAMPLE_EVENTS,
         indicators=SAMPLE_INDICATORS,
@@ -120,9 +124,9 @@ async def test_ollama_fallback_on_error(generator_with_ollama: BriefGenerator):
     assert "192.168.1.100" in result
 
 
-def test_template_includes_events_indicators_entities(generator_no_ollama: BriefGenerator):
+def test_template_includes_events_indicators_entities(generator_no_vllm: BriefGenerator):
     """Template output includes all provided events, indicators, and entities."""
-    md = generator_no_ollama.generate_from_template(
+    md = generator_no_vllm.generate_from_template(
         title="Full Data Brief",
         events=SAMPLE_EVENTS,
         indicators=SAMPLE_INDICATORS,

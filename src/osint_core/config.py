@@ -27,9 +27,9 @@ class Settings(BaseSettings):
   qdrant_port: int = 6333
   qdrant_collection: str = "osint-events"
 
-  # --- Ollama ---
-  ollama_url: str = "http://ollama:11434"
-  ollama_model: str = "llama3.1:8b"
+  # --- vLLM ---
+  vllm_url: str = "http://localhost:8000"
+  llm_model: str = "meta-llama/Llama-3.2-3B-Instruct"
 
   # --- MinIO ---
   minio_endpoint: str = "minio:9000"

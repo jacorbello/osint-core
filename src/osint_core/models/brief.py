@@ -30,7 +30,7 @@ class Brief(UUIDMixin, TimestampMixin, Base):
     )
 
     generated_by: Mapped[str] = mapped_column(
-        Text, default="ollama", server_default="ollama"
+        Text, default="vllm", server_default="vllm"
     )
     model_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 

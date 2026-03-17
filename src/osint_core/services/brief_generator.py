@@ -1,4 +1,4 @@
-"""Brief generator — produce intel briefs via Ollama LLM or Jinja2 template fallback."""
+"""Brief generator — produce intel briefs via vLLM or Jinja2 template fallback."""
 
 from __future__ import annotations
 
@@ -27,24 +27,24 @@ def _load_template() -> Template:
 
 
 class BriefGenerator:
-    """Generate intelligence briefs using Ollama or a Jinja2 template fallback.
+    """Generate intelligence briefs using vLLM or a Jinja2 template fallback.
 
     Args:
-        ollama_url: Base URL for the Ollama API (e.g. ``http://ollama:11434``).
-        ollama_model: Model identifier (e.g. ``llama3.1:8b``).
-        ollama_available: Whether to attempt Ollama generation before falling back.
+        vllm_url: Base URL for the vLLM API (e.g. ``http://vllm-inference:8000``).
+        llm_model: Model identifier (e.g. ``meta-llama/Llama-3.2-3B-Instruct``).
+        llm_available: Whether to attempt vLLM generation before falling back.
     """
 
     def __init__(
         self,
         *,
-        ollama_url: str = "",
-        ollama_model: str = "",
-        ollama_available: bool = True,
+        vllm_url: str = "",
+        llm_model: str = "",
+        llm_available: bool = True,
     ) -> None:
-        self._ollama_url = ollama_url.rstrip("/") if ollama_url else ""
-        self._ollama_model = ollama_model
-        self._ollama_available = ollama_available and bool(ollama_url)
+        self._vllm_url = vllm_url.rstrip("/") if vllm_url else ""
+        self._llm_model = llm_model
+        self._llm_available = llm_available and bool(vllm_url)
         self._template = _load_template()
 
     # ------------------------------------------------------------------
@@ -93,11 +93,11 @@ class BriefGenerator:
         return md
 
     # ------------------------------------------------------------------
-    # Ollama generation
+    # vLLM generation
     # ------------------------------------------------------------------
 
-    async def generate_from_ollama(self, *, query: str, context: str) -> str:
-        """Call the Ollama ``/api/generate`` endpoint to produce an AI brief.
+    async def generate_from_vllm(self, *, query: str, context: str) -> str:
+        """Call the vLLM ``/v1/chat/completions`` endpoint to produce an AI brief.
 
         Args:
             query: The user's natural-language query describing the brief scope.
@@ -107,34 +107,34 @@ class BriefGenerator:
             Generated Markdown string from the LLM.
 
         Raises:
-            httpx.HTTPStatusError: If the Ollama API returns a non-2xx status.
-            httpx.ConnectError: If the Ollama service is unreachable.
+            httpx.HTTPStatusError: If the vLLM API returns a non-2xx status.
+            httpx.ConnectError: If the vLLM service is unreachable.
         """
         prompt = f"{_SYSTEM_PROMPT}\n\nQuery: {query}\n\nContext:\n{context}"
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{self._ollama_url}/api/generate",
+                f"{self._vllm_url}/v1/chat/completions",
                 json={
-                    "model": self._ollama_model,
-                    "prompt": prompt,
+                    "model": self._llm_model,
+                    "messages": [{"role": "user", "content": prompt}],
                     "stream": False,
                 },
             )
             response.raise_for_status()
 
         data = response.json()
-        text: str = data.get("response", "")
+        text: str = data["choices"][0]["message"]["content"]
 
         logger.info(
-            "brief_generated_from_ollama",
-            model=self._ollama_model,
+            "brief_generated_from_vllm",
+            model=self._llm_model,
             response_length=len(text),
         )
         return text
 
     # ------------------------------------------------------------------
-    # Unified generation (Ollama first, template fallback)
+    # Unified generation (vLLM first, template fallback)
     # ------------------------------------------------------------------
 
     async def generate(
@@ -145,7 +145,7 @@ class BriefGenerator:
         indicators: list[dict[str, Any]],
         entities: list[dict[str, Any]],
     ) -> str:
-        """Generate a brief -- try Ollama first, fall back to template on failure.
+        """Generate a brief -- try vLLM first, fall back to template on failure.
 
         Args:
             query: Natural-language query describing the brief scope.
@@ -154,17 +154,17 @@ class BriefGenerator:
             entities: List of entity dicts.
 
         Returns:
-            Markdown string from either Ollama or the template.
+            Markdown string from either vLLM or the template.
         """
         title = query or "Intelligence Brief"
 
-        if self._ollama_available:
+        if self._llm_available:
             try:
                 context = self._build_context(events, indicators, entities)
-                return await self.generate_from_ollama(query=query, context=context)
+                return await self.generate_from_vllm(query=query, context=context)
             except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException) as exc:
                 logger.warning(
-                    "ollama_generation_failed_falling_back_to_template",
+                    "vllm_generation_failed_falling_back_to_template",
                     error=str(exc),
                 )
 

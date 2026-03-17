@@ -150,13 +150,13 @@ def test_brief_response():
         "id": "00000000-0000-0000-0000-000000000005",
         "title": "Weekly Threat Summary",
         "content_md": "# Summary\n\nNo critical threats.",
-        "generated_by": "ollama",
-        "model_id": "llama3.1:8b",
+        "generated_by": "vllm",
+        "model_id": "meta-llama/Llama-3.2-3B-Instruct",
         "created_at": "2026-03-01T00:00:00Z",
     }
     brief = BriefResponse.model_validate(data)
     assert brief.title == "Weekly Threat Summary"
-    assert brief.generated_by == "ollama"
+    assert brief.generated_by == "vllm"
 
 
 def test_brief_generate_request():
