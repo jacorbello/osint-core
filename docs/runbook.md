@@ -46,3 +46,50 @@ curl -s -X POST http://localhost:8000/api/v1/plan/sync | jq .
 ```bash
 curl -s -X POST http://localhost:8000/api/v1/jobs/{job_id}/retry | jq .
 ```
+
+## CI/CD Database Migrations
+
+### How migrations run
+
+Alembic migrations run automatically on every push to `main` as part of the CI/CD pipeline.
+The `migrate` job runs `alembic upgrade head` on the self-hosted runner before the deploy
+job proceeds. If the migration fails, the deploy is blocked.
+
+### Manual migration run
+
+Trigger via GitHub Actions:
+
+1. Go to **Actions** > **CI** workflow
+2. Click **Run workflow**
+3. Set **Run only the migrate job** to `true`
+4. Click **Run workflow**
+
+This runs only the `migrate` job (build/scan/deploy are skipped).
+
+### Rolling back a migration
+
+**On the self-hosted runner:**
+
+```bash
+# SSH into the runner, navigate to a checkout of osint-core
+export OSINT_DATABASE_URL="postgresql+asyncpg://user:pass@host:5432/osint"
+pip install -e "."
+python -m alembic downgrade -1
+```
+
+**Important:** This only works if the migration file has a working `downgrade()` function.
+Always verify downgrade functions exist before relying on this.
+
+### When to roll back
+
+- Migration was applied but the subsequent deploy failed, and the new code depends on the
+  old schema.
+- Migration introduced a breaking schema change that needs reverting before a code fix is
+  ready.
+
+### Future enhancements
+
+- **Pre-migration database backup:** Not yet implemented. Will be added once the backup
+  strategy is decided.
+- **`workflow_dispatch` downgrade:** A future `migration_command` input will allow running
+  `alembic downgrade -1` via the Actions UI without SSH access.
