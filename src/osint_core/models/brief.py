@@ -2,6 +2,7 @@
 
 import uuid
 
+import sqlalchemy as sa
 from sqlalchemy import ForeignKey, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -30,7 +31,7 @@ class Brief(UUIDMixin, TimestampMixin, Base):
     )
 
     generated_by: Mapped[str] = mapped_column(
-        Text, default="llm", server_default="llm"
+        Text, default="vllm", server_default=sa.text("'vllm'")
     )
     model_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 

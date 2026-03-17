@@ -1,4 +1,4 @@
-"""Brief generator — produce intel briefs via LLM or Jinja2 template fallback."""
+"""Brief generator — produce intel briefs via vLLM or Jinja2 template fallback."""
 
 from __future__ import annotations
 
@@ -27,24 +27,24 @@ def _load_template() -> Template:
 
 
 class BriefGenerator:
-    """Generate intelligence briefs using an LLM or a Jinja2 template fallback.
+    """Generate intelligence briefs using vLLM or a Jinja2 template fallback.
 
     Args:
-        llm_url: Base URL for the OpenAI-compatible API (e.g. ``http://localhost:8000``).
+        vllm_url: Base URL for the vLLM API (e.g. ``http://vllm-inference:8000``).
         llm_model: Model identifier (e.g. ``meta-llama/Llama-3.2-3B-Instruct``).
-        llm_available: Whether to attempt LLM generation before falling back.
+        llm_available: Whether to attempt vLLM generation before falling back.
     """
 
     def __init__(
         self,
         *,
-        llm_url: str = "",
+        vllm_url: str = "",
         llm_model: str = "",
         llm_available: bool = True,
     ) -> None:
-        self._llm_url = llm_url.rstrip("/") if llm_url else ""
+        self._vllm_url = vllm_url.rstrip("/") if vllm_url else ""
         self._llm_model = llm_model
-        self._llm_available = llm_available and bool(llm_url)
+        self._llm_available = llm_available and bool(vllm_url)
         self._template = _load_template()
 
     # ------------------------------------------------------------------
@@ -93,36 +93,60 @@ class BriefGenerator:
         return md
 
     # ------------------------------------------------------------------
-    # LLM generation
+    # vLLM generation
     # ------------------------------------------------------------------
 
-    async def generate_from_llm(self, *, query: str, context: str) -> str:
-        """Call an OpenAI-compatible chat completions endpoint to produce an AI brief."""
+    async def generate_from_vllm(self, *, query: str, context: str) -> str:
+        """Call the vLLM ``/v1/chat/completions`` endpoint to produce an AI brief.
+
+        Args:
+            query: The user's natural-language query describing the brief scope.
+            context: Assembled context text (events, indicators, entities).
+
+        Returns:
+            Generated Markdown string from the LLM.
+
+        Raises:
+            httpx.HTTPStatusError: If the vLLM API returns a non-2xx status.
+            httpx.ConnectError: If the vLLM service is unreachable.
+        """
+        prompt = f"{_SYSTEM_PROMPT}\n\nQuery: {query}\n\nContext:\n{context}"
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{self._llm_url}/v1/chat/completions",
+                f"{self._vllm_url}/v1/chat/completions",
                 json={
                     "model": self._llm_model,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": f"Query: {query}\n\nContext:\n{context}"},
-                    ],
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": False,
                 },
             )
             response.raise_for_status()
 
         data = response.json()
-        text: str = data["choices"][0]["message"]["content"]
+        choices = data.get("choices")
+        if not choices or not isinstance(choices, list):
+            raise ValueError(
+                "Unexpected vLLM response shape: "
+                f"missing or empty 'choices' (got: {list(data.keys())})"
+            )
+        message = choices[0].get("message", {})
+        content = message.get("content")
+        if content is None:
+            raise ValueError(
+                "Unexpected vLLM response shape: 'choices[0].message.content' is absent"
+            )
+        text: str = content
 
         logger.info(
-            "brief_generated_from_llm",
+            "brief_generated_from_vllm",
             model=self._llm_model,
             response_length=len(text),
         )
         return text
 
     # ------------------------------------------------------------------
-    # Unified generation (Ollama first, template fallback)
+    # Unified generation (vLLM first, template fallback)
     # ------------------------------------------------------------------
 
     async def generate(
@@ -133,7 +157,7 @@ class BriefGenerator:
         indicators: list[dict[str, Any]],
         entities: list[dict[str, Any]],
     ) -> str:
-        """Generate a brief -- try LLM first, fall back to template on failure.
+        """Generate a brief -- try vLLM first, fall back to template on failure.
 
         Args:
             query: Natural-language query describing the brief scope.
@@ -142,17 +166,22 @@ class BriefGenerator:
             entities: List of entity dicts.
 
         Returns:
-            Markdown string from either the LLM or the template.
+            Markdown string from either vLLM or the template.
         """
         title = query or "Intelligence Brief"
 
         if self._llm_available:
             try:
                 context = self._build_context(events, indicators, entities)
-                return await self.generate_from_llm(query=query, context=context)
-            except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException) as exc:
+                return await self.generate_from_vllm(query=query, context=context)
+            except (
+                httpx.HTTPStatusError,
+                httpx.ConnectError,
+                httpx.TimeoutException,
+                ValueError,
+            ) as exc:
                 logger.warning(
-                    "llm_generation_failed_falling_back_to_template",
+                    "vllm_generation_failed_falling_back_to_template",
                     error=str(exc),
                 )
 

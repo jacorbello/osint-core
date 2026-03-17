@@ -85,7 +85,7 @@ async def create_brief(
 ) -> BriefResponse:
     """Generate and persist a new intelligence brief."""
     generator = BriefGenerator(
-        llm_url=settings.llm_url,
+        vllm_url=settings.vllm_url,
         llm_model=settings.llm_model,
     )
 
@@ -108,7 +108,7 @@ async def create_brief(
         title=body.query,
         content_md=content_md,
         target_query=body.query,
-        generated_by="llm",
+        generated_by="vllm",
         model_id=settings.llm_model,
         requested_by=current_user.username,
     )

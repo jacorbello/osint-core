@@ -34,7 +34,7 @@ services:
       OSINT_CELERY_BROKER_URL: redis://redis:6379/1
       OSINT_CELERY_RESULT_BACKEND: redis://redis:6379/2
       OSINT_QDRANT_HOST: qdrant
-      OSINT_LLM_URL: http://host.docker.internal:8000
+      OSINT_VLLM_URL: http://host.docker.internal:8001
     depends_on:
       - postgres
       - redis

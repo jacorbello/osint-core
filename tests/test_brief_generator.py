@@ -39,16 +39,16 @@ SAMPLE_ENTITIES = [
 
 
 @pytest.fixture()
-def generator_no_llm() -> BriefGenerator:
-    """BriefGenerator with LLM explicitly disabled."""
-    return BriefGenerator(llm_url="", llm_model="", llm_available=False)
+def generator_no_vllm() -> BriefGenerator:
+    """BriefGenerator with vLLM explicitly disabled."""
+    return BriefGenerator(vllm_url="", llm_model="", llm_available=False)
 
 
 @pytest.fixture()
-def generator_with_llm() -> BriefGenerator:
-    """BriefGenerator pointing at a (mocked) LLM endpoint."""
+def generator_with_vllm() -> BriefGenerator:
+    """BriefGenerator pointing at a (mocked) vLLM endpoint."""
     return BriefGenerator(
-        llm_url="http://localhost:8000",
+        vllm_url="http://localhost:8000",
         llm_model="meta-llama/Llama-3.2-3B-Instruct",
         llm_available=True,
     )
@@ -59,9 +59,9 @@ def generator_with_llm() -> BriefGenerator:
 # ---------------------------------------------------------------------------
 
 
-def test_template_fallback_produces_markdown(generator_no_llm: BriefGenerator):
+def test_template_fallback_produces_markdown(generator_no_vllm: BriefGenerator):
     """Template-only generator produces valid markdown."""
-    md = generator_no_llm.generate_from_template(
+    md = generator_no_vllm.generate_from_template(
         title="Weekly Threat Report",
         events=SAMPLE_EVENTS,
         indicators=SAMPLE_INDICATORS,
@@ -78,23 +78,23 @@ def test_template_fallback_produces_markdown(generator_no_llm: BriefGenerator):
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_llm_generation(generator_with_llm: BriefGenerator):
-    """BriefGenerator calls LLM API and returns the generated text."""
-    llm_response = {
+async def test_vllm_generation(generator_with_vllm: BriefGenerator):
+    """BriefGenerator calls vLLM API and returns the generated text."""
+    vllm_response = {
         "choices": [
             {
                 "message": {
                     "content": "## Threat Summary\n\nCritical CVE activity detected."
                 }
             }
-        ],
+        ]
     }
 
     respx.post("http://localhost:8000/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json=llm_response)
+        return_value=httpx.Response(200, json=vllm_response)
     )
 
-    result = await generator_with_llm.generate_from_llm(
+    result = await generator_with_vllm.generate_from_vllm(
         query="Summarize recent CVE activity",
         context="CVE-2026-1234 was published with CVSS 9.8",
     )
@@ -105,13 +105,13 @@ async def test_llm_generation(generator_with_llm: BriefGenerator):
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_llm_fallback_on_error(generator_with_llm: BriefGenerator):
-    """When LLM returns an error, generate() falls back to template."""
+async def test_vllm_fallback_on_error(generator_with_vllm: BriefGenerator):
+    """When vLLM returns an error, generate() falls back to template."""
     respx.post("http://localhost:8000/v1/chat/completions").mock(
         return_value=httpx.Response(500, json={"error": "model not found"})
     )
 
-    result = await generator_with_llm.generate(
+    result = await generator_with_vllm.generate(
         query="Summarize threats",
         events=SAMPLE_EVENTS,
         indicators=SAMPLE_INDICATORS,
@@ -124,9 +124,9 @@ async def test_llm_fallback_on_error(generator_with_llm: BriefGenerator):
     assert "192.168.1.100" in result
 
 
-def test_template_includes_events_indicators_entities(generator_no_llm: BriefGenerator):
+def test_template_includes_events_indicators_entities(generator_no_vllm: BriefGenerator):
     """Template output includes all provided events, indicators, and entities."""
-    md = generator_no_llm.generate_from_template(
+    md = generator_no_vllm.generate_from_template(
         title="Full Data Brief",
         events=SAMPLE_EVENTS,
         indicators=SAMPLE_INDICATORS,

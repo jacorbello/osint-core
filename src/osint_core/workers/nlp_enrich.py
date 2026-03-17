@@ -1,4 +1,4 @@
-"""NLP enrichment task using OpenAI-compatible LLM for summary, relevance, entities.
+"""NLP enrichment task using vLLM for summary, relevance, entities.
 
 NOTE: This file is separate from enrich.py which contains vectorize_event_task
 and correlate_event_task.
@@ -35,21 +35,29 @@ Plan mission: {mission}
 Plan keywords: {keywords}"""
 
 
-async def _call_llm(system: str, user: str) -> dict[str, Any]:
-    url = f"{settings.llm_url}/v1/chat/completions"
+async def _call_vllm(prompt: str) -> dict[str, Any]:
+    url = f"{settings.vllm_url}/v1/chat/completions"
     payload = {
         "model": settings.llm_model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "response_format": {"type": "json_object"},
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 500,
+        "temperature": 0.1,
     }
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(url, json=payload)
         resp.raise_for_status()
-    raw = resp.json()["choices"][0]["message"]["content"]
-    result: dict[str, Any] = json.loads(raw)
+    data = resp.json()
+    choices = data.get("choices")
+    if not choices or not isinstance(choices, list):
+        raise ValueError(
+            f"Unexpected vLLM response shape: missing or empty 'choices' (got: {list(data.keys())})"
+        )
+    content = choices[0].get("message", {}).get("content")
+    if content is None:
+        raise ValueError(
+            "Unexpected vLLM response shape: 'choices[0].message.content' is absent"
+        )
+    result: dict[str, Any] = json.loads(content)
     return result
 
 
@@ -87,8 +95,14 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
         )
 
         try:
-            result = await _call_llm(_SYSTEM_MESSAGE, user_msg)
-        except (TimeoutError, httpx.TimeoutException, httpx.HTTPError, json.JSONDecodeError) as e:
+            result = await _call_vllm(user_msg)
+        except (
+            TimeoutError,
+            httpx.TimeoutException,
+            httpx.HTTPError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as e:
             logger.warning("NLP enrichment fallback for %s: %s", event_id, e)
             await engine.dispose()
             return {"event_id": event_id, "status": "fallback"}
