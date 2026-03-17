@@ -318,20 +318,22 @@ def test_create_brief_returns_201_and_location():
     db = _mock_db()
     response = Response()
 
-    with patch("osint_core.api.routes.briefs.BriefGenerator") as generator_cls:
-        generator = AsyncMock()
-        generator.generate = AsyncMock(return_value="# Brief\nGenerated content.")
-        generator_cls.return_value = generator
-        with patch("osint_core.api.routes.briefs.Brief", return_value=brief):
-            result = run_async(
-                briefs.create_brief(
-                    body=briefs.BriefCreateRequest(query="Latest CVE threats"),
-                    request=make_request("/api/v1/briefs", method="POST"),
-                    response=response,
-                    db=db,
-                    current_user=make_user(),
+    empty_context = ([], [], [], [], [], [])
+    with patch("osint_core.api.routes.briefs.fetch_brief_context", new_callable=AsyncMock, return_value=empty_context):
+        with patch("osint_core.api.routes.briefs.BriefGenerator") as generator_cls:
+            generator = AsyncMock()
+            generator.generate = AsyncMock(return_value="# Brief\nGenerated content.")
+            generator_cls.return_value = generator
+            with patch("osint_core.api.routes.briefs.Brief", return_value=brief):
+                result = run_async(
+                    briefs.create_brief(
+                        body=briefs.BriefCreateRequest(query="Latest CVE threats"),
+                        request=make_request("/api/v1/briefs", method="POST"),
+                        response=response,
+                        db=db,
+                        current_user=make_user(),
+                    )
                 )
-            )
     assert response.headers["Location"].endswith(str(brief.id))
     assert result.title == "Latest CVE threats"
 

@@ -1,10 +1,12 @@
 """Tests for the intel brief generator service."""
 
+import uuid
+
 import httpx
 import pytest
 import respx
 
-from osint_core.services.brief_generator import BriefGenerator
+from osint_core.services.brief_generator import BriefGenerator, serialize_events_for_context
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -156,3 +158,120 @@ def test_template_includes_events_indicators_entities(generator_no_vllm: BriefGe
     assert "## Indicators of Compromise" in md
     assert "## Entities" in md
     assert "## Summary" in md
+
+
+# ---------------------------------------------------------------------------
+# serialize_events_for_context tests
+# ---------------------------------------------------------------------------
+
+
+class _FakeEntity:
+    def __init__(self, id, name, entity_type):
+        self.id = id
+        self.name = name
+        self.entity_type = entity_type
+
+
+class _FakeIndicator:
+    def __init__(self, id, value, indicator_type):
+        self.id = id
+        self.value = value
+        self.indicator_type = indicator_type
+
+
+class _FakeEvent:
+    def __init__(self, id, title, severity, score, source_id, occurred_at, entities=None, indicators=None):
+        self.id = id
+        self.title = title
+        self.severity = severity
+        self.score = score
+        self.source_id = source_id
+        self.occurred_at = occurred_at
+        self.entities = entities or []
+        self.indicators = indicators or []
+
+
+def test_serialize_events_for_context_extracts_event_fields():
+    """serialize_events_for_context returns dicts with correct keys from ORM objects."""
+    evt_id = uuid.uuid4()
+    ent_id = uuid.uuid4()
+    ind_id = uuid.uuid4()
+
+    entity = _FakeEntity(id=ent_id, name="APT-29", entity_type="threat-actor")
+    indicator = _FakeIndicator(id=ind_id, value="10.0.0.1", indicator_type="ipv4")
+    event = _FakeEvent(
+        id=evt_id,
+        title="Border clash",
+        severity="high",
+        score=7.5,
+        source_id="gdelt",
+        occurred_at="2026-03-01T10:00:00Z",
+        entities=[entity],
+        indicators=[indicator],
+    )
+
+    events, entities, indicators, event_ids, entity_ids, indicator_ids = (
+        serialize_events_for_context([event])
+    )
+
+    assert len(events) == 1
+    assert events[0]["title"] == "Border clash"
+    assert events[0]["severity"] == "high"
+    assert events[0]["score"] == 7.5
+
+    assert len(entities) == 1
+    assert entities[0]["name"] == "APT-29"
+    assert entities[0]["entity_type"] == "threat-actor"
+
+    assert len(indicators) == 1
+    assert indicators[0]["value"] == "10.0.0.1"
+    assert indicators[0]["type"] == "ipv4"
+
+    assert event_ids == [evt_id]
+    assert entity_ids == [ent_id]
+    assert indicator_ids == [ind_id]
+
+
+def test_serialize_events_for_context_deduplicates_entities():
+    """Entities/indicators shared across events should not be duplicated."""
+    shared_ent_id = uuid.uuid4()
+    entity = _FakeEntity(id=shared_ent_id, name="Shared", entity_type="org")
+
+    evt1 = _FakeEvent(id=uuid.uuid4(), title="E1", severity="low", score=1.0,
+                       source_id="a", occurred_at=None, entities=[entity])
+    evt2 = _FakeEvent(id=uuid.uuid4(), title="E2", severity="low", score=2.0,
+                       source_id="b", occurred_at=None, entities=[entity])
+
+    events, entities, indicators, event_ids, entity_ids, indicator_ids = (
+        serialize_events_for_context([evt1, evt2])
+    )
+
+    assert len(events) == 2
+    assert len(entities) == 1  # deduplicated
+    assert entity_ids == [shared_ent_id]
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_vllm_receives_event_context(generator_with_vllm: BriefGenerator):
+    """When events are provided, the LLM prompt includes their data."""
+    vllm_response = {
+        "choices": [{"message": {"content": "## Brief\n\nAnalysis complete."}}]
+    }
+
+    route = respx.post("http://localhost:8000/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=vllm_response)
+    )
+
+    await generator_with_vllm.generate(
+        query="Austin terrorism",
+        events=SAMPLE_EVENTS,
+        indicators=SAMPLE_INDICATORS,
+        entities=SAMPLE_ENTITIES,
+    )
+
+    sent_body = route.calls.last.request.content.decode()
+    # The prompt sent to vLLM should include actual event data
+    assert "CVE-2026-1234 Published" in sent_body
+    assert "192.168.1.100" in sent_body
+    assert "APT-29" in sent_body

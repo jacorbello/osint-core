@@ -3,14 +3,111 @@
 from __future__ import annotations
 
 import importlib.resources
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 import structlog
 from jinja2 import Template
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger()
+
+
+def serialize_events_for_context(
+    events: list[Any],
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[uuid.UUID],
+    list[uuid.UUID],
+    list[uuid.UUID],
+]:
+    """Convert ORM Event objects (with related entities/indicators) into dicts.
+
+    Returns:
+        Tuple of (event_dicts, entity_dicts, indicator_dicts,
+                  event_ids, entity_ids, indicator_ids).
+    """
+    event_dicts: list[dict[str, Any]] = []
+    entity_dicts: list[dict[str, Any]] = []
+    indicator_dicts: list[dict[str, Any]] = []
+    event_ids: list[uuid.UUID] = []
+    seen_entity_ids: set[uuid.UUID] = set()
+    seen_indicator_ids: set[uuid.UUID] = set()
+
+    for evt in events:
+        event_dicts.append({
+            "title": evt.title,
+            "severity": evt.severity,
+            "score": evt.score,
+            "source_id": getattr(evt, "source_id", None),
+            "occurred_at": str(evt.occurred_at) if evt.occurred_at else None,
+        })
+        event_ids.append(evt.id)
+
+        for ent in getattr(evt, "entities", []):
+            if ent.id not in seen_entity_ids:
+                seen_entity_ids.add(ent.id)
+                entity_dicts.append({
+                    "name": ent.name,
+                    "entity_type": ent.entity_type,
+                })
+
+        for ind in getattr(evt, "indicators", []):
+            if ind.id not in seen_indicator_ids:
+                seen_indicator_ids.add(ind.id)
+                indicator_dicts.append({
+                    "value": ind.value,
+                    "type": ind.indicator_type,
+                })
+
+    entity_ids = sorted(seen_entity_ids)
+    indicator_ids = sorted(seen_indicator_ids)
+
+    return event_dicts, entity_dicts, indicator_dicts, event_ids, list(entity_ids), list(indicator_ids)
+
+
+async def fetch_brief_context(
+    db: AsyncSession,
+    query: str,
+    *,
+    limit: int = 50,
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[uuid.UUID],
+    list[uuid.UUID],
+    list[uuid.UUID],
+]:
+    """Query the database for events matching *query* and return serialized context.
+
+    Uses Postgres full-text search on the events ``search_vector`` column.
+    Related entities and indicators are loaded via selectin relationships.
+
+    Returns:
+        Same tuple as :func:`serialize_events_for_context`.
+    """
+    from osint_core.models.event import Event  # avoid circular imports
+
+    ts_query = func.plainto_tsquery("english", query)
+    stmt = (
+        select(Event)
+        .where(Event.search_vector.op("@@")(ts_query))
+        .order_by(Event.ingested_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    events = list(result.scalars().all())
+
+    if not events:
+        return [], [], [], [], [], []
+
+    return serialize_events_for_context(events)
 
 _SYSTEM_PROMPT = (
     "You are an intelligence analyst. Given the following OSINT context, "

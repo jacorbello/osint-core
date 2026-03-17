@@ -16,7 +16,7 @@ from osint_core.models.brief import Brief
 from osint_core.models.job import Job
 from osint_core.schemas.common import JobStatusEnum
 from osint_core.schemas.job import JobCreateRequest, JobKindEnum, JobList, JobResponse
-from osint_core.services.brief_generator import BriefGenerator
+from osint_core.services.brief_generator import BriefGenerator, fetch_brief_context
 from osint_core.workers.ingest import ingest_source
 from osint_core.workers.score import rescore_all_events_task
 
@@ -94,6 +94,12 @@ async def create_job(
                 code="validation_failed",
                 detail=f"Missing required job input fields: {', '.join(missing)}",
             )  # type: ignore[return-value]
+        query_str = str(input_payload["query"])
+
+        events, indicators, entities, event_ids, entity_ids, indicator_ids = (
+            await fetch_brief_context(db, query_str)
+        )
+
         generator = BriefGenerator(
             vllm_url=settings.vllm_url,
             llm_model=settings.llm_model,
@@ -108,10 +114,10 @@ async def create_job(
         await db.flush()
         try:
             content_md = await generator.generate(
-                query=str(input_payload["query"]),
-                events=[],
-                indicators=[],
-                entities=[],
+                query=query_str,
+                events=events,
+                indicators=indicators,
+                entities=entities,
             )
         except Exception as exc:
             job.status = "failed"
@@ -125,12 +131,15 @@ async def create_job(
             )  # type: ignore[return-value]
 
         brief = Brief(
-            title=str(input_payload["query"]),
+            title=query_str,
             content_md=content_md,
-            target_query=str(input_payload["query"]),
+            target_query=query_str,
             generated_by="llm",
             model_id=settings.llm_model,
             requested_by=current_user.username,
+            event_ids=event_ids,
+            entity_ids=entity_ids,
+            indicator_ids=indicator_ids,
         )
         db.add(brief)
         await db.flush()
