@@ -3,13 +3,17 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+import structlog
 
 from .base import BaseConnector, RawItem
+
+logger = structlog.get_logger()
 
 _COUNTRY_MAP: dict[str, str] = {
     "United States": "USA", "United Kingdom": "GBR", "China": "CHN",
@@ -50,7 +54,15 @@ class GdeltConnector(BaseConnector):
             resp = await client.get(self.config.url, params=params)
             resp.raise_for_status()
 
-        data = resp.json()
+        try:
+            data = resp.json()
+        except (json.JSONDecodeError, ValueError):
+            logger.warning(
+                "gdelt_non_json_response",
+                status=resp.status_code,
+                body_preview=resp.text[:200],
+            )
+            return []
         articles = data.get("articles", [])
 
         max_per_domain = self.config.extra.get("max_per_domain")

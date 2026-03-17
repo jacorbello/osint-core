@@ -14,7 +14,7 @@ from osint_core.api.middleware.auth import UserInfo
 from osint_core.config import settings
 from osint_core.models.brief import Brief
 from osint_core.schemas.brief import BriefCreateRequest, BriefList, BriefResponse
-from osint_core.services.brief_generator import BriefGenerator
+from osint_core.services.brief_generator import BriefContext, BriefGenerator, fetch_brief_context
 
 router = APIRouter(prefix="/api/v1/briefs", tags=["briefs"])
 
@@ -84,6 +84,8 @@ async def create_brief(
     current_user: UserInfo = Depends(get_current_user),
 ) -> BriefResponse:
     """Generate and persist a new intelligence brief."""
+    ctx: BriefContext = await fetch_brief_context(db, body.query)
+
     generator = BriefGenerator(
         vllm_url=settings.vllm_url,
         llm_model=settings.llm_model,
@@ -92,9 +94,9 @@ async def create_brief(
     try:
         content_md = await generator.generate(
             query=body.query,
-            events=[],
-            indicators=[],
-            entities=[],
+            events=ctx.events,
+            indicators=ctx.indicators,
+            entities=ctx.entities,
         )
     except Exception:
         return problem_response(
@@ -111,6 +113,9 @@ async def create_brief(
         generated_by="vllm",
         model_id=settings.llm_model,
         requested_by=current_user.username,
+        event_ids=ctx.event_ids,
+        entity_ids=ctx.entity_ids,
+        indicator_ids=ctx.indicator_ids,
     )
     db.add(brief)
     await db.flush()
