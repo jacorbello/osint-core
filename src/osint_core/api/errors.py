@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
+from typing import Any
 from uuid import uuid4
 
 from fastapi import HTTPException, Request
@@ -34,7 +35,7 @@ class ProblemError(Exception):
         super().__init__(detail)
 
 
-def problem_response_docs(*statuses: int) -> dict[int, dict[str, object]]:
+def problem_response_docs(*statuses: int) -> dict[int | str, dict[str, Any]]:
     """Return OpenAPI response metadata for the shared problem schema."""
     return {
         status_code: {"model": ProblemDetails, "description": HTTPStatus(status_code).phrase}

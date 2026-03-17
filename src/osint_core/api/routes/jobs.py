@@ -95,8 +95,8 @@ async def create_job(
                 detail=f"Missing required job input fields: {', '.join(missing)}",
             )  # type: ignore[return-value]
         generator = BriefGenerator(
-            ollama_url=settings.ollama_url,
-            ollama_model=settings.ollama_model,
+            llm_url=settings.llm_url,
+            llm_model=settings.llm_model,
         )
         job = Job(
             job_type=body.kind,
@@ -128,8 +128,8 @@ async def create_job(
             title=str(input_payload["query"]),
             content_md=content_md,
             target_query=str(input_payload["query"]),
-            generated_by="ollama",
-            model_id=settings.ollama_model,
+            generated_by="llm",
+            model_id=settings.llm_model,
             requested_by=current_user.username,
         )
         db.add(brief)
@@ -146,7 +146,7 @@ async def create_job(
             status_code=422,
             code="validation_failed",
             detail=f"Unsupported job kind '{body.kind}'",
-        )  # type: ignore[return-value]
+        )
 
     db.add(job)
     await db.commit()

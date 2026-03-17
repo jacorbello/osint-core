@@ -7,6 +7,7 @@ import structlog
 from fastapi import FastAPI
 
 import osint_core.metrics as metrics  # noqa: F401 — register custom Prometheus metrics
+from osint_core.api.errors import ProblemError, problem_exception_handler
 from osint_core.api.routes import (
     alerts,
     audit,
@@ -43,6 +44,8 @@ app = FastAPI(
     docs_url=f"{settings.api_prefix}/docs",
     openapi_url=f"{settings.api_prefix}/openapi.json",
 )
+
+app.add_exception_handler(ProblemError, problem_exception_handler)  # type: ignore[arg-type]
 
 app.include_router(health.router)
 app.include_router(plan.router)

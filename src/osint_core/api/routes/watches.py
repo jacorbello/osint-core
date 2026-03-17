@@ -197,15 +197,16 @@ async def delete_watch(
     current_user: UserInfo = Depends(get_current_user),
 ) -> None:
     """Delete a watch."""
+    from osint_core.api.errors import ProblemError
+
     result = await db.execute(select(Watch).where(Watch.id == watch_id))
     watch = result.scalar_one_or_none()
     if not watch:
-        return problem_response(
-            request,
+        raise ProblemError(
             status_code=404,
             code="not_found",
             detail="Watch not found",
-        )  # type: ignore[return-value]
+        )
 
     await db.delete(watch)
     await db.commit()
