@@ -95,7 +95,7 @@ async def create_job(
                 detail=f"Missing required job input fields: {', '.join(missing)}",
             )  # type: ignore[return-value]
         generator = BriefGenerator(
-            llm_url=settings.llm_url,
+            vllm_url=settings.vllm_url,
             llm_model=settings.llm_model,
         )
         job = Job(

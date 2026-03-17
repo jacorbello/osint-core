@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # --- vLLM (with deprecated Ollama fallbacks) ---
     vllm_url: str = Field(
         default_factory=lambda: _deprecated_env(
-            "OSINT_VLLM_URL", "OSINT_OLLAMA_URL", "http://localhost:8000"
+            "OSINT_VLLM_URL", "OSINT_OLLAMA_URL", "http://localhost:8001"
         ),
     )
     llm_model: str = Field(
