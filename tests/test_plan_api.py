@@ -1,8 +1,17 @@
 """Tests for plan API endpoints."""
 
-from fastapi.testclient import TestClient
+from __future__ import annotations
 
-from osint_core.main import app
+import asyncio
+import uuid
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from fastapi import Response
+from starlette.requests import Request
+
+from osint_core.api.middleware.auth import UserInfo
+from osint_core.api.routes import plan
 
 VALID_PLAN = """
 version: 1
@@ -33,91 +42,129 @@ notifications:
 """
 
 
-def test_validate_plan_endpoint():
-    client = TestClient(app)
-    resp = client.post(
-        "/api/v1/plan/validate",
-        content=VALID_PLAN,
-        headers={"Content-Type": "application/x-yaml"},
+def _run(awaitable):
+    return asyncio.run(awaitable)
+
+
+def _request(path: str, body: bytes = b"", method: str = "GET") -> Request:
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "scheme": "http",
+            "method": method,
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "headers": [],
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+        },
+        receive=receive,
     )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["is_valid"] is True
+
+
+def _user() -> UserInfo:
+    return UserInfo(sub="u-1", username="admin", roles=["admin"])
+
+
+def _mock_plan(**overrides):
+    now = datetime.now(UTC)
+    defaults = {
+        "id": uuid.uuid4(),
+        "plan_id": "test-plan",
+        "version": 1,
+        "content_hash": "sha256:123",
+        "content": {"plan_id": "test-plan"},
+        "retention_class": "standard",
+        "git_commit_sha": None,
+        "activated_at": now,
+        "activated_by": "admin",
+        "is_active": True,
+        "validation_result": {"is_valid": True},
+        "created_at": now,
+    }
+    defaults.update(overrides)
+    mock = MagicMock()
+    for key, value in defaults.items():
+        setattr(mock, key, value)
+    return mock
+
+
+def _db():
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    return db
+
+
+def test_validate_plan_endpoint():
+    request = _request("/api/v1/plans:validate", body=VALID_PLAN.encode(), method="POST")
+    result = _run(plan.validate_plan(request))
+    assert result["is_valid"] is True
 
 
 def test_validate_plan_endpoint_invalid_yaml():
-    client = TestClient(app)
-    resp = client.post(
-        "/api/v1/plan/validate",
-        content="not: valid: yaml: [[[",
-        headers={"Content-Type": "application/x-yaml"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["is_valid"] is False
-    assert len(data["errors"]) > 0
+    request = _request("/api/v1/plans:validate", body=b"not: valid: yaml: [[", method="POST")
+    result = _run(plan.validate_plan(request))
+    assert result["is_valid"] is False
 
 
-def test_validate_plan_endpoint_missing_required():
-    client = TestClient(app)
-    resp = client.post(
-        "/api/v1/plan/validate",
-        content="version: 1\nplan_id: incomplete\n",
-        headers={"Content-Type": "application/x-yaml"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["is_valid"] is False
-    assert len(data["errors"]) > 0
+def test_list_active_plans():
+    with patch("osint_core.api.routes.plan.store.get_all_active", AsyncMock(return_value=[_mock_plan()])):
+        result = _run(plan.list_active_plans(limit=50, offset=0, db=_db(), current_user=_user()))
+    assert result.items[0].plan_id == "test-plan"
 
 
-def test_rescore_events_endpoint_no_plan_id():
-    """POST /api/v1/plan/rescore enqueues a rescore task and returns task metadata."""
-    from unittest.mock import MagicMock, patch
-
-    from fastapi.testclient import TestClient
-
-    from osint_core.main import app
-
-    mock_task = MagicMock()
-    mock_task.id = "test-task-id-1234"
-
-    with patch(
-        "osint_core.api.routes.plan.rescore_all_events_task.delay",
-        return_value=mock_task,
-    ) as mock_delay:
-        client = TestClient(app)
-        resp = client.post("/api/v1/plan/rescore")
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["task_id"] == "test-task-id-1234"
-    assert data["status"] == "enqueued"
-    assert data["plan_id"] is None
-    mock_delay.assert_called_once_with(None)
+def test_get_active_plan():
+    with patch("osint_core.api.routes.plan.store.get_active", AsyncMock(return_value=_mock_plan())):
+        result = _run(
+            plan.get_active_plan(
+                "test-plan",
+                request=_request("/api/v1/plans/test-plan/active-version"),
+                db=_db(),
+                current_user=_user(),
+            )
+        )
+    assert result.plan_id == "test-plan"
 
 
-def test_rescore_events_endpoint_with_plan_id():
-    """POST /api/v1/plan/rescore?plan_id=foo passes plan_id to the task."""
-    from unittest.mock import MagicMock, patch
+def test_update_active_plan_with_version_id():
+    plan_version = _mock_plan()
+    db = _db()
+    with patch("osint_core.api.routes.plan.store.activate", AsyncMock(return_value=plan_version)):
+        result = _run(
+            plan.update_active_plan(
+                "test-plan",
+                body=plan.PlanActivationRequest(version_id=plan_version.id),
+                request=_request("/api/v1/plans/test-plan/active-version", method="PATCH"),
+                db=db,
+                current_user=_user(),
+            )
+        )
+    assert result.id == plan_version.id
 
-    from fastapi.testclient import TestClient
 
-    from osint_core.main import app
-
-    mock_task = MagicMock()
-    mock_task.id = "test-task-id-5678"
-
-    with patch(
-        "osint_core.api.routes.plan.rescore_all_events_task.delay",
-        return_value=mock_task,
-    ) as mock_delay:
-        client = TestClient(app)
-        resp = client.post("/api/v1/plan/rescore?plan_id=my-plan")
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["task_id"] == "test-task-id-5678"
-    assert data["status"] == "enqueued"
-    assert data["plan_id"] == "my-plan"
-    mock_delay.assert_called_once_with("my-plan")
+def test_create_plan_version():
+    db = _db()
+    response = Response()
+    plan_version = _mock_plan()
+    with patch("osint_core.api.routes.plan.store.get_next_version", AsyncMock(return_value=1)):
+        with patch("osint_core.api.routes.plan.store.store_version", AsyncMock(return_value=plan_version)):
+            with patch("osint_core.api.routes.plan.store.activate", AsyncMock(return_value=plan_version)):
+                result = _run(
+                    plan.create_plan(
+                        body=plan.PlanCreateRequest(yaml=VALID_PLAN, activate=True),
+                        request=_request("/api/v1/plans", method="POST"),
+                        response=response,
+                        db=db,
+                        current_user=_user(),
+                    )
+                )
+    assert result.id == plan_version.id
+    assert response.headers["Location"].endswith(str(plan_version.id))

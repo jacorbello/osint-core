@@ -6,11 +6,12 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.api.deps import get_current_user, get_db
+from osint_core.api.errors import collection_page, problem_response, problem_response_docs
 from osint_core.api.middleware.auth import UserInfo
 from osint_core.models.event import Event
 from osint_core.schemas.event import EventList, EventResponse
@@ -39,7 +40,12 @@ def _parse_sort(sort: str | None) -> Any:
     return column.desc().nullslast() if descending else column.asc().nullsfirst()
 
 
-@router.get("", response_model=EventList)
+@router.get(
+    "",
+    response_model=EventList,
+    operation_id="listEvents",
+    responses=problem_response_docs(401, 422),
+)
 async def list_events(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -81,15 +87,18 @@ async def list_events(
     count_result = await db.execute(count_stmt)
     total = count_result.scalar_one()
 
-    page = (offset // limit) + 1
-    pages = (total + limit - 1) // limit if total > 0 else 0
-
-    return EventList(items=items, total=total, page=page, page_size=limit, pages=pages)
+    return EventList(items=items, page=collection_page(offset=offset, limit=limit, total=total))
 
 
-@router.get("/{event_id}", response_model=EventResponse)
+@router.get(
+    "/{event_id}",
+    response_model=EventResponse,
+    operation_id="getEvent",
+    responses=problem_response_docs(401, 404, 422),
+)
 async def get_event(
     event_id: UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
 ) -> EventResponse:
@@ -97,5 +106,10 @@ async def get_event(
     result = await db.execute(select(Event).where(Event.id == event_id))
     event = result.scalar_one_or_none()
     if event is None:
-        raise HTTPException(status_code=404, detail="Event not found")
+        return problem_response(
+            request,
+            status_code=404,
+            code="not_found",
+            detail="Event not found",
+        )  # type: ignore[return-value]
     return event  # type: ignore[return-value]

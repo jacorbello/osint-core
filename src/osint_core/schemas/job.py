@@ -4,26 +4,37 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from enum import StrEnum
 
-from osint_core.schemas.common import JobStatusEnum, PaginatedResponse
+from pydantic import BaseModel, Field
+
+from osint_core.schemas.common import CollectionResponse, JobStatusEnum
+
+
+class JobKindEnum(StrEnum):
+    """API-exposed asynchronous job kinds."""
+
+    ingest = "ingest"
+    rescore = "rescore"
+    brief_generate = "brief_generate"
 
 
 class JobResponse(BaseModel):
     """Serialized job for API responses."""
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
     id: uuid.UUID
-    job_type: str
+    kind: str = Field(alias="job_type")
     status: JobStatusEnum
 
     celery_task_id: str | None = None
     k8s_job_name: str | None = None
-    input_params: dict[str, Any] = {}
-    output: dict[str, Any] = {}
+    input: dict[str, Any] = Field(default_factory=dict, alias="input_params")
+    result: dict[str, Any] = Field(default_factory=dict, alias="output")
     error: str | None = None
     retry_count: int
+    retry_of: uuid.UUID | None = None
 
     next_retry_at: datetime | None = None
     idempotency_key: str | None = None
@@ -31,9 +42,18 @@ class JobResponse(BaseModel):
     plan_version_id: uuid.UUID | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    submitted_at: datetime = Field(alias="created_at")
+    submitted_by: str | None = None
 
-    created_at: datetime
 
-
-class JobList(PaginatedResponse[JobResponse]):
+class JobList(CollectionResponse):
     """Paginated list of jobs."""
+    items: list[JobResponse]
+
+
+class JobCreateRequest(BaseModel):
+    """Submit an asynchronous platform job."""
+
+    kind: JobKindEnum
+    input: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str | None = None

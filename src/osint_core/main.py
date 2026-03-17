@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
-from prometheus_fastapi_instrumentator import Instrumentator
 
 import osint_core.metrics as metrics  # noqa: F401 — register custom Prometheus metrics
 from osint_core.api.routes import (
@@ -16,7 +15,6 @@ from osint_core.api.routes import (
     events,
     health,
     indicators,
-    ingest,
     jobs,
     plan,
     search,
@@ -46,8 +44,6 @@ app = FastAPI(
     openapi_url=f"{settings.api_prefix}/openapi.json",
 )
 
-Instrumentator().instrument(app).expose(app, endpoint="/metrics")
-
 app.include_router(health.router)
 app.include_router(plan.router)
 app.include_router(events.router)
@@ -56,7 +52,6 @@ app.include_router(entities.router)
 app.include_router(alerts.router)
 app.include_router(briefs.router)
 app.include_router(search.router)
-app.include_router(ingest.router)
 app.include_router(jobs.router)
 app.include_router(audit.router)
 app.include_router(watches.router)

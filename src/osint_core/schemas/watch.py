@@ -6,7 +6,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
-from osint_core.schemas.common import PaginatedResponse, SeverityEnum
+from osint_core.schemas.common import CollectionResponse, SeverityEnum
 
 
 class WatchTypeEnum(StrEnum):
@@ -43,6 +43,7 @@ class WatchCreateRequest(BaseModel):
 
 
 class WatchUpdateRequest(BaseModel):
+    watch_type: WatchTypeEnum | None = None
     status: WatchStatusEnum | None = None
     region: str | None = None
     country_codes: list[str] | None = None
@@ -74,5 +75,5 @@ class WatchResponse(BaseModel):
     created_by: str
 
 
-class WatchList(PaginatedResponse[WatchResponse]):
-    pass
+class WatchList(CollectionResponse):
+    items: list[WatchResponse]

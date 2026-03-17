@@ -9,15 +9,12 @@ from typing import Any
 import httpx
 import structlog
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from osint_core.config import settings
 
 logger = structlog.get_logger()
-
-_bearer_scheme = HTTPBearer(auto_error=False)
 
 # JWKS cache
 _jwks_cache: dict[str, Any] | None = None
@@ -70,7 +67,6 @@ def _extract_roles(payload: dict[str, Any]) -> list[str]:
 
 async def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> UserInfo:
     """FastAPI dependency that extracts and validates the Bearer JWT token.
 
@@ -82,14 +78,21 @@ async def get_current_user(
     if settings.auth_disabled:
         return _DEFAULT_ADMIN
 
-    if credentials is None:
+    auth_header = request.headers.get("authorization")
+    if not auth_header:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = credentials.credentials
+    scheme, _, token = auth_header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     try:
         jwks = await _fetch_jwks()

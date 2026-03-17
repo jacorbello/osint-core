@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from osint_core.schemas.common import PaginatedResponse, SeverityEnum
+from osint_core.schemas.common import CollectionResponse, SeverityEnum
 
 
 class EventResponse(BaseModel):
@@ -41,5 +41,12 @@ class EventResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, alias="metadata_")
 
 
-class EventList(PaginatedResponse[EventResponse]):
+class EventList(CollectionResponse):
     """Paginated list of events."""
+    items: list[EventResponse]
+
+
+class EventSearchList(EventList):
+    """Paginated search results with retrieval metadata."""
+
+    retrieval_mode: str

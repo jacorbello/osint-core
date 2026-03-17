@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from osint_core.schemas.common import PaginatedResponse, SeverityEnum, StatusEnum
+from osint_core.schemas.common import CollectionResponse, SeverityEnum, StatusEnum
 
 
 class AlertResponse(BaseModel):
@@ -19,9 +19,9 @@ class AlertResponse(BaseModel):
     title: str
     summary: str | None = None
 
-    event_ids: list[uuid.UUID] = []
-    indicator_ids: list[uuid.UUID] = []
-    entity_ids: list[uuid.UUID] = []
+    event_ids: list[uuid.UUID] = Field(default_factory=list)
+    indicator_ids: list[uuid.UUID] = Field(default_factory=list)
+    entity_ids: list[uuid.UUID] = Field(default_factory=list)
 
     route_name: str | None = None
     status: StatusEnum
@@ -37,20 +37,12 @@ class AlertResponse(BaseModel):
     created_at: datetime
 
 
-class AlertList(PaginatedResponse[AlertResponse]):
+class AlertList(CollectionResponse):
     """Paginated list of alerts."""
+    items: list[AlertResponse]
 
 
-class AlertAckRequest(BaseModel):
-    """Request body for acknowledging an alert."""
+class AlertUpdateRequest(BaseModel):
+    """Request body for updating alert lifecycle state."""
 
-    acked_by: str = Field(description="Username or ID of the person acknowledging the alert")
-
-
-class AlertEscalateRequest(BaseModel):
-    """Request body for escalating an alert."""
-
-    reason: str = Field(description="Reason for escalation")
-    escalate_to: str | None = Field(
-        default=None, description="Target user or team for escalation"
-    )
+    status: StatusEnum = Field(description="New lifecycle status for the alert")
