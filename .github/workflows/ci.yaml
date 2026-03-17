@@ -202,6 +202,44 @@ jobs:
           sarif_file: "trivy-results-${{ matrix.target }}.sarif"
           category: "trivy-${{ matrix.target }}"
 
+  # ── Stage 3.5: Run database migrations (main only) ──────────────
+  migrate:
+    runs-on: [self-hosted, linux, osint-deploy]
+    needs: [build, scan]
+    if: >-
+      always()
+      && github.ref == 'refs/heads/main'
+      && (needs.scan.result == 'success' || inputs.run_migrations)
+    timeout-minutes: 5
+    concurrency:
+      group: osint-infra-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-migrate-${{ hashFiles('pyproject.toml') }}
+          restore-keys: pip-migrate-
+
+      - name: Install app (no dev deps)
+        run: pip install -e "."
+
+      - name: Run Alembic migrations
+        env:
+          OSINT_DATABASE_URL: ${{ secrets.OSINT_DATABASE_URL }}
+        run: python -m alembic upgrade head --verbose
+
+      - name: Verify migration state
+        env:
+          OSINT_DATABASE_URL: ${{ secrets.OSINT_DATABASE_URL }}
+        run: python -m alembic current
+
   # ── Stage 4: Deploy to K8s via GitOps (main only) ──────────────
   deploy:
     runs-on: [self-hosted, linux, osint-deploy]
