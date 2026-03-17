@@ -15,7 +15,9 @@ Run `alembic upgrade head` directly on the self-hosted runner, which already has
 
 ### New GitHub Actions Secret
 
-- **`DATABASE_URL`**: PostgreSQL connection string (e.g., `postgresql+asyncpg://user:pass@host:5432/osint`). Must be added to the repo's Actions secrets before this workflow change is deployed.
+- **`OSINT_DATABASE_URL`**: PostgreSQL connection string (e.g., `postgresql+asyncpg://user:pass@host:5432/osint`). Must be added to the repo's Actions secrets before this workflow change is deployed.
+
+**Why this name:** The app's `Settings` class uses `env_prefix = "OSINT_"` (`src/osint_core/config.py`), so the `database_url` field reads from `OSINT_DATABASE_URL`. Alembic's `env.py` gets the URL via `settings.database_url`. Using a different env var name would silently fall back to the hardcoded default (the in-cluster `postgres:5432` hostname), which would either fail to resolve or connect to the wrong database.
 
 ### New `migrate` Job in `ci.yaml`
 
@@ -32,12 +34,16 @@ test ─┘
 - **Needs:** `[build, scan]`
 - **Condition:** `github.ref == 'refs/heads/main' && needs.scan.result == 'success'`
 - **No path filtering** — runs unconditionally on every deploy. This is intentional: if someone changes an ORM model without adding a migration, `alembic upgrade head` is a no-op when the schema is current, but the deploy proceeds. The real protection is that the schema stays in sync — if a migration is missing, the mismatch surfaces at the application level rather than silently drifting.
+- **Note:** The existing `push` trigger has `paths-ignore` for `docs/**` and `**/*.md`, so doc-only pushes skip the entire workflow (including `migrate`). This is acceptable since doc-only changes never include schema modifications.
+- **Timeout:** `timeout-minutes: 5` on the job to prevent hung migrations (e.g., waiting on a database lock) from blocking the pipeline indefinitely.
+- **Concurrency:** Uses the same `concurrency` group as `deploy` (`osint-infra-deploy`) to prevent concurrent migration runs against the same database. While Alembic acquires an advisory lock on `alembic_version`, running two migrations simultaneously would produce confusing logs and potential lock-timeout failures.
 
 **Steps:**
 1. `actions/checkout@v4`
 2. `actions/setup-python@v5` (Python 3.12, with pip cache)
 3. `pip install -e "."` (installs alembic + app models)
-4. `alembic upgrade head` with `DATABASE_URL` from secrets
+4. `alembic upgrade head` with `OSINT_DATABASE_URL` from secrets
+5. `alembic current` — post-migration verification step (prints current revision for audit logs)
 
 ### Updated `deploy` Job
 
@@ -47,9 +53,11 @@ test ─┘
 
 ### `workflow_dispatch` Input
 
-A new `run_migrations` boolean input (default: `false`) on the workflow. When triggered manually with `run_migrations: true`:
-- Only the `migrate` job runs (build/scan/deploy are skipped via condition).
+The existing `on:` block gains a `workflow_dispatch` trigger with a `run_migrations` boolean input (default: `false`). When triggered manually with `run_migrations: true`:
+- Only the `migrate` job runs. The `build`, `scan`, and `deploy` jobs add `&& !inputs.run_migrations` to their existing `if:` conditions so they are skipped.
 - Enables manual migration runs independent of a code push (e.g., applying a migration that was merged but failed to run, or running migrations against a restored database).
+
+**Note on `pip install`:** The migrate job uses `pip install -e "."` (not `".[dev]"`). Dev dependencies (ruff, mypy, pytest) are not needed for running migrations. This is intentional — do not "correct" it to match lint/test jobs.
 
 ### Rollback Documentation (`docs/runbook.md`)
 
