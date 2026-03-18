@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import uuid
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +14,8 @@ from osint_core.api.errors import collection_page, problem_response_docs
 from osint_core.api.middleware.auth import UserInfo
 from osint_core.models.event import Event
 from osint_core.schemas.event import EventSearchList
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/search", tags=["search"])
 
@@ -65,12 +70,49 @@ async def search_events(
 async def search_semantic(
     q: str = Query(description="Natural language query for semantic search"),
     limit: int = Query(default=20, ge=1, le=100),
+    score_threshold: float = Query(default=0.5, ge=0.0, le=1.0),
+    db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
 ) -> EventSearchList:
     """Semantic similarity search via Qdrant."""
-    _ = q
+    from osint_core.services.vectorize import search_similar
+
+    hits = search_similar(q, limit=limit, score_threshold=score_threshold)
+
+    if not hits:
+        logger.debug("Semantic search for %r returned 0 Qdrant hits", q)
+        return EventSearchList(
+            items=[],
+            page=collection_page(offset=0, limit=limit, total=0),
+            retrieval_mode="semantic",
+        )
+
+    # Extract event UUIDs from Qdrant payloads (stored as strings)
+    event_ids: list[uuid.UUID] = []
+    for hit in hits:
+        raw_id = hit.get("payload", {}).get("event_id")
+        if raw_id:
+            try:
+                event_ids.append(uuid.UUID(str(raw_id)))
+            except ValueError:
+                logger.warning("Qdrant hit has non-UUID event_id: %r", raw_id)
+
+    if not event_ids:
+        return EventSearchList(
+            items=[],
+            page=collection_page(offset=0, limit=limit, total=0),
+            retrieval_mode="semantic",
+        )
+
+    stmt = select(Event).where(Event.id.in_(event_ids))
+    result = await db.execute(stmt)
+    events_by_id = {str(e.id): e for e in result.scalars().all()}
+
+    # Return events in Qdrant score order (highest similarity first)
+    ordered = [events_by_id[str(eid)] for eid in event_ids if str(eid) in events_by_id]
+
     return EventSearchList(
-        items=[],
-        page=collection_page(offset=0, limit=limit, total=0),
+        items=ordered,
+        page=collection_page(offset=0, limit=limit, total=len(ordered)),
         retrieval_mode="semantic",
     )
