@@ -5,8 +5,6 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from osint_core.api.routes.search import search_semantic
 from osint_core.schemas.event import EventSearchList
 from tests.helpers import make_user, run_async

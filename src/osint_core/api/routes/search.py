@@ -15,6 +15,7 @@ from osint_core.api.errors import collection_page, problem_response_docs
 from osint_core.api.middleware.auth import UserInfo
 from osint_core.models.event import Event
 from osint_core.schemas.event import EventSearchList
+from osint_core.services.vectorize import search_similar
 
 logger = structlog.get_logger()
 
@@ -76,8 +77,6 @@ async def search_semantic(
     current_user: UserInfo = Depends(get_current_user),
 ) -> EventSearchList:
     """Semantic similarity search via Qdrant."""
-    from osint_core.services.vectorize import search_similar
-
     hits = await asyncio.to_thread(search_similar, q, limit=limit, score_threshold=score_threshold)
 
     if not hits:

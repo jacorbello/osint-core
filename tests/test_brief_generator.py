@@ -1,7 +1,7 @@
 """Tests for the intel brief generator service."""
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
