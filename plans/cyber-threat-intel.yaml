@@ -35,7 +35,7 @@ sources:
     url: "https://threatfox-api.abuse.ch/api/v1/"
     schedule_cron: "45 */4 * * *"
 
-  - id: rss_hackernews
+  - id: rss_thehackersnews
     type: rss
     url: "https://feeds.feedburner.com/TheHackersNews"
     schedule_cron: "0 */1 * * *"
@@ -70,7 +70,7 @@ scoring:
     osv_pypi: 0.6
     urlhaus_recent: 0.73
     threatfox_iocs: 0.8
-    rss_hackernews: 0.53
+    rss_thehackersnews: 0.53
     otx_pulses: 0.67
     mb_recent: 0.6
     feodo_recent: 0.6

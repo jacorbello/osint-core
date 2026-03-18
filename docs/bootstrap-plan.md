@@ -34,7 +34,7 @@ After sync the script verifies the `cyber-threat-intel` plan is active.
 
 | File | plan_id | Description |
 |------|---------|-------------|
-| `plans/cyber-threat-intel.yaml` | `cyber-threat-intel` | Primary CTI plan — 6 connectors (CISA KEV, NVD, OSV/PyPI, URLhaus, ThreatFox, RSS/Hacker News) |
+| `plans/cyber-threat-intel.yaml` | `cyber-threat-intel` | Primary CTI plan — 9 connectors (CISA KEV, NVD, OSV/PyPI, URLhaus, ThreatFox, The Hacker News, OTX, MalwareBazaar, FeodoTracker) |
 | `plans/example.yaml` | `libertycenter-osint` | Example/reference plan |
 
 ## Plan API reference
@@ -53,7 +53,12 @@ After sync the script verifies the `cyber-threat-intel` plan is active.
 Once a plan is active you can trigger a single source:
 
 ```bash
+# With auth disabled (OSINT_AUTH_DISABLED=true, e.g. in dev):
 curl -X POST "http://localhost:8000/api/v1/ingest/source/cisa_kev/run?plan_id=cyber-threat-intel"
+
+# With auth enabled, include a Bearer token:
+curl -X POST "http://localhost:8000/api/v1/ingest/source/cisa_kev/run?plan_id=cyber-threat-intel" \
+  -H "Authorization: Bearer <token>"
 ```
 
 ## Updating a plan
@@ -61,3 +66,17 @@ curl -X POST "http://localhost:8000/api/v1/ingest/source/cisa_kev/run?plan_id=cy
 Edit the YAML file and re-run `./scripts/load_plan.sh`.  A new version is
 created only if the content hash differs from the latest stored version.  The
 new version is auto-activated on sync.
+
+> **Note:** With `docker-compose.dev.yaml` the `plans/` directory is baked into
+> the image — there is no bind-mount by default.  After editing a plan YAML you
+> must rebuild the `api` image before re-running the sync script:
+>
+> ```bash
+> docker compose -f docker-compose.dev.yaml build api
+> docker compose -f docker-compose.dev.yaml up -d api
+> ./scripts/load_plan.sh
+> ```
+>
+> Alternatively, set `OSINT_PLAN_DIR` to a host-mounted directory (add a
+> `volumes:` bind-mount in your compose override) so edits are picked up without
+> a rebuild.

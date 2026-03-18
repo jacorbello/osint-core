@@ -31,6 +31,7 @@ echo "    synced: ${SYNCED}  errors: ${ERRORS}"
 if [ "$ERRORS" -gt 0 ]; then
   echo "==> Sync errors:"
   echo "$SYNC_RESP" | python3 -m json.tool
+  exit 1
 fi
 
 # Verify the cyber-threat-intel plan is active
