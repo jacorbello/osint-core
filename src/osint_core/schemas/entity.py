@@ -4,9 +4,9 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from osint_core.schemas.common import PaginatedResponse
+from osint_core.schemas.common import CollectionResponse
 
 
 class EntityResponse(BaseModel):
@@ -17,8 +17,8 @@ class EntityResponse(BaseModel):
     id: uuid.UUID
     entity_type: str
     name: str
-    aliases: list[str] = []
-    attributes: dict[str, Any] = {}
+    aliases: list[str] = Field(default_factory=list)
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
     first_seen: datetime
     last_seen: datetime
@@ -26,5 +26,6 @@ class EntityResponse(BaseModel):
     created_at: datetime
 
 
-class EntityList(PaginatedResponse[EntityResponse]):
+class EntityList(CollectionResponse):
     """Paginated list of entities."""
+    items: list[EntityResponse]

@@ -86,12 +86,23 @@
     "notifications": {
       "$ref": "#/$defs/notifications"
     },
+    "keywords": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Topic keywords for relevance scoring. Events matching more keywords score higher."
+    },
     "source_profiles": {
       "type": "object",
       "description": "Map of source IDs to reliability/credibility profiles (child plans only).",
       "additionalProperties": {
         "$ref": "#/$defs/source_profile"
       }
+    },
+    "enrichment": {
+      "$ref": "#/$defs/enrichment"
+    },
+    "target_geo": {
+      "$ref": "#/$defs/target_geo"
     }
   },
   "if": {
@@ -132,7 +143,12 @@
             "github_releases",
             "gdelt_api",
             "reliefweb_api",
-            "shodan_api"
+            "shodan_api",
+            "otx_api",
+            "abusech_malwarebazaar",
+            "abusech_feodotracker",
+            "acled_api",
+            "nws_alerts"
           ],
           "description": "Source collector type."
         },
@@ -199,9 +215,51 @@
               "description": "If any of these tags are present, force an alert."
             }
           }
+        },
+        "severity_promotions": {
+          "type": "array",
+          "description": "Rules that can promote severity based on event conditions.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "condition": { "type": "object" },
+              "promote_to": {
+                "type": "string",
+                "enum": ["low", "medium", "high", "critical"]
+              }
+            }
+          }
+        },
+        "keyword_miss_penalty": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.05,
+          "description": "Relevance score when no keywords match."
         }
       },
       "additionalProperties": false
+    },
+    "target_geo": {
+      "type": "object",
+      "description": "Target geographic area for relevance scoring.",
+      "properties": {
+        "country_codes": { "type": "array", "items": { "type": "string" } },
+        "lat": { "type": "number" },
+        "lon": { "type": "number" },
+        "radius_km": { "type": "number", "minimum": 0 }
+      }
+    },
+    "enrichment": {
+      "type": "object",
+      "description": "NLP enrichment configuration.",
+      "properties": {
+        "nlp_enabled": { "type": "boolean", "default": false },
+        "mission": { "type": "string" },
+        "classify_relevance": { "type": "boolean", "default": true },
+        "extract_entities": { "type": "boolean", "default": true },
+        "generate_summaries": { "type": "boolean", "default": true }
+      }
     },
     "notifications": {
       "type": "object",

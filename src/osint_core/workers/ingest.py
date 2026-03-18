@@ -9,6 +9,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from celery import chain, group
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -22,6 +23,7 @@ from osint_core.services.indicators import extract_indicators
 from osint_core.services.plan_store import PlanStore
 from osint_core.workers.celery_app import celery_app
 from osint_core.workers.enrich import correlate_event_task, vectorize_event_task
+from osint_core.workers.nlp_enrich import nlp_enrich_task
 from osint_core.workers.score import score_event_task
 
 logger = logging.getLogger(__name__)
@@ -51,12 +53,13 @@ def ingest_source(self: Any, source_id: str, plan_id: str) -> dict[str, Any]:
     Config errors (ValueError, KeyError) are not retried.
     Transient errors are retried with capped exponential backoff.
     """
+    loop = asyncio.new_event_loop()
     try:
-        return asyncio.run(_ingest_source_async(self, source_id, plan_id))
+        return loop.run_until_complete(_ingest_source_async(self, source_id, plan_id))
     except (ValueError, KeyError) as exc:
         logger.error("Ingest config error for %s: %s", source_id, exc)
         try:
-            asyncio.run(_record_failed_job(self, plan_id, source_id, str(exc)))
+            loop.run_until_complete(_record_failed_job(self, plan_id, source_id, str(exc)))
         except Exception:
             logger.exception("Failed to record failed job for %s", source_id)
         return {
@@ -71,6 +74,8 @@ def ingest_source(self: Any, source_id: str, plan_id: str) -> dict[str, Any]:
     except Exception as exc:
         countdown = min(2 ** self.request.retries * 30, 900)
         raise self.retry(exc=exc, countdown=countdown) from exc
+    finally:
+        loop.close()
 
 
 async def _ingest_source_async(
@@ -110,7 +115,12 @@ async def _ingest_source_async(
         # Step 2: Fetch items
         connector = registry.get(source_cfg.type, source_cfg)
         items = await connector.fetch()
-        logger.info("Fetched %d items from %s", len(items), source_id)
+
+        # Enforce max_items cap and minimum content threshold
+        max_items = source_cfg.extra.get("max_items", 100)
+        items = items[:max_items]
+        items = [i for i in items if i.title or i.summary]
+        logger.info("Fetched %d items from %s (after filtering)", len(items), source_id)
 
         # Step 3: Dedupe & persist each item
         for item in items:
@@ -176,10 +186,13 @@ async def _ingest_source_async(
         await db.commit()
 
     # Step 6: Chain downstream tasks
+    # NLP enrich first, then score + vectorize in parallel, then correlate
     for event_id in new_event_ids:
-        score_event_task.delay(event_id)
-        vectorize_event_task.delay(event_id)
-        correlate_event_task.delay(event_id)
+        chain(
+            nlp_enrich_task.si(event_id),
+            group(score_event_task.si(event_id), vectorize_event_task.si(event_id)),
+            correlate_event_task.si(event_id),
+        ).apply_async()
 
     # Step 7: Record Job
     if errors > 0 and ingested > 0:

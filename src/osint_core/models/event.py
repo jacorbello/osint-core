@@ -5,11 +5,14 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Column,
+    Computed,
     Float,
     ForeignKey,
     Index,
+    Integer,
     Table,
     Text,
 )
@@ -108,9 +111,26 @@ class Event(UUIDMixin, TimestampMixin, Base):
         "metadata", JSONB, server_default="{}", nullable=False
     )
 
-    # FTS vector — the actual GENERATED ALWAYS AS expression is applied in the
-    # Alembic migration.  We define the column here so SQLAlchemy knows about it.
-    search_vector: Mapped[Any | None] = mapped_column(TSVECTOR, nullable=True)
+    simhash: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    canonical_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("osint.events.id"), nullable=True,
+    )
+    corroboration_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    nlp_relevance: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nlp_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fatalities: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    _SEARCH_EXPR = (
+        "to_tsvector('english',"
+        " coalesce(title, '') || ' '"
+        " || coalesce(summary, '') || ' '"
+        " || coalesce(raw_excerpt, ''))"
+    )
+    search_vector: Mapped[Any | None] = mapped_column(
+        TSVECTOR,
+        Computed(_SEARCH_EXPR, persisted=True),
+        nullable=True,
+    )
 
     # --- relationships ---
     plan_version = relationship("PlanVersion", lazy="selectin")

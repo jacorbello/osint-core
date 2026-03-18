@@ -1,63 +1,92 @@
-version: 1
+version: 2
 plan_id: cyber-threat-intel
+plan_type: child
 description: >-
   Cyber threat intelligence collection plan covering vulnerability feeds,
   malware IOCs, and security news.  Designed for continuous monitoring
-  with cron-scheduled ingest across six open-source connectors.
+  with cron-scheduled ingest across open-source connectors.
 retention_class: standard
 
 sources:
   - id: cisa_kev
     type: cisa_kev
     url: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-    weight: 1.3
-    schedule_cron: "0 */4 * * *"           # every 4 hours
+    schedule_cron: "0 */4 * * *"
 
   - id: nvd_recent
     type: nvd_json_feed
     url: "https://services.nvd.nist.gov/rest/json/cves/2.0"
-    weight: 1.0
-    schedule_cron: "15 */2 * * *"          # every 2 hours at :15
+    schedule_cron: "15 */2 * * *"
 
   - id: osv_pypi
     type: osv_api
     url: "https://api.osv.dev/v1/query"
-    weight: 0.9
-    schedule_cron: "30 */6 * * *"          # every 6 hours at :30
+    schedule_cron: "30 */6 * * *"
     params:
       ecosystem: PyPI
 
   - id: urlhaus_recent
     type: urlhaus_api
     url: "https://urlhaus-api.abuse.ch/v1/"
-    weight: 1.1
-    schedule_cron: "0 */3 * * *"           # every 3 hours
+    schedule_cron: "0 */3 * * *"
 
   - id: threatfox_iocs
     type: threatfox_api
     url: "https://threatfox-api.abuse.ch/api/v1/"
-    weight: 1.2
-    schedule_cron: "45 */4 * * *"          # every 4 hours at :45
+    schedule_cron: "45 */4 * * *"
 
-  - id: rss_hackernews
+  - id: rss_thehackersnews
     type: rss
     url: "https://feeds.feedburner.com/TheHackersNews"
-    weight: 0.8
-    schedule_cron: "0 */1 * * *"           # every hour
+    schedule_cron: "0 */1 * * *"
+
+  - id: otx_pulses
+    type: otx_api
+    url: "https://otx.alienvault.com/api/v1/pulses/subscribed"
+    schedule_cron: "0 */4 * * *"
+    params:
+      api_key: "${OSINT_OTX_API_KEY}"
+      max_items: 50
+
+  - id: mb_recent
+    type: abusech_malwarebazaar
+    url: "https://mb-api.abuse.ch/api/v1/"
+    schedule_cron: "30 */4 * * *"
+    params:
+      max_items: 50
+
+  - id: feodo_recent
+    type: abusech_feodotracker
+    url: "https://feodotracker.abuse.ch/downloads/ipblocklist_recent.json"
+    schedule_cron: "0 */6 * * *"
+    params:
+      max_items: 50
 
 scoring:
   recency_half_life_hours: 48
   source_reputation:
-    cisa_kev: 1.3
-    nvd_recent: 1.0
-    osv_pypi: 0.9
-    urlhaus_recent: 1.1
-    threatfox_iocs: 1.2
-    rss_hackernews: 0.8
+    cisa_kev: 0.87
+    nvd_recent: 0.67
+    osv_pypi: 0.6
+    urlhaus_recent: 0.73
+    threatfox_iocs: 0.8
+    rss_thehackersnews: 0.53
+    otx_pulses: 0.67
+    mb_recent: 0.6
+    feodo_recent: 0.6
   ioc_match_boost: 2.5
-  force_alert:
-    min_severity: high
-    tags_any: ["force_alert", "critical_vuln"]
+  severity_promotions:
+    - condition: {field: "indicators.cvss", op: "gte", value: 9.0}
+      promote_to: critical
+    - condition: {field: "source_id", op: "eq", value: "cisa_kev"}
+      promote_to: high
+
+enrichment:
+  nlp_enabled: true
+  mission: "Track vulnerabilities, malware campaigns, and IOC indicators affecting enterprise infrastructure"
+  classify_relevance: true
+  extract_entities: true
+  generate_summaries: true
 
 notifications:
   default_dedupe_window_minutes: 90

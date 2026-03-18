@@ -6,3 +6,8 @@
 #
 # Maintenance: prune entries older than 90 days.
 # No entries yet — add as needed after first scan.
+
+# owner: alastar | date: 2026-03-15 | reason: linux-libc-dev contains kernel headers only;
+# the running kernel is the k3s host's kernel, not the container's. Not exploitable in
+# containerized workloads. Re-evaluate if base image is updated with linux-libc-dev >= 6.12.74-2.
+CVE-2025-71238

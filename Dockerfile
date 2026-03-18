@@ -4,10 +4,13 @@
 FROM harbor.corbello.io/osint/python-base:ml-latest AS base
 WORKDIR /app
 
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
 # Install only core Python deps (ML deps already in base image)
 COPY pyproject.toml .
 COPY src/ src/
-RUN pip install --no-cache-dir "."
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install "."
 
 COPY alembic.ini .
 COPY plans/ plans/

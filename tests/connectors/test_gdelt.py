@@ -169,3 +169,23 @@ async def test_dedupe_keys_differ(connector: GdeltConnector, respx_mock):
     )
     items = await connector.fetch()
     assert connector.dedupe_key(items[0]) != connector.dedupe_key(items[1])
+
+
+@pytest.mark.asyncio
+async def test_fetch_returns_empty_on_non_json_response(connector: GdeltConnector, respx_mock):
+    """GDELT sometimes returns HTML or empty bodies instead of JSON."""
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, text="<html>Rate limited</html>")
+    )
+    items = await connector.fetch()
+    assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_returns_empty_on_empty_body(connector: GdeltConnector, respx_mock):
+    """GDELT sometimes returns 200 with completely empty body."""
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, text="")
+    )
+    items = await connector.fetch()
+    assert items == []
