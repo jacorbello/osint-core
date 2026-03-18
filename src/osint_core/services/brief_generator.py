@@ -98,7 +98,7 @@ async def fetch_brief_context(
     """
     from osint_core.models.event import Event  # avoid circular imports
 
-    ts_query = func.plainto_tsquery("english", query)
+    ts_query = func.websearch_to_tsquery("english", query)
     stmt = (
         select(Event)
         .where(Event.search_vector.op("@@")(ts_query))
@@ -273,6 +273,17 @@ class BriefGenerator:
             Markdown string from either vLLM or the template.
         """
         title = query or "Intelligence Brief"
+
+        if not events:
+            timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            logger.info("brief_skipped_no_events", query=query)
+            return (
+                "# No Matching Events\n\n"
+                "No events matching the query were found in the database. "
+                "Try broadening your search terms or ingesting more data.\n\n"
+                f"**Query:** {query}\n"
+                f"**Generated at:** {timestamp}\n"
+            )
 
         if self._llm_available:
             try:

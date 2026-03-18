@@ -110,7 +110,7 @@ async def create_brief(
         title=body.query,
         content_md=content_md,
         target_query=body.query,
-        generated_by="vllm",
+        generated_by="template" if not ctx.events else "vllm",
         model_id=settings.llm_model,
         requested_by=current_user.username,
         event_ids=ctx.event_ids,
