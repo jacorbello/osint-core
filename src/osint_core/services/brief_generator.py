@@ -260,7 +260,7 @@ class BriefGenerator:
         events: list[dict[str, Any]],
         indicators: list[dict[str, Any]],
         entities: list[dict[str, Any]],
-    ) -> str:
+    ) -> tuple[str, str]:
         """Generate a brief -- try vLLM first, fall back to template on failure.
 
         Args:
@@ -270,25 +270,28 @@ class BriefGenerator:
             entities: List of entity dicts.
 
         Returns:
-            Markdown string from either vLLM or the template.
+            Tuple of (content_md, generated_by) where generated_by is one of
+            ``"none"``, ``"vllm"``, or ``"template"``.
         """
         title = query or "Intelligence Brief"
 
         if not events:
             timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             logger.info("brief_skipped_no_events", query=query)
-            return (
+            content_md = (
                 "# No Matching Events\n\n"
                 "No events matching the query were found in the database. "
                 "Try broadening your search terms or ingesting more data.\n\n"
-                f"**Query:** {query}\n"
+                f"**Query:** `{query}`\n"
                 f"**Generated at:** {timestamp}\n"
             )
+            return content_md, "none"
 
         if self._llm_available:
             try:
                 context = self._build_context(events, indicators, entities)
-                return await self.generate_from_vllm(query=query, context=context)
+                content_md = await self.generate_from_vllm(query=query, context=context)
+                return content_md, "vllm"
             except (
                 httpx.HTTPStatusError,
                 httpx.ConnectError,
@@ -300,12 +303,13 @@ class BriefGenerator:
                     error=str(exc),
                 )
 
-        return self.generate_from_template(
+        content_md = self.generate_from_template(
             title=title,
             events=events,
             indicators=indicators,
             entities=entities,
         )
+        return content_md, "template"
 
     # ------------------------------------------------------------------
     # Helpers

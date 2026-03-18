@@ -92,7 +92,7 @@ async def create_brief(
     )
 
     try:
-        content_md = await generator.generate(
+        content_md, generated_by = await generator.generate(
             query=body.query,
             events=ctx.events,
             indicators=ctx.indicators,
@@ -110,7 +110,7 @@ async def create_brief(
         title=body.query,
         content_md=content_md,
         target_query=body.query,
-        generated_by="template" if not ctx.events else "vllm",
+        generated_by=generated_by,
         model_id=settings.llm_model,
         requested_by=current_user.username,
         event_ids=ctx.event_ids,

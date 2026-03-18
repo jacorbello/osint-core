@@ -120,7 +120,7 @@ async def test_vllm_fallback_on_error(generator_with_vllm: BriefGenerator):
         return_value=httpx.Response(500, json={"error": "model not found"})
     )
 
-    result = await generator_with_vllm.generate(
+    result, generated_by = await generator_with_vllm.generate(
         query="Summarize threats",
         events=SAMPLE_EVENTS,
         indicators=SAMPLE_INDICATORS,
@@ -131,6 +131,7 @@ async def test_vllm_fallback_on_error(generator_with_vllm: BriefGenerator):
     assert "# Intel Brief:" in result
     assert "CVE-2026-1234 Published" in result
     assert "192.168.1.100" in result
+    assert generated_by == "template"
 
 
 def test_template_includes_events_indicators_entities(generator_no_vllm: BriefGenerator):
@@ -273,7 +274,7 @@ async def test_vllm_receives_event_context(generator_with_vllm: BriefGenerator):
         return_value=httpx.Response(200, json=vllm_response)
     )
 
-    await generator_with_vllm.generate(
+    content_md, generated_by = await generator_with_vllm.generate(
         query="Austin terrorism",
         events=SAMPLE_EVENTS,
         indicators=SAMPLE_INDICATORS,
@@ -285,6 +286,7 @@ async def test_vllm_receives_event_context(generator_with_vllm: BriefGenerator):
     assert "CVE-2026-1234 Published" in sent_body
     assert "192.168.1.100" in sent_body
     assert "APT-29" in sent_body
+    assert generated_by == "vllm"
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +303,7 @@ async def test_generate_empty_events_skips_vllm(generator_with_vllm: BriefGenera
         return_value=httpx.Response(200, json={"choices": [{"message": {"content": "hallucination"}}]})
     )
 
-    result = await generator_with_vllm.generate(
+    result, generated_by = await generator_with_vllm.generate(
         query="What are the current terror threats in Austin, Texas?",
         events=[],
         indicators=[],
@@ -312,12 +314,13 @@ async def test_generate_empty_events_skips_vllm(generator_with_vllm: BriefGenera
     assert "# No Matching Events" in result
     assert "Austin, Texas" in result
     assert "hallucination" not in result
+    assert generated_by == "none"
 
 
 @pytest.mark.asyncio
 async def test_generate_empty_events_returns_template_markdown(generator_no_vllm: BriefGenerator):
     """Empty events with vLLM disabled also returns the no-match template."""
-    result = await generator_no_vllm.generate(
+    result, generated_by = await generator_no_vllm.generate(
         query="Terror threats Austin",
         events=[],
         indicators=[],
@@ -328,12 +331,13 @@ async def test_generate_empty_events_returns_template_markdown(generator_no_vllm
     assert "Terror threats Austin" in result
     assert "**Query:**" in result
     assert "**Generated at:**" in result
+    assert generated_by == "none"
 
 
 @pytest.mark.asyncio
 async def test_generate_non_empty_events_still_calls_vllm_path(generator_no_vllm: BriefGenerator):
     """Non-empty events still follow the normal generation path (template here since no vLLM)."""
-    result = await generator_no_vllm.generate(
+    result, generated_by = await generator_no_vllm.generate(
         query="Weekly brief",
         events=SAMPLE_EVENTS,
         indicators=SAMPLE_INDICATORS,
@@ -343,6 +347,7 @@ async def test_generate_non_empty_events_still_calls_vllm_path(generator_no_vllm
     # Should use the template path (no vLLM available) and include event data
     assert "# No Matching Events" not in result
     assert "CVE-2026-1234 Published" in result
+    assert generated_by == "template"
 
 
 # ---------------------------------------------------------------------------
