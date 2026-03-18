@@ -79,3 +79,6 @@ docker-compose.override.yml
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Git worktrees
+.worktrees/
