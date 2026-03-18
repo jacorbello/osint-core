@@ -16,6 +16,8 @@
 #
 # Environment:
 #   API_BASE_URL  — API base URL (default: http://localhost:8000)
+#   API_TOKEN     — Bearer token for authenticated deployments (omit when auth_disabled=true)
+#   CURL_TIMEOUT  — Max seconds per curl request (default: 30)
 #   POLL_INTERVAL — Seconds between status polls (default: 5)
 #   POLL_TIMEOUT  — Max seconds to wait for task completion (default: 120)
 
@@ -29,6 +31,8 @@ SOURCE_ID="${1:-cisa_kev}"
 PLAN_ID="${2:-libertycenter-osint}"
 POLL_INTERVAL="${POLL_INTERVAL:-5}"
 POLL_TIMEOUT="${POLL_TIMEOUT:-120}"
+API_TOKEN="${API_TOKEN:-}"
+CURL_TIMEOUT="${CURL_TIMEOUT:-30}"
 
 PASS=0
 FAIL=0
@@ -51,8 +55,24 @@ require_cmd() {
     fi
 }
 
-api_get() { curl -fsS --fail-with-body -H "Content-Type: application/json" "${API_BASE_URL}$1"; }
-api_post() { curl -fsS --fail-with-body -X POST -H "Content-Type: application/json" "${API_BASE_URL}$1"; }
+api_get() {
+    if [[ -n "${API_TOKEN}" ]]; then
+        curl -sf --max-time "${CURL_TIMEOUT}" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            "${API_BASE_URL}$1"
+    else
+        curl -sf --max-time "${CURL_TIMEOUT}" "${API_BASE_URL}$1"
+    fi
+}
+api_post() {
+    if [[ -n "${API_TOKEN}" ]]; then
+        curl -sf --max-time "${CURL_TIMEOUT}" -X POST \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            "${API_BASE_URL}$1"
+    else
+        curl -sf --max-time "${CURL_TIMEOUT}" -X POST "${API_BASE_URL}$1"
+    fi
+}
 
 # ---------------------------------------------------------------------------
 # Preflight
@@ -97,7 +117,6 @@ DISPATCH_RESPONSE=$(api_post "/api/v1/ingest/source/${SOURCE_ID}/run?plan_id=${P
 }
 
 TASK_ID=$(echo "${DISPATCH_RESPONSE}" | jq -r '.task_id // empty')
-CELERY_TASK_ID=$(echo "${DISPATCH_RESPONSE}" | jq -r '.celery_task_id // empty')
 DISPATCH_STATUS=$(echo "${DISPATCH_RESPONSE}" | jq -r '.status // empty')
 
 if [[ -n "${TASK_ID}" && "${DISPATCH_STATUS}" == "dispatched" ]]; then
@@ -121,13 +140,14 @@ while [[ ${ELAPSED} -lt ${POLL_TIMEOUT} ]]; do
     JOBS_RESPONSE=$(api_get "/api/v1/jobs?limit=100" 2>/dev/null) || true
 
     if [[ -n "${JOBS_RESPONSE}" ]]; then
-        # Find the job matching our celery_task_id, falling back to source_id + dispatch time
-        if [[ -n "${CELERY_TASK_ID}" ]]; then
-            JOB_MATCH=$(echo "${JOBS_RESPONSE}" | jq -r --arg tid "${CELERY_TASK_ID}" \
-                '[.items[] | select(.celery_task_id == $tid)] | first // empty')
-        else
+        # Match job by celery_task_id (== TASK_ID from dispatch response),
+        # falling back to source_id + dispatch time for older records without it
+        JOB_MATCH=$(echo "${JOBS_RESPONSE}" | jq -r --arg tid "${TASK_ID}" \
+            '[.items[] | select(.celery_task_id == $tid)] | first // empty')
+
+        if [[ -z "${JOB_MATCH}" || "${JOB_MATCH}" == "null" ]]; then
             JOB_MATCH=$(echo "${JOBS_RESPONSE}" | jq -r --arg sid "${SOURCE_ID}" --arg dt "${DISPATCH_TIME}" \
-                '[.items[] | select(.input_params.source_id == $sid and .created_at >= $dt)] | sort_by(.created_at) | last // empty')
+                '[.items[] | select(.input.source_id == $sid and .submitted_at >= $dt)] | sort_by(.submitted_at) | last // empty')
         fi
 
         if [[ -n "${JOB_MATCH}" && "${JOB_MATCH}" != "null" ]]; then
@@ -171,7 +191,7 @@ bold "Step 3: Verify events were created"
 EVENTS_RESPONSE=$(api_get "/api/v1/events?source_id=${SOURCE_ID}&limit=5&date_from=${DISPATCH_TIME}" 2>/dev/null) || true
 
 if [[ -n "${EVENTS_RESPONSE}" ]]; then
-    EVENT_COUNT=$(echo "${EVENTS_RESPONSE}" | jq -r '.total // 0')
+    EVENT_COUNT=$(echo "${EVENTS_RESPONSE}" | jq -r '.page.total // 0')
     if [[ "${EVENT_COUNT}" -gt 0 ]]; then
         check_pass "Found ${EVENT_COUNT} event(s) for source_id=${SOURCE_ID}"
         # Show a sample event title
@@ -219,9 +239,9 @@ if [[ -n "${JOB_ID}" && "${JOB_ID}" != "null" ]]; then
     JOB_DETAIL=$(api_get "/api/v1/jobs/${JOB_ID}" 2>/dev/null) || true
 
     if [[ -n "${JOB_DETAIL}" ]]; then
-        INGESTED=$(echo "${JOB_DETAIL}" | jq -r '.output.ingested // 0')
-        SKIPPED=$(echo "${JOB_DETAIL}" | jq -r '.output.skipped // 0')
-        ERRORS=$(echo "${JOB_DETAIL}" | jq -r '.output.errors // 0')
+        INGESTED=$(echo "${JOB_DETAIL}" | jq -r '.result.ingested // 0')
+        SKIPPED=$(echo "${JOB_DETAIL}" | jq -r '.result.skipped // 0')
+        ERRORS=$(echo "${JOB_DETAIL}" | jq -r '.result.errors // 0')
 
         echo "  Ingested: ${INGESTED}  |  Skipped: ${SKIPPED}  |  Errors: ${ERRORS}"
 
