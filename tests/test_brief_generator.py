@@ -9,8 +9,8 @@ import respx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.services.brief_generator import (
-    BriefGenerator,
     BriefContext,
+    BriefGenerator,
     fetch_brief_context,
     serialize_events_for_context,
 )
@@ -300,7 +300,9 @@ async def test_generate_empty_events_skips_vllm(generator_with_vllm: BriefGenera
     """When events list is empty, generate() must NOT call vLLM."""
     # Register a route — we assert it is never called
     route = respx.post("http://localhost:8000/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json={"choices": [{"message": {"content": "hallucination"}}]})
+        return_value=httpx.Response(
+            200, json={"choices": [{"message": {"content": "hallucination"}}]},
+        )
     )
 
     result, generated_by = await generator_with_vllm.generate(
@@ -377,7 +379,9 @@ async def test_fetch_brief_context_uses_websearch_to_tsquery():
 
         await fetch_brief_context(db, "terror threats Austin Texas")
 
-        mock_func.websearch_to_tsquery.assert_called_once_with("english", "terror threats Austin Texas")
+        mock_func.websearch_to_tsquery.assert_called_once_with(
+            "english", "terror threats Austin Texas",
+        )
         mock_func.plainto_tsquery.assert_not_called()
 
 

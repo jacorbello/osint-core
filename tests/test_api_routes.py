@@ -342,7 +342,7 @@ def test_create_brief_returns_201_and_location():
         patch("osint_core.api.routes.briefs.Brief", return_value=brief),
     ):
         generator = AsyncMock()
-        generator.generate = AsyncMock(return_value="# Brief\nGenerated content.")
+        generator.generate = AsyncMock(return_value=("# Brief\nGenerated content.", "vllm"))
         generator_cls.return_value = generator
         result = run_async(
             briefs.create_brief(
