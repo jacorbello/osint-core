@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
@@ -77,7 +78,7 @@ async def search_semantic(
     """Semantic similarity search via Qdrant."""
     from osint_core.services.vectorize import search_similar
 
-    hits = search_similar(q, limit=limit, score_threshold=score_threshold)
+    hits = await asyncio.to_thread(search_similar, q, limit=limit, score_threshold=score_threshold)
 
     if not hits:
         logger.debug("Semantic search for %r returned 0 Qdrant hits", q)

@@ -51,7 +51,7 @@ def _make_db(events: list[MagicMock]) -> AsyncMock:
 # ---------------------------------------------------------------------------
 
 
-@patch("osint_core.services.vectorize.search_similar")
+@patch("osint_core.api.routes.search.search_similar")
 def test_semantic_search_returns_events(mock_search_similar):
     """Route fetches events from Postgres and returns them in score order."""
     event_id = uuid.uuid4()
@@ -81,7 +81,7 @@ def test_semantic_search_returns_events(mock_search_similar):
     )
 
 
-@patch("osint_core.services.vectorize.search_similar")
+@patch("osint_core.api.routes.search.search_similar")
 def test_semantic_search_preserves_score_order(mock_search_similar):
     """Events are returned in Qdrant score order (highest first)."""
     id_high = uuid.uuid4()
@@ -116,7 +116,7 @@ def test_semantic_search_preserves_score_order(mock_search_similar):
 # ---------------------------------------------------------------------------
 
 
-@patch("osint_core.services.vectorize.search_similar")
+@patch("osint_core.api.routes.search.search_similar")
 def test_semantic_search_no_qdrant_hits(mock_search_similar):
     """Returns empty list when Qdrant has no hits above threshold."""
     mock_search_similar.return_value = []
@@ -137,7 +137,7 @@ def test_semantic_search_no_qdrant_hits(mock_search_similar):
     db.execute.assert_not_called()
 
 
-@patch("osint_core.services.vectorize.search_similar")
+@patch("osint_core.api.routes.search.search_similar")
 def test_semantic_search_skips_invalid_event_ids(mock_search_similar):
     """Hits with malformed event_id in payload are silently skipped."""
     valid_id = uuid.uuid4()
@@ -163,7 +163,7 @@ def test_semantic_search_skips_invalid_event_ids(mock_search_similar):
     assert result.items[0].id == valid_id
 
 
-@patch("osint_core.services.vectorize.search_similar")
+@patch("osint_core.api.routes.search.search_similar")
 def test_semantic_search_event_deleted_from_postgres(mock_search_similar):
     """Qdrant hits whose events no longer exist in Postgres are omitted gracefully."""
     ghost_id = uuid.uuid4()
