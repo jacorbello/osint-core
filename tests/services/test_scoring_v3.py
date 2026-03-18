@@ -175,6 +175,62 @@ class TestScoreEvent:
         assert score <= 1.0
 
 
+class TestEdgeCases:
+    """Document and verify behavior when keywords/target_geo are missing."""
+
+    def test_compute_keyword_relevance_no_keywords(self):
+        """When total_keywords=0, keyword relevance is 1.0 regardless of content."""
+        config = ScoringConfig(recency_half_life_hours=48, keywords=[])
+        assert compute_keyword_relevance(0, 0, config) == 1.0
+
+    def test_compute_keyword_relevance_no_matches(self):
+        """When keywords exist but none match, penalty is applied."""
+        config = ScoringConfig(recency_half_life_hours=48, keywords=["terrorism", "attack"])
+        assert compute_keyword_relevance(0, 2, config) == 0.05
+
+    def test_compute_keyword_relevance_partial_match(self):
+        """Partial keyword match gives proportional score."""
+        config = ScoringConfig(recency_half_life_hours=48, keywords=["terrorism", "attack", "bombing"])
+        assert compute_keyword_relevance(1, 3, config) == pytest.approx(1 / 3)
+
+    def test_compute_keyword_relevance_nlp_override(self):
+        """NLP relevance classification overrides keyword matching."""
+        config = ScoringConfig(recency_half_life_hours=48, keywords=["terrorism"])
+        assert compute_keyword_relevance(0, 1, config, nlp_relevance="relevant") == 1.0
+        assert compute_keyword_relevance(1, 1, config, nlp_relevance="irrelevant") == 0.05
+        assert compute_keyword_relevance(0, 1, config, nlp_relevance="tangential") == 0.4
+
+    def test_compute_geographic_relevance_no_target_geo(self):
+        """No target_geo means all events get 1.0 geographic relevance."""
+        assert compute_geographic_relevance(None, None, None, None) == 1.0
+        assert compute_geographic_relevance("USA", 30.27, -97.74, None) == 1.0
+
+    def test_compute_geographic_relevance_with_target(self):
+        """Events far from target get penalized."""
+        target = {"country_codes": ["USA"], "lat": 30.2672, "lon": -97.7431, "radius_km": 100}
+        # Austin, TX (within radius)
+        assert compute_geographic_relevance("USA", 30.27, -97.74, target) == 1.0
+        # New York (far from Austin, same country)
+        assert compute_geographic_relevance("USA", 40.71, -74.01, target) == 0.5
+        # London (different country)
+        assert compute_geographic_relevance("GBR", 51.51, -0.13, target) == 0.2
+
+    def test_score_event_empty_config_gives_high_score(self):
+        """Demonstrates the scoring problem: empty keywords+geo = everything scores high."""
+        from datetime import UTC, datetime
+
+        config = ScoringConfig(recency_half_life_hours=48, source_reputation={"kxan_rss": 1.0})
+        score = score_event(
+            source_id="kxan_rss",
+            occurred_at=datetime.now(UTC),
+            matched_keywords=0,
+            total_keywords=0,
+            config=config,
+        )
+        # With no keywords and no target_geo, score should be ~1.0 * 1.0 * 1.0 * ~1.0
+        assert score > 0.9
+
+
 class TestScoreToSeverity:
     def test_info(self):
         assert score_to_severity(0.1) == "info"
