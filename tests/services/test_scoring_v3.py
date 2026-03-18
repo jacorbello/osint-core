@@ -190,7 +190,9 @@ class TestEdgeCases:
 
     def test_compute_keyword_relevance_partial_match(self):
         """Partial keyword match gives proportional score."""
-        config = ScoringConfig(recency_half_life_hours=48, keywords=["terrorism", "attack", "bombing"])
+        config = ScoringConfig(
+            recency_half_life_hours=48, keywords=["terrorism", "attack", "bombing"],
+        )
         assert compute_keyword_relevance(1, 3, config) == pytest.approx(1 / 3)
 
     def test_compute_keyword_relevance_nlp_override(self):

@@ -20,8 +20,8 @@ def _make_event(event_id: uuid.UUID | None = None) -> MagicMock:
     e.summary = None
     e.raw_excerpt = None
     e.occurred_at = None
-    from datetime import datetime, timezone
-    e.ingested_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    from datetime import UTC, datetime
+    e.ingested_at = datetime(2026, 1, 1, tzinfo=UTC)
     e.score = None
     e.severity = None
     e.dedupe_fingerprint = "fp"
