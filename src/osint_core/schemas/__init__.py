@@ -1,16 +1,17 @@
 """Pydantic v2 request/response schemas for all API resources."""
 
 from osint_core.schemas.alert import (
-    AlertAckRequest,
-    AlertEscalateRequest,
     AlertList,
     AlertResponse,
+    AlertUpdateRequest,
 )
 from osint_core.schemas.audit import AuditLogList, AuditLogResponse
-from osint_core.schemas.brief import BriefGenerateRequest, BriefList, BriefResponse
+from osint_core.schemas.brief import BriefCreateRequest, BriefList, BriefResponse
 from osint_core.schemas.common import (
+    CollectionResponse,
     JobStatusEnum,
-    PaginatedResponse,
+    PageInfo,
+    ProblemDetails,
     RetentionClassEnum,
     SeverityEnum,
     StatusEnum,
@@ -18,31 +19,43 @@ from osint_core.schemas.common import (
 from osint_core.schemas.entity import EntityList, EntityResponse
 from osint_core.schemas.event import EventList, EventResponse
 from osint_core.schemas.indicator import IndicatorList, IndicatorResponse
-from osint_core.schemas.job import JobList, JobResponse
-from osint_core.schemas.plan import PlanValidationResult, PlanVersionResponse
+from osint_core.schemas.job import JobCreateRequest, JobKindEnum, JobList, JobResponse
+from osint_core.schemas.plan import (
+    PlanActivationRequest,
+    PlanCreateRequest,
+    PlanValidationResult,
+    PlanVersionList,
+    PlanVersionResponse,
+)
 
 __all__ = [
-    "AlertAckRequest",
-    "AlertEscalateRequest",
     "AlertList",
     "AlertResponse",
+    "AlertUpdateRequest",
     "AuditLogList",
     "AuditLogResponse",
-    "BriefGenerateRequest",
+    "BriefCreateRequest",
     "BriefList",
     "BriefResponse",
+    "CollectionResponse",
     "EntityList",
     "EntityResponse",
     "EventList",
     "EventResponse",
     "IndicatorList",
     "IndicatorResponse",
+    "JobCreateRequest",
+    "JobKindEnum",
     "JobList",
     "JobResponse",
     "JobStatusEnum",
-    "PaginatedResponse",
+    "PageInfo",
+    "PlanActivationRequest",
+    "PlanCreateRequest",
     "PlanValidationResult",
+    "PlanVersionList",
     "PlanVersionResponse",
+    "ProblemDetails",
     "RetentionClassEnum",
     "SeverityEnum",
     "StatusEnum",

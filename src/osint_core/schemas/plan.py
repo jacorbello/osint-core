@@ -4,9 +4,9 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from osint_core.schemas.common import RetentionClassEnum
+from osint_core.schemas.common import CollectionResponse, RetentionClassEnum
 
 
 class PlanVersionResponse(BaseModel):
@@ -37,3 +37,31 @@ class PlanValidationResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     diff_summary: str | None = None
+
+
+class PlanCreateRequest(BaseModel):
+    """Create a new plan version from YAML content."""
+
+    yaml: str = Field(description="Plan YAML document")
+    git_commit_sha: str | None = None
+    activate: bool = True
+
+
+class PlanActivationRequest(BaseModel):
+    """Update which version is active for a plan."""
+
+    version_id: uuid.UUID | None = None
+    rollback: bool = False
+
+    @model_validator(mode="after")
+    def validate_action(self) -> "PlanActivationRequest":
+        if self.rollback and self.version_id is not None:
+            raise ValueError("version_id cannot be set when rollback=true")
+        if not self.rollback and self.version_id is None:
+            raise ValueError("version_id is required unless rollback=true")
+        return self
+
+
+class PlanVersionList(CollectionResponse):
+    """Paginated list of plan versions."""
+    items: list[PlanVersionResponse]

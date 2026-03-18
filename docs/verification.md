@@ -38,6 +38,8 @@ Defaults: `SOURCE_ID=cisa_kev`, `PLAN_ID=libertycenter-osint`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_BASE_URL` | `http://localhost:8000` | Base URL of the API |
+| `API_TOKEN` | _(empty)_ | Bearer token — required when `auth_disabled=false` (e.g. staging/prod) |
+| `CURL_TIMEOUT` | `30` | Max seconds per individual curl request |
 | `POLL_INTERVAL` | `5` | Seconds between job status polls |
 | `POLL_TIMEOUT` | `120` | Max seconds to wait for job completion |
 
@@ -101,16 +103,16 @@ Expected response:
 Poll the jobs endpoint until the job completes:
 
 ```bash
-curl -s "http://localhost:8000/api/v1/jobs?limit=5" | jq '.items[] | select(.input_params.source_id == "cisa_kev") | {id, status, output, error}'
+curl -s "http://localhost:8000/api/v1/jobs?limit=5" | jq '.items[] | select(.input.source_id == "cisa_kev") | {id, status, result, error}'
 ```
 
-Expected: `status` should be `succeeded`. The `output` field contains counts:
+Expected: `status` should be `succeeded`. The `result` field contains counts:
 
 ```json
 {
   "id": "...",
   "status": "succeeded",
-  "output": {
+  "result": {
     "ingested": 25,
     "skipped": 3,
     "errors": 0
@@ -122,7 +124,7 @@ Expected: `status` should be `succeeded`. The `output` field contains counts:
 ### 5. Verify Events
 
 ```bash
-curl -s "http://localhost:8000/api/v1/events?source_id=cisa_kev&limit=5" | jq '{total, sample: .items[0].title}'
+curl -s "http://localhost:8000/api/v1/events?source_id=cisa_kev&limit=5" | jq '{total: .page.total, sample: .items[0].title}'
 ```
 
 Expected: `total > 0` with meaningful event titles.
@@ -130,7 +132,7 @@ Expected: `total > 0` with meaningful event titles.
 ### 6. Verify Indicators
 
 ```bash
-curl -s "http://localhost:8000/api/v1/indicators?limit=10" | jq '{total, types: [.items[].indicator_type] | unique}'
+curl -s "http://localhost:8000/api/v1/indicators?limit=10" | jq '{total: .page.total, types: [.items[].indicator_type] | unique}'
 ```
 
 Expected: `total > 0` with indicator types such as `cve`, `ip`, `url`, `domain`, or `hash`.

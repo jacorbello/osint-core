@@ -1,4 +1,4 @@
-"""Search API routes — full-text and semantic search."""
+"""Search API routes."""
 
 from __future__ import annotations
 
@@ -7,21 +7,27 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.api.deps import get_current_user, get_db
+from osint_core.api.errors import collection_page, problem_response_docs
 from osint_core.api.middleware.auth import UserInfo
 from osint_core.models.event import Event
-from osint_core.schemas.event import EventList
+from osint_core.schemas.event import EventSearchList
 
 router = APIRouter(prefix="/api/v1/search", tags=["search"])
 
 
-@router.get("", response_model=EventList)
+@router.get(
+    "/events",
+    response_model=EventSearchList,
+    operation_id="searchEvents",
+    responses=problem_response_docs(401, 422),
+)
 async def search_events(
     q: str = Query(description="Search query string"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
-) -> EventList:
+) -> EventSearchList:
     """Full-text search over events using Postgres tsvector."""
     ts_query = func.plainto_tsquery("english", q)
     stmt = (
@@ -43,23 +49,28 @@ async def search_events(
     count_result = await db.execute(count_stmt)
     total = count_result.scalar_one()
 
-    page = (offset // limit) + 1
-    pages = (total + limit - 1) // limit if total > 0 else 0
+    return EventSearchList(
+        items=items,
+        page=collection_page(offset=offset, limit=limit, total=total),
+        retrieval_mode="lexical",
+    )
 
-    return EventList(items=items, total=total, page=page, page_size=limit, pages=pages)
 
-
-@router.get("/semantic", response_model=EventList)
+@router.get(
+    "/events:semantic",
+    response_model=EventSearchList,
+    operation_id="searchEventsSemantic",
+    responses=problem_response_docs(401, 422),
+)
 async def search_semantic(
     q: str = Query(description="Natural language query for semantic search"),
     limit: int = Query(default=20, ge=1, le=100),
     current_user: UserInfo = Depends(get_current_user),
-) -> EventList:
-    """Semantic similarity search via Qdrant.
-
-    Note: This endpoint requires a running Qdrant instance and
-    the vectorize service to have indexed events. Returns an empty
-    list when Qdrant is unavailable.
-    """
-    # Qdrant integration is handled externally — return empty for now
-    return EventList(items=[], total=0, page=1, page_size=limit, pages=0)
+) -> EventSearchList:
+    """Semantic similarity search via Qdrant."""
+    _ = q
+    return EventSearchList(
+        items=[],
+        page=collection_page(offset=0, limit=limit, total=0),
+        retrieval_mode="semantic",
+    )

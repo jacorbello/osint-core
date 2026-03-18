@@ -1,15 +1,17 @@
-"""Watch API routes -- CRUD for regional and event-driven watches."""
+"""Watch API routes."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.api.deps import get_current_user, get_db
+from osint_core.api.errors import collection_page, problem_response, problem_response_docs
 from osint_core.api.middleware.auth import UserInfo
 from osint_core.models.watch import Watch
 from osint_core.schemas.watch import (
@@ -23,13 +25,21 @@ from osint_core.schemas.watch import (
 router = APIRouter(prefix="/api/v1/watches", tags=["watches"])
 
 
-@router.post("", response_model=WatchResponse, status_code=201)
+@router.post(
+    "",
+    response_model=WatchResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="createWatch",
+    responses=problem_response_docs(401, 409, 422),
+)
 async def create_watch(
     body: WatchCreateRequest,
+    request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
 ) -> Watch:
-    """Create a new dynamic watch."""
+    """Create a new watch."""
     expires_at = None
     if body.ttl_hours:
         expires_at = datetime.now(UTC) + timedelta(hours=body.ttl_hours)
@@ -40,7 +50,7 @@ async def create_watch(
         status="active",
         region=body.region,
         country_codes=body.country_codes,
-        bounding_box=body.bounding_box,
+        bounding_box=body.bounding_box.model_dump() if body.bounding_box else None,
         keywords=body.keywords,
         source_filter=body.source_filter,
         severity_threshold=body.severity_threshold,
@@ -51,12 +61,28 @@ async def create_watch(
     )
 
     db.add(watch)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return problem_response(
+            request,
+            status_code=409,
+            code="conflict",
+            detail="A watch with this name already exists",
+        )  # type: ignore[return-value]
+
     await db.refresh(watch)
+    response.headers["Location"] = f"/api/v1/watches/{watch.id}"
     return watch
 
 
-@router.get("", response_model=WatchList)
+@router.get(
+    "",
+    response_model=WatchList,
+    operation_id="listWatches",
+    responses=problem_response_docs(401, 422),
+)
 async def list_watches(
     status: WatchStatusEnum | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
@@ -80,15 +106,18 @@ async def list_watches(
     count_result = await db.execute(count_stmt)
     total = count_result.scalar_one()
 
-    page = (offset // limit) + 1
-    pages = (total + limit - 1) // limit if total > 0 else 0
-
-    return WatchList(items=items, total=total, page=page, page_size=limit, pages=pages)
+    return WatchList(items=items, page=collection_page(offset=offset, limit=limit, total=total))
 
 
-@router.get("/{watch_id}", response_model=WatchResponse)
+@router.get(
+    "/{watch_id}",
+    response_model=WatchResponse,
+    operation_id="getWatch",
+    responses=problem_response_docs(401, 404, 422),
+)
 async def get_watch(
     watch_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
 ) -> Watch:
@@ -96,64 +125,88 @@ async def get_watch(
     result = await db.execute(select(Watch).where(Watch.id == watch_id))
     watch = result.scalar_one_or_none()
     if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
+        return problem_response(
+            request,
+            status_code=404,
+            code="not_found",
+            detail="Watch not found",
+        )  # type: ignore[return-value]
     return watch
 
 
-@router.patch("/{watch_id}", response_model=WatchResponse)
+@router.patch(
+    "/{watch_id}",
+    response_model=WatchResponse,
+    operation_id="updateWatch",
+    responses=problem_response_docs(401, 404, 409, 422),
+)
 async def update_watch(
     watch_id: uuid.UUID,
     body: WatchUpdateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
 ) -> Watch:
-    """Update a watch (pause, adjust filters, etc.)."""
+    """Update a watch."""
     result = await db.execute(select(Watch).where(Watch.id == watch_id))
     watch = result.scalar_one_or_none()
     if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
+        return problem_response(
+            request,
+            status_code=404,
+            code="not_found",
+            detail="Watch not found",
+        )  # type: ignore[return-value]
 
     update_data = body.model_dump(exclude_unset=True)
+
+    if update_data.get("watch_type") == "persistent" and watch.watch_type == "persistent":
+        return problem_response(
+            request,
+            status_code=409,
+            code="invalid_state_transition",
+            detail="Watch is already persistent",
+        )  # type: ignore[return-value]
+
     for field, value in update_data.items():
         setattr(watch, field, value)
 
+    if "ttl_hours" in update_data:
+        if watch.ttl_hours and watch.ttl_hours > 0:
+            watch.expires_at = datetime.now(UTC) + timedelta(hours=watch.ttl_hours)
+        else:
+            watch.expires_at = None
+    elif watch.ttl_hours:
+        watch.expires_at = datetime.now(UTC) + timedelta(hours=watch.ttl_hours)
+
     await db.commit()
     await db.refresh(watch)
     return watch
 
 
-@router.post("/{watch_id}/promote", response_model=WatchResponse)
-async def promote_watch(
-    watch_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: UserInfo = Depends(get_current_user),
-) -> Watch:
-    """Promote a dynamic watch to persistent."""
-    result = await db.execute(select(Watch).where(Watch.id == watch_id))
-    watch = result.scalar_one_or_none()
-    if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    if watch.watch_type != "dynamic":
-        raise HTTPException(status_code=400, detail="Only dynamic watches can be promoted")
-
-    watch.status = "promoted"
-    watch.watch_type = "persistent"
-    watch.promoted_at = datetime.now(UTC)
-    await db.commit()
-    await db.refresh(watch)
-    return watch
-
-
-@router.delete("/{watch_id}", status_code=204)
+@router.delete(
+    "/{watch_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="deleteWatch",
+    responses=problem_response_docs(401, 404, 422),
+)
 async def delete_watch(
     watch_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
 ) -> None:
-    """Expire/delete a watch."""
+    """Delete a watch."""
+    from osint_core.api.errors import ProblemError
+
     result = await db.execute(select(Watch).where(Watch.id == watch_id))
     watch = result.scalar_one_or_none()
     if not watch:
-        raise HTTPException(status_code=404, detail="Watch not found")
-    watch.status = "expired"
+        raise ProblemError(
+            status_code=404,
+            code="not_found",
+            detail="Watch not found",
+        )
+
+    await db.delete(watch)
     await db.commit()

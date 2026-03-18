@@ -26,7 +26,6 @@ sources:
   - id: reliefweb
     type: reliefweb_api
     url: "https://api.reliefweb.int/v2/reports"
-    weight: 1.0
     schedule_cron: "0 */4 * * *"
     params:
       appname: "osint-core-cortech"
@@ -34,22 +33,37 @@ sources:
   - id: hrw_news
     type: rss
     url: "https://www.hrw.org/rss/news"
-    weight: 1.2
     schedule_cron: "0 */6 * * *"
 
   - id: amnesty
     type: rss
     url: "https://www.amnesty.org/en/feed/"
-    weight: 1.2
     schedule_cron: "0 */6 * * *"
+
+  - id: acled_global
+    type: acled_api
+    url: "https://api.acleddata.com/acled/read"
+    schedule_cron: "0 */4 * * *"
+    params:
+      api_key: "${OSINT_ACLED_API_KEY}"
+      email: "${OSINT_ACLED_EMAIL}"
+      max_items: 100
 
 scoring:
   recency_half_life_hours: 24
   source_reputation:
-    reliefweb: 1.0
-    hrw_news: 1.2
-    amnesty: 1.2
+    reliefweb: 0.67
+    hrw_news: 0.8
+    amnesty: 0.8
+    acled_global: 0.67
   ioc_match_boost: 1.5
+
+enrichment:
+  nlp_enabled: true
+  mission: "Monitor humanitarian crises, human rights violations, and disaster events globally"
+  classify_relevance: true
+  extract_entities: true
+  generate_summaries: true
 
 notifications:
   routes:
