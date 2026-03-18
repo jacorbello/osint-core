@@ -1,8 +1,7 @@
 """Tests for Celery application configuration."""
 
+import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 from osint_core.workers.celery_app import celery_app, load_beat_schedule
 
@@ -133,11 +132,9 @@ def test_load_beat_schedule_db_error_retries_correct_number_of_times():
             side_effect=failing_fetch,
         ),
         patch("osint_core.workers.celery_app.time.sleep"),
+        contextlib.suppress(ConnectionError),
     ):
-        try:
-            load_beat_schedule()
-        except ConnectionError:
-            pass
+        load_beat_schedule()
 
     assert call_count == _BEAT_SCHEDULE_MAX_RETRIES
 

@@ -73,12 +73,7 @@ async def _fetch_active_plans_schedule() -> dict[str, object]:
 
     for plan_version in active_plans:
         plan_schedule = engine.build_beat_schedule(plan_version.content)
-        for task_key, task_def in plan_schedule.items():
-            # Namespace with plan_id to avoid cross-plan key collisions.
-            # build_beat_schedule keys have the form "ingest-{source_id}";
-            # we rewrite them to "ingest-{plan_id}-{source_id}".
-            namespaced_key = f"ingest-{plan_version.plan_id}-{task_key[len('ingest-'):]}"
-            schedule[namespaced_key] = task_def
+        schedule.update(plan_schedule)
         logger.info(
             "beat_plan_loaded",
             plan_id=plan_version.plan_id,
