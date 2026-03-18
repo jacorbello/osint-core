@@ -1,12 +1,19 @@
 """Tests for the intel brief generator service."""
 
 import uuid
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 import respx
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from osint_core.services.brief_generator import BriefGenerator, serialize_events_for_context
+from osint_core.services.brief_generator import (
+    BriefContext,
+    BriefGenerator,
+    fetch_brief_context,
+    serialize_events_for_context,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -113,7 +120,7 @@ async def test_vllm_fallback_on_error(generator_with_vllm: BriefGenerator):
         return_value=httpx.Response(500, json={"error": "model not found"})
     )
 
-    result = await generator_with_vllm.generate(
+    result, generated_by = await generator_with_vllm.generate(
         query="Summarize threats",
         events=SAMPLE_EVENTS,
         indicators=SAMPLE_INDICATORS,
@@ -124,6 +131,7 @@ async def test_vllm_fallback_on_error(generator_with_vllm: BriefGenerator):
     assert "# Intel Brief:" in result
     assert "CVE-2026-1234 Published" in result
     assert "192.168.1.100" in result
+    assert generated_by == "template"
 
 
 def test_template_includes_events_indicators_entities(generator_no_vllm: BriefGenerator):
@@ -266,7 +274,7 @@ async def test_vllm_receives_event_context(generator_with_vllm: BriefGenerator):
         return_value=httpx.Response(200, json=vllm_response)
     )
 
-    await generator_with_vllm.generate(
+    content_md, generated_by = await generator_with_vllm.generate(
         query="Austin terrorism",
         events=SAMPLE_EVENTS,
         indicators=SAMPLE_INDICATORS,
@@ -278,3 +286,123 @@ async def test_vllm_receives_event_context(generator_with_vllm: BriefGenerator):
     assert "CVE-2026-1234 Published" in sent_body
     assert "192.168.1.100" in sent_body
     assert "APT-29" in sent_body
+    assert generated_by == "vllm"
+
+
+# ---------------------------------------------------------------------------
+# Empty context / hallucination prevention tests
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_generate_empty_events_skips_vllm(generator_with_vllm: BriefGenerator):
+    """When events list is empty, generate() must NOT call vLLM."""
+    # Register a route — we assert it is never called
+    route = respx.post("http://localhost:8000/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200, json={"choices": [{"message": {"content": "hallucination"}}]},
+        )
+    )
+
+    result, generated_by = await generator_with_vllm.generate(
+        query="What are the current terror threats in Austin, Texas?",
+        events=[],
+        indicators=[],
+        entities=[],
+    )
+
+    assert route.called is False, "vLLM must not be called when there are no events"
+    assert "# No Matching Events" in result
+    assert "Austin, Texas" in result
+    assert "hallucination" not in result
+    assert generated_by == "none"
+
+
+@pytest.mark.asyncio
+async def test_generate_empty_events_returns_template_markdown(generator_no_vllm: BriefGenerator):
+    """Empty events with vLLM disabled also returns the no-match template."""
+    result, generated_by = await generator_no_vllm.generate(
+        query="Terror threats Austin",
+        events=[],
+        indicators=[],
+        entities=[],
+    )
+
+    assert "# No Matching Events" in result
+    assert "Terror threats Austin" in result
+    assert "**Query:**" in result
+    assert "**Generated at:**" in result
+    assert generated_by == "none"
+
+
+@pytest.mark.asyncio
+async def test_generate_non_empty_events_still_calls_vllm_path(generator_no_vllm: BriefGenerator):
+    """Non-empty events still follow the normal generation path (template here since no vLLM)."""
+    result, generated_by = await generator_no_vllm.generate(
+        query="Weekly brief",
+        events=SAMPLE_EVENTS,
+        indicators=SAMPLE_INDICATORS,
+        entities=SAMPLE_ENTITIES,
+    )
+
+    # Should use the template path (no vLLM available) and include event data
+    assert "# No Matching Events" not in result
+    assert "CVE-2026-1234 Published" in result
+    assert generated_by == "template"
+
+
+# ---------------------------------------------------------------------------
+# fetch_brief_context uses websearch_to_tsquery
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_brief_context_uses_websearch_to_tsquery():
+    """fetch_brief_context must use websearch_to_tsquery, not plainto_tsquery."""
+    db = MagicMock(spec=AsyncSession)
+
+    # Capture the statement passed to db.execute
+    captured_stmts: list = []
+
+    async def fake_execute(stmt, *args, **kwargs):
+        captured_stmts.append(stmt)
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        return mock_result
+
+    db.execute = fake_execute
+
+    with patch("osint_core.services.brief_generator.func") as mock_func:
+        mock_func.websearch_to_tsquery = MagicMock(return_value="<tsquery>")
+        mock_func.plainto_tsquery = MagicMock(return_value="<plainto_tsquery_should_not_be_called>")
+
+        await fetch_brief_context(db, "terror threats Austin Texas")
+
+        mock_func.websearch_to_tsquery.assert_called_once_with(
+            "english", "terror threats Austin Texas",
+        )
+        mock_func.plainto_tsquery.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_brief_context_returns_empty_brief_context_on_no_events():
+    """fetch_brief_context returns an all-empty BriefContext when no events match."""
+    db = MagicMock(spec=AsyncSession)
+
+    async def fake_execute(stmt, *args, **kwargs):
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        return mock_result
+
+    db.execute = fake_execute
+
+    ctx = await fetch_brief_context(db, "nonexistent query xyz")
+
+    assert isinstance(ctx, BriefContext)
+    assert ctx.events == []
+    assert ctx.entities == []
+    assert ctx.indicators == []
+    assert ctx.event_ids == []
+    assert ctx.entity_ids == []
+    assert ctx.indicator_ids == []
