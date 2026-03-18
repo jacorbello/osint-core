@@ -182,6 +182,9 @@ jobs:
         env:
           TRIVY_DB_REPOSITORY: "ghcr.io/aquasecurity/trivy-db"
         run: |
+          # Skip prebuilt ML library directories — large binary .so files cause Trivy to time out
+          # and are not app code we can remediate. --skip-dirs does not support globs; if the
+          # Python version in the base image changes (e.g. 3.12 → 3.13) add a second --skip-dirs.
           docker run --rm \
             -e TRIVY_DB_REPOSITORY \
             -v /var/run/docker.sock:/var/run/docker.sock \
@@ -189,6 +192,7 @@ jobs:
             aquasec/trivy:0.56.1 image \
               --timeout 15m0s \
               --skip-dirs "usr/local/lib/python3.12/site-packages/torch" \
+              --skip-dirs "usr/local/lib/python3.12/site-packages/nvidia" \
               --format sarif \
               --output /workspace/trivy-results-${{ matrix.target }}.sarif \
               --severity HIGH,CRITICAL \
