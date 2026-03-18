@@ -1,7 +1,7 @@
 """Celery application and Beat configuration."""
 
 import asyncio
-import sys
+import time
 
 import structlog
 from celery import Celery
@@ -50,6 +50,9 @@ celery_app.conf.beat_schedule = {}
 
 celery_app.autodiscover_tasks(["osint_core.workers"])
 
+_BEAT_SCHEDULE_MAX_RETRIES = 3
+_BEAT_SCHEDULE_RETRY_BACKOFF_BASE = 2  # seconds; delay = base ** attempt
+
 
 async def _fetch_active_plans_schedule() -> dict[str, object]:
     """Query the database for all active plans and build a combined beat schedule."""
@@ -70,13 +73,6 @@ async def _fetch_active_plans_schedule() -> dict[str, object]:
 
     for plan_version in active_plans:
         plan_schedule = engine.build_beat_schedule(plan_version.content)
-        collisions = set(schedule.keys()) & set(plan_schedule.keys())
-        if collisions:
-            logger.warning(
-                "beat_schedule_key_collision",
-                plan_id=plan_version.plan_id,
-                colliding_keys=sorted(collisions),
-            )
         schedule.update(plan_schedule)
         logger.info(
             "beat_plan_loaded",
@@ -88,41 +84,39 @@ async def _fetch_active_plans_schedule() -> dict[str, object]:
     return schedule
 
 
-_BEAT_LOAD_MAX_RETRIES = 3
-_BEAT_LOAD_BACKOFF_SECONDS = 2
-
-
 def load_beat_schedule() -> None:
     """Load the active plan schedule into celery_app.conf.beat_schedule.
 
-    Retries with exponential backoff on failure. If all retries are exhausted,
-    exits with a non-zero code so orchestrators can restart Beat.
+    Retries up to _BEAT_SCHEDULE_MAX_RETRIES times with exponential backoff.
+    Raises on retry exhaustion so that Beat exits non-zero and an orchestrator
+    can restart it — intentionally no silent empty-schedule fallback.
     """
-    import time
-
-    for attempt in range(1, _BEAT_LOAD_MAX_RETRIES + 1):
+    last_exc: Exception | None = None
+    for attempt in range(1, _BEAT_SCHEDULE_MAX_RETRIES + 1):
         try:
             schedule = asyncio.run(_fetch_active_plans_schedule())
             celery_app.conf.beat_schedule = schedule
             logger.info("beat_schedule_loaded", total_tasks=len(schedule))
             return
-        except Exception:
-            logger.exception(
-                "beat_schedule_load_failed",
-                msg="Failed to load beat schedule from database",
-                attempt=attempt,
-                max_retries=_BEAT_LOAD_MAX_RETRIES,
-            )
-            if attempt < _BEAT_LOAD_MAX_RETRIES:
-                backoff = _BEAT_LOAD_BACKOFF_SECONDS ** attempt
-                logger.info("beat_schedule_load_retry", backoff_seconds=backoff)
-                time.sleep(backoff)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < _BEAT_SCHEDULE_MAX_RETRIES:
+                delay = _BEAT_SCHEDULE_RETRY_BACKOFF_BASE ** attempt
+                logger.warning(
+                    "beat_schedule_load_retry",
+                    attempt=attempt,
+                    max_retries=_BEAT_SCHEDULE_MAX_RETRIES,
+                    retry_in=delay,
+                )
+                time.sleep(delay)
 
-    logger.critical(
-        "beat_schedule_load_exhausted",
-        msg="All retries exhausted loading beat schedule; exiting",
+    logger.error(
+        "beat_schedule_load_failed",
+        msg="Failed to load beat schedule after retries; Beat will exit",
     )
-    sys.exit(1)
+    if last_exc is None:
+        raise RuntimeError("Unexpected: no exception captured after retries")
+    raise last_exc
 
 
 @beat_init.connect  # type: ignore[untyped-decorator]
