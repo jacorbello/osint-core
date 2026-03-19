@@ -1,4 +1,4 @@
-"""Celery notification task — dispatch alert notifications via Gotify."""
+"""Celery notification task — dispatch alert notifications via configured channels."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 import httpx
+import jinja2
 from sqlalchemy import NullPool
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -35,6 +36,22 @@ _SEVERITY_TO_PRIORITY: dict[str, int] = {
 
 # Key fields that should be present for a complete notification.
 _REQUIRED_FIELDS = {"title", "summary", "severity", "source_id"}
+
+# Jinja2 environment for rendering webhook payload templates.
+_JINJA_ENV = jinja2.Environment(
+    undefined=jinja2.StrictUndefined,
+    autoescape=False,
+)
+
+# Default webhook payload template used when none is provided in the channel config.
+_DEFAULT_WEBHOOK_TEMPLATE = """{
+  "title": {{ title | tojson }},
+  "severity": {{ severity | tojson }},
+  "summary": {{ summary | tojson }},
+  "source_id": {{ source_id | tojson }},
+  "event_type": {{ event_type | tojson }},
+  "indicators": {{ indicators | tojson }}
+}"""
 
 
 def _gotify_url() -> str:
@@ -76,6 +93,108 @@ def _post_to_gotify(title: str, message: str, priority: int) -> bool:
     except httpx.RequestError as exc:
         logger.error("Gotify request failed: %s", exc)
         raise
+
+
+def _render_webhook_payload(template_str: str, context: dict[str, Any]) -> str:
+    """Render a Jinja2 payload template with the given event context.
+
+    Args:
+        template_str: Jinja2 template string for the webhook body.
+        context: Dict of event fields available to the template.
+
+    Returns:
+        The rendered string payload.
+    """
+    template = _JINJA_ENV.from_string(template_str)
+    return template.render(**context)
+
+
+def _post_to_webhook(
+    url: str,
+    *,
+    method: str = "POST",
+    headers: dict[str, str] | None = None,
+    payload: str,
+) -> bool:
+    """Send an HTTP request to a webhook URL.
+
+    Args:
+        url: The webhook endpoint URL.
+        method: HTTP method (default ``POST``).
+        headers: Optional dict of HTTP headers.
+        payload: The rendered string payload (typically JSON).
+
+    Returns:
+        True on success (2xx response).
+
+    Raises:
+        httpx.HTTPStatusError: On 4xx/5xx responses (5xx triggers Celery retry).
+        httpx.RequestError: On connection failures.
+    """
+    req_headers = {"Content-Type": "application/json"}
+    if headers:
+        req_headers.update(headers)
+
+    try:
+        resp = httpx.request(
+            method.upper(),
+            url,
+            headers=req_headers,
+            content=payload,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return True
+    except httpx.HTTPStatusError as exc:
+        logger.error("Webhook returned HTTP %s: %s", exc.response.status_code, exc)
+        raise
+    except httpx.RequestError as exc:
+        logger.error("Webhook request failed: %s", exc)
+        raise
+
+
+def _dispatch_channel(
+    channel: dict[str, Any],
+    *,
+    msg: dict[str, str],
+    event_data: dict[str, Any],
+    priority: int,
+) -> bool:
+    """Dispatch a notification to a single channel.
+
+    Args:
+        channel: Channel configuration dict with at minimum a ``type`` key.
+        msg: Formatted message dict with ``title`` and ``body``.
+        event_data: Full event data dict for webhook template rendering.
+        priority: Gotify priority level.
+
+    Returns:
+        True if the notification was dispatched successfully.
+
+    Raises:
+        httpx.HTTPStatusError: On HTTP error responses (retryable).
+        httpx.RequestError: On connection errors (retryable).
+        ValueError: If the channel type is unknown.
+    """
+    channel_type = channel.get("type", "").lower()
+
+    if channel_type == "gotify":
+        return _post_to_gotify(msg["title"], msg["body"], priority)
+
+    if channel_type == "webhook":
+        url = channel.get("url")
+        if not url:
+            logger.warning("Webhook channel missing 'url'; skipping")
+            return False
+
+        method = channel.get("method", "POST")
+        headers = channel.get("headers") or {}
+        template_str = channel.get("payload_template") or _DEFAULT_WEBHOOK_TEMPLATE
+
+        payload = _render_webhook_payload(template_str, event_data)
+        return _post_to_webhook(url, method=method, headers=headers, payload=payload)
+
+    raise ValueError(f"Unknown notification channel type: {channel_type!r}")
 
 
 def _needs_db_fetch(event_data: dict[str, Any] | None) -> bool:
@@ -126,9 +245,15 @@ async def _fetch_event_data(event_id: str) -> dict[str, Any] | None:
 
 @celery_app.task(bind=True, name="osint.send_notification", max_retries=3)  # type: ignore[untyped-decorator]
 def send_notification(
-    self: Any, event_id: str, event_data: dict[str, Any] | None = None
+    self: Any,
+    event_id: str,
+    event_data: dict[str, Any] | None = None,
+    channels: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Send a Gotify push notification for a scored event.
+    """Send notifications for a scored event via configured channels.
+
+    When *channels* is ``None`` (legacy callers), the task falls back to
+    dispatching a single Gotify notification using env-var configuration.
 
     Args:
         event_id: The ID of the event to notify about.
@@ -137,6 +262,10 @@ def send_notification(
             ``source_id``, ``event_type``, ``indicators`` (list[str]).
             When omitted or incomplete, the task fetches the full event
             from the database and supplements missing fields.
+        channels: Optional list of channel config dicts from plan YAML.
+            Each dict must have a ``type`` key (``"gotify"`` or ``"webhook"``).
+            Webhook channels support ``url``, ``method``, ``headers``, and
+            ``payload_template`` (Jinja2).
 
     Returns:
         A dict with keys:
@@ -197,17 +326,65 @@ def send_notification(
 
     priority = _SEVERITY_TO_PRIORITY.get(severity, 5)
 
-    try:
-        dispatched = _post_to_gotify(msg["title"], msg["body"], priority)
-    except (httpx.HTTPStatusError, httpx.RequestError) as exc:
-        logger.warning("Gotify dispatch failed for event %s; retrying. %s", event_id, exc)
-        raise self.retry(exc=exc, countdown=2 ** self.request.retries) from exc
+    # Template context available to Jinja2 webhook payloads.
+    template_context: dict[str, Any] = {
+        "title": title,
+        "summary": summary,
+        "severity": severity,
+        "source_id": source_id,
+        "event_type": event_type,
+        "indicators": indicators,
+        "event_id": event_id,
+        "priority": priority,
+    }
 
-    if not dispatched:
+    # Resolve channel list: use provided channels, or fall back to Gotify.
+    effective_channels: list[dict[str, Any]] = (
+        channels if channels is not None else [{"type": "gotify"}]
+    )
+
+    dispatched_any = False
+    errors: list[str] = []
+
+    for ch in effective_channels:
+        try:
+            ok = _dispatch_channel(
+                ch, msg=msg, event_data=template_context, priority=priority,
+            )
+            if ok:
+                dispatched_any = True
+        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status and status >= 500:
+                # 5xx — retryable; raise to trigger Celery retry.
+                logger.warning(
+                    "Channel %s dispatch failed for event %s (5xx); retrying. %s",
+                    ch.get("type"), event_id, exc,
+                )
+                raise self.retry(exc=exc, countdown=2 ** self.request.retries) from exc
+            # For connection errors (RequestError without response), also retry.
+            if status is None and isinstance(exc, httpx.RequestError):
+                logger.warning(
+                    "Channel %s dispatch failed for event %s; retrying. %s",
+                    ch.get("type"), event_id, exc,
+                )
+                raise self.retry(exc=exc, countdown=2 ** self.request.retries) from exc
+            errors.append(f"{ch.get('type')}: {exc}")
+        except ValueError as exc:
+            errors.append(str(exc))
+
+    if not dispatched_any and not errors:
         return {
             "event_id": event_id,
             "notified": False,
-            "reason": "Gotify token not configured",
+            "reason": "No channels dispatched (token/config missing)",
+        }
+
+    if not dispatched_any:
+        return {
+            "event_id": event_id,
+            "notified": False,
+            "reason": f"All channels failed: {'; '.join(errors)}",
         }
 
     logger.info("Notification dispatched for event %s (severity=%s)", event_id, severity)
