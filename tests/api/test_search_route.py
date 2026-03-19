@@ -44,12 +44,9 @@ def _make_db(events: list[MagicMock]) -> AsyncMock:
     return db
 
 
-def _mock_celery_task(return_value):
-    """Return a mock celery_app.send_task that resolves to return_value."""
-    mock_result = MagicMock()
-    mock_result.get.return_value = return_value
-    mock_send = MagicMock(return_value=mock_result)
-    return mock_send
+def _mock_dispatch(return_value):
+    """Return a mock _dispatch_and_wait that resolves to return_value."""
+    return MagicMock(return_value=return_value)
 
 
 # ---------------------------------------------------------------------------
@@ -57,13 +54,13 @@ def _mock_celery_task(return_value):
 # ---------------------------------------------------------------------------
 
 
-@patch("osint_core.api.routes.search.celery_app")
-def test_semantic_search_returns_events(mock_celery):
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_returns_events(mock_dispatch):
     """Route fetches events from Postgres and returns them in score order."""
     event_id = uuid.uuid4()
-    mock_celery.send_task = _mock_celery_task([
+    mock_dispatch.return_value = [
         {"id": "point-1", "score": 0.91, "payload": {"event_id": str(event_id)}},
-    ])
+    ]
 
     event = _make_event(event_id)
     db = _make_db([event])
@@ -83,23 +80,21 @@ def test_semantic_search_returns_events(mock_celery):
     assert result.retrieval_mode == "semantic"
     assert len(result.items) == 1
     assert result.items[0].id == event_id
-    mock_celery.send_task.assert_called_once_with(
-        "osint.semantic_search",
-        args=["cyberattack on infrastructure"],
-        kwargs={"limit": 10, "score_threshold": 0.5},
+    mock_dispatch.assert_called_once_with(
+        "cyberattack on infrastructure", 10, 0.5,
     )
 
 
-@patch("osint_core.api.routes.search.celery_app")
-def test_semantic_search_preserves_score_order(mock_celery):
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_preserves_score_order(mock_dispatch):
     """Events are returned in Qdrant score order (highest first)."""
     id_high = uuid.uuid4()
     id_low = uuid.uuid4()
 
-    mock_celery.send_task = _mock_celery_task([
+    mock_dispatch.return_value = [
         {"id": "p1", "score": 0.95, "payload": {"event_id": str(id_high)}},
         {"id": "p2", "score": 0.60, "payload": {"event_id": str(id_low)}},
-    ])
+    ]
 
     event_high = _make_event(id_high)
     event_low = _make_event(id_low)
@@ -126,10 +121,10 @@ def test_semantic_search_preserves_score_order(mock_celery):
 # ---------------------------------------------------------------------------
 
 
-@patch("osint_core.api.routes.search.celery_app")
-def test_semantic_search_no_qdrant_hits(mock_celery):
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_no_qdrant_hits(mock_dispatch):
     """Returns empty list when Qdrant has no hits above threshold."""
-    mock_celery.send_task = _mock_celery_task([])
+    mock_dispatch.return_value = []
     db = _make_db([])
 
     result = run_async(
@@ -148,14 +143,14 @@ def test_semantic_search_no_qdrant_hits(mock_celery):
     db.execute.assert_not_called()
 
 
-@patch("osint_core.api.routes.search.celery_app")
-def test_semantic_search_skips_invalid_event_ids(mock_celery):
-    """Hits with malformed event_id in payload are silently skipped."""
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_skips_invalid_event_ids(mock_dispatch):
+    """Hits with malformed event_id in payload are skipped with a warning."""
     valid_id = uuid.uuid4()
-    mock_celery.send_task = _mock_celery_task([
+    mock_dispatch.return_value = [
         {"id": "p1", "score": 0.88, "payload": {"event_id": "not-a-uuid"}},
         {"id": "p2", "score": 0.75, "payload": {"event_id": str(valid_id)}},
-    ])
+    ]
 
     event = _make_event(valid_id)
     db = _make_db([event])
@@ -175,13 +170,13 @@ def test_semantic_search_skips_invalid_event_ids(mock_celery):
     assert result.items[0].id == valid_id
 
 
-@patch("osint_core.api.routes.search.celery_app")
-def test_semantic_search_event_deleted_from_postgres(mock_celery):
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_event_deleted_from_postgres(mock_dispatch):
     """Qdrant hits whose events no longer exist in Postgres are omitted."""
     ghost_id = uuid.uuid4()
-    mock_celery.send_task = _mock_celery_task([
+    mock_dispatch.return_value = [
         {"id": "p1", "score": 0.80, "payload": {"event_id": str(ghost_id)}},
-    ])
+    ]
     # Postgres returns nothing (event was deleted)
     db = _make_db([])
 
@@ -205,12 +200,10 @@ def test_semantic_search_event_deleted_from_postgres(mock_celery):
 # ---------------------------------------------------------------------------
 
 
-@patch("osint_core.api.routes.search.celery_app")
-def test_semantic_search_returns_503_on_task_failure(mock_celery):
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_returns_503_on_task_failure(mock_dispatch):
     """When the Celery task fails, endpoint returns 503."""
-    mock_celery.send_task.return_value.get.side_effect = RuntimeError(
-        "Worker unavailable",
-    )
+    mock_dispatch.side_effect = RuntimeError("Worker unavailable")
     db = _make_db([])
     result = run_async(
         search_semantic(
@@ -225,13 +218,11 @@ def test_semantic_search_returns_503_on_task_failure(mock_celery):
     assert result.status_code == 503
 
 
-@patch("osint_core.api.routes.search.celery_app")
-def test_semantic_search_returns_503_on_timeout(mock_celery):
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_returns_503_on_timeout(mock_dispatch):
     """When the Celery task times out, endpoint returns 503."""
     from celery.exceptions import TimeoutError as CeleryTimeout
-    mock_celery.send_task.return_value.get.side_effect = CeleryTimeout(
-        "Task timed out",
-    )
+    mock_dispatch.side_effect = CeleryTimeout("Task timed out")
     db = _make_db([])
     result = run_async(
         search_semantic(

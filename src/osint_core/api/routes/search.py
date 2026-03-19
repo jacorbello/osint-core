@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import structlog
-from celery.result import AsyncResult
+from celery import Celery
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,15 +14,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from osint_core.api.deps import get_current_user, get_db
 from osint_core.api.errors import collection_page, problem_response, problem_response_docs
 from osint_core.api.middleware.auth import UserInfo
+from osint_core.config import settings
 from osint_core.models.event import Event
 from osint_core.schemas.event import EventSearchList
-from osint_core.workers.celery_app import celery_app
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/v1/search", tags=["search"])
 
 _SEMANTIC_SEARCH_TIMEOUT = 30  # seconds to wait for worker result
+
+
+def _get_celery() -> Celery:
+    """Create a lightweight Celery client for dispatching tasks by name.
+
+    Uses only broker/backend URLs — does not import worker modules.
+    """
+    return Celery(
+        broker=settings.celery_broker_url,
+        backend=settings.celery_result_backend,
+    )
 
 
 @router.get(
@@ -65,6 +77,17 @@ async def search_events(
     )
 
 
+def _dispatch_and_wait(query: str, limit: int, score_threshold: float) -> list[dict]:
+    """Send semantic search task to worker and block until result arrives."""
+    app = _get_celery()
+    task = app.send_task(
+        "osint.semantic_search",
+        args=[query],
+        kwargs={"limit": limit, "score_threshold": score_threshold},
+    )
+    return task.get(timeout=_SEMANTIC_SEARCH_TIMEOUT)
+
+
 @router.get(
     "/events:semantic",
     response_model=EventSearchList,
@@ -85,12 +108,11 @@ async def search_semantic(
     to avoid OOM on API pods.
     """
     try:
-        task: AsyncResult = celery_app.send_task(
-            "osint.semantic_search",
-            args=[q],
-            kwargs={"limit": limit, "score_threshold": score_threshold},
+        hits: list[dict] = await asyncio.to_thread(
+            _dispatch_and_wait, q, limit, score_threshold,
         )
-        hits: list[dict] = task.get(timeout=_SEMANTIC_SEARCH_TIMEOUT)
+    except asyncio.CancelledError:
+        raise
     except Exception:
         logger.exception("semantic_search_failed", query=q)
         return problem_response(  # type: ignore[return-value]
