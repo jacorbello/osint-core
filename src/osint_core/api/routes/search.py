@@ -82,6 +82,8 @@ async def search_semantic(
         hits = await asyncio.to_thread(
             search_similar, q, limit=limit, score_threshold=score_threshold,
         )
+    except asyncio.CancelledError:
+        raise
     except Exception:
         logger.exception("semantic_search_failed", query=q)
         return problem_response(  # type: ignore[return-value]

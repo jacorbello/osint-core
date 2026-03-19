@@ -227,7 +227,7 @@ async def test_fetch_returns_empty_after_max_retries(connector: GdeltConnector, 
     with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
         items = await connector.fetch()
     assert items == []
-    assert mock_sleep.await_count == 3
+    assert mock_sleep.await_count == 2  # skip sleep on last attempt
 
 
 @pytest.mark.asyncio

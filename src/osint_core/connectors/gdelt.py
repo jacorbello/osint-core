@@ -55,16 +55,18 @@ class GdeltConnector(BaseConnector):
             for attempt in range(3):
                 resp = await client.get(self.config.url, params=params)
                 if resp.status_code in (429, 503):
-                    retry_after = min(
-                        int(resp.headers.get("Retry-After", "10")), 60,
-                    )
+                    try:
+                        retry_after = min(int(resp.headers.get("Retry-After", "10")), 60)
+                    except (ValueError, TypeError):
+                        retry_after = 10
                     logger.warning(
                         "gdelt_rate_limited",
                         status=resp.status_code,
                         retry_after=retry_after,
                         attempt=attempt + 1,
                     )
-                    await asyncio.sleep(retry_after)
+                    if attempt < 2:  # skip sleep on last attempt
+                        await asyncio.sleep(retry_after)
                     continue
                 resp.raise_for_status()
                 break
