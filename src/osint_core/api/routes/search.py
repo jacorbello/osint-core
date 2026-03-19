@@ -85,6 +85,7 @@ def _dispatch_and_wait(query: str, limit: int, score_threshold: float) -> list[d
         "osint.semantic_search",
         args=[query],
         kwargs={"limit": limit, "score_threshold": score_threshold},
+        queue="osint",
     )
     result: list[dict[str, Any]] = task.get(timeout=_SEMANTIC_SEARCH_TIMEOUT)
     return result
