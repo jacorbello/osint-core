@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from osint_core.workers.notify import (
+    _dispatch_channel,
     _needs_db_fetch,
+    _render_webhook_payload,
     send_notification,
 )
 
@@ -329,6 +333,266 @@ def test_no_gotify_token_returns_not_notified(monkeypatch: pytest.MonkeyPatch) -
     # _post_to_gotify logs a warning and returns False when no token is set.
     assert result["notified"] is False
     assert result["event_id"] == "evt-006"
+
+
+# ---------------------------------------------------------------------------
+# Webhook channel — _render_webhook_payload
+# ---------------------------------------------------------------------------
+
+
+def test_render_webhook_payload_default_template():
+    """The default template should produce valid JSON with event fields."""
+    from osint_core.workers.notify import _DEFAULT_WEBHOOK_TEMPLATE
+
+    context = {
+        "title": "Test Alert",
+        "severity": "high",
+        "summary": "Something happened.",
+        "source_id": "nvd",
+        "event_type": "cve",
+        "indicators": ["CVE-2026-0001"],
+    }
+    rendered = _render_webhook_payload(_DEFAULT_WEBHOOK_TEMPLATE, context)
+    parsed = json.loads(rendered)
+    assert parsed["title"] == "Test Alert"
+    assert parsed["severity"] == "high"
+    assert parsed["indicators"] == ["CVE-2026-0001"]
+
+
+def test_render_webhook_payload_custom_template():
+    """A custom Jinja2 template should render event fields."""
+    template = "Alert: {{ title }} ({{ severity }})"
+    context = {"title": "CVE found", "severity": "critical"}
+    rendered = _render_webhook_payload(template, context)
+    assert rendered == "Alert: CVE found (critical)"
+
+
+def test_render_webhook_payload_json_escaping():
+    """Jinja2 tojson filter should properly escape special characters."""
+    template = '{"msg": {{ summary | tojson }}}'
+    context = {"summary": 'He said "hello" & <bye>'}
+    rendered = _render_webhook_payload(template, context)
+    parsed = json.loads(rendered)
+    assert parsed["msg"] == 'He said "hello" & <bye>'
+
+
+# ---------------------------------------------------------------------------
+# Webhook channel — _dispatch_channel
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_channel_gotify():
+    """dispatch_channel with type=gotify should call _post_to_gotify."""
+    channel = {"type": "gotify"}
+    msg = {"title": "T", "body": "B"}
+    event_data = {"title": "T", "severity": "high"}
+
+    with patch("osint_core.workers.notify._post_to_gotify", return_value=True) as mock:
+        result = _dispatch_channel(channel, msg=msg, event_data=event_data, priority=8)
+
+    assert result is True
+    mock.assert_called_once_with("T", "B", 8)
+
+
+def test_dispatch_channel_webhook():
+    """dispatch_channel with type=webhook should call _post_to_webhook."""
+    channel = {
+        "type": "webhook",
+        "url": "https://hooks.example.com/alert",
+        "method": "POST",
+        "headers": {"Authorization": "Bearer secret"},
+        "payload_template": '{"alert": {{ title | tojson }}}',
+    }
+    msg = {"title": "T", "body": "B"}
+    event_data = {"title": "CVE Alert", "severity": "high"}
+
+    with patch("osint_core.workers.notify._post_to_webhook", return_value=True) as mock:
+        result = _dispatch_channel(channel, msg=msg, event_data=event_data, priority=8)
+
+    assert result is True
+    mock.assert_called_once()
+    call_kwargs = mock.call_args
+    assert call_kwargs.args[0] == "https://hooks.example.com/alert"
+    assert call_kwargs.kwargs["method"] == "POST"
+    assert call_kwargs.kwargs["headers"] == {"Authorization": "Bearer secret"}
+    assert '"CVE Alert"' in call_kwargs.kwargs["payload"]
+
+
+def test_dispatch_channel_webhook_missing_url():
+    """dispatch_channel with type=webhook but no url should return False."""
+    channel = {"type": "webhook"}
+    msg = {"title": "T", "body": "B"}
+    result = _dispatch_channel(channel, msg=msg, event_data={}, priority=5)
+    assert result is False
+
+
+def test_dispatch_channel_unknown_type():
+    """dispatch_channel with an unknown type should raise ValueError."""
+    channel = {"type": "carrier_pigeon"}
+    msg = {"title": "T", "body": "B"}
+    with pytest.raises(ValueError, match="Unknown notification channel type"):
+        _dispatch_channel(channel, msg=msg, event_data={}, priority=5)
+
+
+# ---------------------------------------------------------------------------
+# Webhook end-to-end via send_notification
+# ---------------------------------------------------------------------------
+
+
+def test_webhook_channel_dispatched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """send_notification should dispatch to a webhook channel from plan YAML."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+    channels = [
+        {
+            "type": "webhook",
+            "url": "https://hooks.example.com/osint",
+            "headers": {"X-Api-Key": "abc123"},
+        },
+    ]
+
+    with patch("osint_core.workers.notify._post_to_webhook", return_value=True) as mock_wh:
+        result = send_notification.run(
+            "evt-wh-1",
+            {
+                "severity": "high",
+                "title": "Webhook Test",
+                "summary": "Testing webhook channel.",
+                "source_id": "test",
+                "event_type": "alert",
+                "indicators": [],
+            },
+            channels=channels,
+        )
+
+    assert result["notified"] is True
+    assert result["event_id"] == "evt-wh-1"
+    mock_wh.assert_called_once()
+    call_kwargs = mock_wh.call_args
+    assert call_kwargs.args[0] == "https://hooks.example.com/osint"
+    assert call_kwargs.kwargs["headers"] == {"X-Api-Key": "abc123"}
+
+
+def test_webhook_5xx_triggers_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 5xx response from a webhook should trigger a Celery retry."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+    mock_self = MagicMock()
+    mock_self.request.retries = 0
+    mock_self.retry.side_effect = Exception("retried")
+
+    response = httpx.Response(502, request=httpx.Request("POST", "https://example.com"))
+    error = httpx.HTTPStatusError("Bad Gateway", request=response.request, response=response)
+
+    channels = [{"type": "webhook", "url": "https://hooks.example.com/fail"}]
+
+    with patch(
+        "osint_core.workers.notify._post_to_webhook", side_effect=error,
+    ), pytest.raises(Exception, match="retried"):
+        send_notification.run.__func__(
+            mock_self,
+            "evt-wh-retry",
+            {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
+            channels=channels,
+        )
+
+    mock_self.retry.assert_called_once()
+
+
+def test_webhook_connect_error_triggers_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A connection error from a webhook should trigger a Celery retry."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+    mock_self = MagicMock()
+    mock_self.request.retries = 0
+    mock_self.retry.side_effect = Exception("retried")
+
+    channels = [{"type": "webhook", "url": "https://hooks.example.com/down"}]
+
+    with patch(
+        "osint_core.workers.notify._post_to_webhook",
+        side_effect=httpx.ConnectError("connection refused"),
+    ), pytest.raises(Exception, match="retried"):
+        send_notification.run.__func__(
+            mock_self,
+            "evt-wh-conn",
+            {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
+            channels=channels,
+        )
+
+    mock_self.retry.assert_called_once()
+
+
+def test_webhook_custom_payload_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A custom payload_template should be rendered with event fields."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+    channels = [
+        {
+            "type": "webhook",
+            "url": "https://hooks.example.com/slack",
+            "payload_template": '{"text": "{{ severity }}: {{ title }}"}',
+        },
+    ]
+
+    with patch("osint_core.workers.notify._post_to_webhook", return_value=True) as mock_wh:
+        result = send_notification.run(
+            "evt-wh-tpl",
+            {
+                "severity": "critical",
+                "title": "Major Incident",
+                "summary": "Big problem.",
+                "source_id": "test",
+            },
+            channels=channels,
+        )
+
+    assert result["notified"] is True
+    call_kwargs = mock_wh.call_args
+    payload = call_kwargs.kwargs["payload"]
+    parsed = json.loads(payload)
+    assert parsed["text"] == "critical: Major Incident"
+
+
+def test_multiple_channels_mixed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """send_notification should dispatch to multiple channels."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+    monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+
+    channels = [
+        {"type": "gotify"},
+        {"type": "webhook", "url": "https://hooks.example.com/a"},
+    ]
+
+    with (
+        patch("osint_core.workers.notify._post_to_gotify", return_value=True) as mock_g,
+        patch("osint_core.workers.notify._post_to_webhook", return_value=True) as mock_w,
+    ):
+        result = send_notification.run(
+            "evt-multi",
+            {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
+            channels=channels,
+        )
+
+    assert result["notified"] is True
+    mock_g.assert_called_once()
+    mock_w.assert_called_once()
+
+
+def test_no_channels_falls_back_to_gotify(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When channels is None, send_notification falls back to Gotify."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+    monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+
+    with patch("osint_core.workers.notify._post_to_gotify", return_value=True) as mock_g:
+        result = send_notification.run(
+            "evt-fallback",
+            {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
+            # channels not passed — default None
+        )
+
+    assert result["notified"] is True
+    mock_g.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
