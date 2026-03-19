@@ -62,6 +62,7 @@ def test_semantic_search_returns_events(mock_search_similar):
 
     result = run_async(
         search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
             q="cyberattack on infrastructure",
             limit=10,
             score_threshold=0.5,
@@ -97,6 +98,7 @@ def test_semantic_search_preserves_score_order(mock_search_similar):
 
     result = run_async(
         search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
             q="ransomware attack",
             limit=10,
             score_threshold=0.5,
@@ -122,6 +124,7 @@ def test_semantic_search_no_qdrant_hits(mock_search_similar):
 
     result = run_async(
         search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
             q="nothing matches this",
             limit=20,
             score_threshold=0.5,
@@ -190,6 +193,7 @@ def test_semantic_search_skips_invalid_event_ids(mock_search_similar):
 
     result = run_async(
         search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
             q="query",
             limit=10,
             score_threshold=0.5,
@@ -214,6 +218,7 @@ def test_semantic_search_event_deleted_from_postgres(mock_search_similar):
 
     result = run_async(
         search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
             q="ghost event",
             limit=10,
             score_threshold=0.5,
