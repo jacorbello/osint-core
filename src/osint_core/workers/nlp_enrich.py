@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -35,11 +36,22 @@ Plan mission: {mission}
 Plan keywords: {keywords}"""
 
 
+def _strip_markdown_fences(text: str) -> str:
+    """Extract JSON from markdown code fences if present."""
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+    if match:
+        return match.group(1)
+    return text.strip()
+
+
 async def _call_vllm(prompt: str) -> dict[str, Any]:
     url = f"{settings.vllm_url}/v1/chat/completions"
     payload = {
         "model": settings.llm_model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [
+            {"role": "system", "content": _SYSTEM_MESSAGE},
+            {"role": "user", "content": prompt},
+        ],
         "max_tokens": 500,
         "temperature": 0.1,
     }
@@ -57,7 +69,7 @@ async def _call_vllm(prompt: str) -> dict[str, Any]:
         raise ValueError(
             "Unexpected vLLM response shape: 'choices[0].message.content' is absent"
         )
-    result: dict[str, Any] = json.loads(content)
+    result: dict[str, Any] = json.loads(_strip_markdown_fences(content))
     return result
 
 
