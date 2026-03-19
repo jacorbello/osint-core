@@ -23,6 +23,7 @@ from osint_core.services.indicators import extract_indicators
 from osint_core.services.plan_store import PlanStore
 from osint_core.workers.celery_app import celery_app
 from osint_core.workers.enrich import correlate_event_task, vectorize_event_task
+from osint_core.workers.k8s_dispatch import enrich_entities_task
 from osint_core.workers.nlp_enrich import nlp_enrich_task
 from osint_core.workers.score import score_event_task
 
@@ -186,11 +187,16 @@ async def _ingest_source_async(
         await db.commit()
 
     # Step 6: Chain downstream tasks
-    # NLP enrich first, then score + vectorize in parallel, then correlate
+    # NLP enrich first, then score + vectorize + entity extraction in parallel,
+    # then correlate
     for event_id in new_event_ids:
         chain(
             nlp_enrich_task.si(event_id),
-            group(score_event_task.si(event_id), vectorize_event_task.si(event_id)),
+            group(
+                score_event_task.si(event_id),
+                vectorize_event_task.si(event_id),
+                enrich_entities_task.si(event_id),
+            ),
             correlate_event_task.si(event_id),
         ).apply_async()
 
