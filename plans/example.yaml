@@ -61,6 +61,12 @@ notifications:
         - type: gotify
           application: "osint-alerts"
           priority: 8
+    - name: critical_slack
+      when:
+        severity_gte: high
+      channels:
+        - type: slack
+          webhook_url: "${OSINT_SLACK_WEBHOOK_URL}"
     - name: daily_digest
       when:
         severity_gte: low

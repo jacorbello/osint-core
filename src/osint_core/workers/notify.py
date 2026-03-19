@@ -34,6 +34,15 @@ _SEVERITY_TO_PRIORITY: dict[str, int] = {
     "critical": 10,
 }
 
+# Slack severity → sidebar color (hex).
+_SEVERITY_TO_COLOR: dict[str, str] = {
+    "info": "#36a64f",      # green
+    "low": "#2196f3",       # blue
+    "medium": "#ff9800",    # amber
+    "high": "#ff5722",      # orange-red
+    "critical": "#d32f2f",  # red
+}
+
 # Key fields that should be present for a complete notification.
 _REQUIRED_FIELDS = {"title", "summary", "severity", "source_id"}
 
@@ -153,6 +162,86 @@ def _post_to_webhook(
         raise
 
 
+def _build_slack_blocks(
+    title: str,
+    summary: str,
+    severity: str,
+    indicators: list[str],
+) -> dict[str, Any]:
+    """Build a Slack incoming-webhook payload with Block Kit attachments.
+
+    Returns a dict ready for ``json=`` in an httpx POST to a Slack webhook URL.
+    The payload uses *attachments* (not top-level blocks) so that the severity
+    colour sidebar is rendered.
+    """
+    color = _SEVERITY_TO_COLOR.get(severity, _SEVERITY_TO_COLOR["info"])
+
+    fields: list[dict[str, Any]] = [
+        {"type": "mrkdwn", "text": f"*Severity:*\n{severity.upper()}"},
+    ]
+
+    if indicators:
+        indicator_text = ", ".join(indicators[:10])
+        if len(indicators) > 10:
+            indicator_text += f" (+{len(indicators) - 10} more)"
+        fields.append({"type": "mrkdwn", "text": f"*Indicators:*\n{indicator_text}"})
+
+    blocks: list[dict[str, Any]] = [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*{title}*\n{summary}"},
+        },
+        {
+            "type": "section",
+            "fields": fields,
+        },
+    ]
+
+    return {
+        "attachments": [
+            {
+                "color": color,
+                "blocks": blocks,
+            }
+        ],
+    }
+
+
+def _post_to_slack(
+    webhook_url: str,
+    title: str,
+    summary: str,
+    severity: str,
+    indicators: list[str],
+) -> bool:
+    """POST a notification to a Slack incoming webhook.
+
+    Args:
+        webhook_url: The Slack incoming webhook URL.
+        title: Alert title.
+        summary: Alert summary text.
+        severity: Severity label (used for colour mapping).
+        indicators: List of indicator values.
+
+    Returns True on success, False on failure (non-HTTP errors are raised).
+    """
+    if not webhook_url:
+        logger.warning("Slack webhook URL is empty; skipping Slack dispatch")
+        return False
+
+    payload = _build_slack_blocks(title, summary, severity, indicators)
+    try:
+        resp = httpx.post(webhook_url, json=payload, timeout=10)
+        resp.raise_for_status()
+        return True
+    except httpx.HTTPStatusError as exc:
+        logger.error("Slack returned HTTP %s: %s", exc.response.status_code, exc)
+        raise
+    except httpx.RequestError as exc:
+        logger.error("Slack request failed: %s", exc)
+        raise
+
+
 def _dispatch_channel(
     channel: dict[str, Any],
     *,
@@ -194,7 +283,18 @@ def _dispatch_channel(
         payload = _render_webhook_payload(template_str, event_data)
         return _post_to_webhook(url, method=method, headers=headers, payload=payload)
 
+    if channel_type == "slack":
+        webhook_url = channel.get("webhook_url", "")
+        return _post_to_slack(
+            webhook_url,
+            event_data.get("title", ""),
+            event_data.get("summary", ""),
+            event_data.get("severity", "info"),
+            event_data.get("indicators", []),
+        )
+
     raise ValueError(f"Unknown notification channel type: {channel_type!r}")
+
 
 
 def _needs_db_fetch(event_data: dict[str, Any] | None) -> bool:
@@ -253,7 +353,7 @@ def send_notification(
     """Send notifications for a scored event via configured channels.
 
     When *channels* is ``None`` (legacy callers), the task falls back to
-    dispatching a single Gotify notification using env-var configuration.
+    dispatching via Gotify and Slack using env-var configuration.
 
     Args:
         event_id: The ID of the event to notify about.
@@ -338,12 +438,18 @@ def send_notification(
         "priority": priority,
     }
 
-    # Resolve channel list: use provided channels, or fall back to Gotify.
-    effective_channels: list[dict[str, Any]] = (
-        channels if channels is not None else [{"type": "gotify"}]
-    )
+    # Resolve channel list: use provided channels, or fall back to
+    # Gotify + Slack (env-var based) for backward compatibility.
+    if channels is not None:
+        effective_channels = channels
+    else:
+        effective_channels: list[dict[str, Any]] = [{"type": "gotify"}]
+        slack_url = os.environ.get("OSINT_SLACK_WEBHOOK_URL", "")
+        if slack_url:
+            effective_channels.append({"type": "slack", "webhook_url": slack_url})
 
     dispatched_any = False
+    retryable_errors: list[Exception] = []
     errors: list[str] = []
 
     for ch in effective_channels:
@@ -354,30 +460,27 @@ def send_notification(
             if ok:
                 dispatched_any = True
         except (httpx.HTTPStatusError, httpx.RequestError) as exc:
-            status = getattr(getattr(exc, "response", None), "status_code", None)
-            if status and status >= 500:
-                # 5xx — retryable; raise to trigger Celery retry.
-                logger.warning(
-                    "Channel %s dispatch failed for event %s (5xx); retrying. %s",
-                    ch.get("type"), event_id, exc,
-                )
-                raise self.retry(exc=exc, countdown=2 ** self.request.retries) from exc
-            # For connection errors (RequestError without response), also retry.
-            if status is None and isinstance(exc, httpx.RequestError):
-                logger.warning(
-                    "Channel %s dispatch failed for event %s; retrying. %s",
-                    ch.get("type"), event_id, exc,
-                )
-                raise self.retry(exc=exc, countdown=2 ** self.request.retries) from exc
+            logger.warning(
+                "Channel %s dispatch failed for event %s: %s",
+                ch.get("type"), event_id, exc,
+            )
+            retryable_errors.append(exc)
             errors.append(f"{ch.get('type')}: {exc}")
         except ValueError as exc:
             errors.append(str(exc))
+
+    # Only retry if ALL channels failed — partial success is still success.
+    if retryable_errors and not dispatched_any:
+        raise self.retry(
+            exc=retryable_errors[0],
+            countdown=2 ** self.request.retries,
+        )
 
     if not dispatched_any and not errors:
         return {
             "event_id": event_id,
             "notified": False,
-            "reason": "No channels dispatched (token/config missing)",
+            "reason": "no notification channels configured",
         }
 
     if not dispatched_any:
