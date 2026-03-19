@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
 
 import httpx
+from sqlalchemy import NullPool
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from osint_core.config import settings
+from osint_core.models.event import Event
 from osint_core.services.notification import SEVERITY_ORDER, NotificationService
 from osint_core.workers.celery_app import celery_app
 
@@ -27,6 +32,9 @@ _SEVERITY_TO_PRIORITY: dict[str, int] = {
     "high": 8,
     "critical": 10,
 }
+
+# Key fields that should be present for a complete notification.
+_REQUIRED_FIELDS = {"title", "summary", "severity", "source_id"}
 
 
 def _gotify_url() -> str:
@@ -70,6 +78,52 @@ def _post_to_gotify(title: str, message: str, priority: int) -> bool:
         raise
 
 
+def _needs_db_fetch(event_data: dict[str, Any] | None) -> bool:
+    """Return True if event_data is missing or lacks required fields."""
+    if event_data is None:
+        return True
+    return not _REQUIRED_FIELDS.issubset(
+        {k for k, v in event_data.items() if v is not None}
+    )
+
+
+async def _fetch_event_data(event_id: str) -> dict[str, Any] | None:
+    """Fetch event data from the database by *event_id*.
+
+    Returns a dict with event fields, or ``None`` if the event is not found
+    or the fetch fails.
+    """
+    try:
+        engine = create_async_engine(settings.database_url, poolclass=NullPool)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        try:
+            async with session_factory() as db:
+                event = await db.get(Event, event_id)
+                if event is None:
+                    logger.warning("Event %s not found in DB", event_id)
+                    return None
+
+                # Extract indicator values from the relationship.
+                indicator_values: list[str] = []
+                if event.indicators:
+                    indicator_values = [ind.value for ind in event.indicators]
+
+                return {
+                    "title": event.title,
+                    "summary": event.summary or event.nlp_summary,
+                    "severity": event.severity,
+                    "source_id": event.source_id,
+                    "event_type": event.event_type,
+                    "indicators": indicator_values,
+                }
+        finally:
+            await engine.dispose()
+    except Exception:
+        logger.exception("Failed to fetch event %s from DB", event_id)
+        return None
+
+
 @celery_app.task(bind=True, name="osint.send_notification", max_retries=3)  # type: ignore[untyped-decorator]
 def send_notification(
     self: Any, event_id: str, event_data: dict[str, Any] | None = None
@@ -81,8 +135,8 @@ def send_notification(
         event_data: Optional pre-loaded event dict from ``score_event``.
             Expected keys: ``severity``, ``title``, ``summary``,
             ``source_id``, ``event_type``, ``indicators`` (list[str]).
-            If omitted, the task checks severity from a minimal fallback
-            and skips dispatch (DB integration deferred).
+            When omitted or incomplete, the task fetches the full event
+            from the database and supplements missing fields.
 
     Returns:
         A dict with keys:
@@ -92,7 +146,23 @@ def send_notification(
     """
     logger.info("send_notification called for event: %s", event_id)
 
-    data = event_data or {}
+    # --- DB fallback: fetch missing data when event_data is absent/incomplete ---
+    data: dict[str, Any] = dict(event_data) if event_data else {}
+
+    if _needs_db_fetch(event_data):
+        logger.info("Event data incomplete for %s; fetching from DB", event_id)
+        loop = asyncio.new_event_loop()
+        try:
+            db_data = loop.run_until_complete(_fetch_event_data(event_id))
+        finally:
+            loop.close()
+
+        if db_data:
+            # Supplement: only fill keys that are missing or None in caller data.
+            for key, value in db_data.items():
+                if data.get(key) is None and value is not None:
+                    data[key] = value
+
     severity: str = data.get("severity") or "info"
     threshold: str = _notify_threshold()
 
