@@ -73,7 +73,7 @@ async def search_semantic(
     q: str = Query(description="Natural language query for semantic search"),
     limit: int = Query(default=20, ge=1, le=100),
     score_threshold: float = Query(default=0.5, ge=0.0, le=1.0),
-    request: Request = ...,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
 ) -> EventSearchList:
