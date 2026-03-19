@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from osint_core.api.routes.search import search_semantic
 from osint_core.schemas.event import EventSearchList
-from tests.helpers import make_user, run_async
+from tests.helpers import make_request, make_user, run_async
 
 
 def _make_event(event_id: uuid.UUID | None = None) -> MagicMock:
@@ -62,6 +62,7 @@ def test_semantic_search_returns_events(mock_search_similar):
 
     result = run_async(
         search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
             q="cyberattack on infrastructure",
             limit=10,
             score_threshold=0.5,
@@ -97,6 +98,7 @@ def test_semantic_search_preserves_score_order(mock_search_similar):
 
     result = run_async(
         search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
             q="ransomware attack",
             limit=10,
             score_threshold=0.5,
@@ -122,6 +124,7 @@ def test_semantic_search_no_qdrant_hits(mock_search_similar):
 
     result = run_async(
         search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
             q="nothing matches this",
             limit=20,
             score_threshold=0.5,
@@ -133,6 +136,47 @@ def test_semantic_search_no_qdrant_hits(mock_search_similar):
     assert result.items == []
     assert result.page.total == 0
     db.execute.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Error handling
+# ---------------------------------------------------------------------------
+
+
+@patch("osint_core.api.routes.search.search_similar")
+def test_semantic_search_returns_503_on_exception(mock_search_similar):
+    """When search_similar raises, endpoint returns 503."""
+    mock_search_similar.side_effect = RuntimeError("Qdrant unavailable")
+    db = _make_db([])
+    result = run_async(
+        search_semantic(
+            q="terrorism Austin",
+            limit=5,
+            score_threshold=0.5,
+            db=db,
+            current_user=make_user(),
+            request=make_request("/api/v1/search/events:semantic"),
+        )
+    )
+    assert result.status_code == 503
+
+
+@patch("osint_core.api.routes.search.search_similar")
+def test_semantic_search_returns_503_on_import_error(mock_search_similar):
+    """When ML deps missing, endpoint returns 503."""
+    mock_search_similar.side_effect = ImportError("No module named 'sentence_transformers'")
+    db = _make_db([])
+    result = run_async(
+        search_semantic(
+            q="terrorism Austin",
+            limit=5,
+            score_threshold=0.5,
+            db=db,
+            current_user=make_user(),
+            request=make_request("/api/v1/search/events:semantic"),
+        )
+    )
+    assert result.status_code == 503
 
 
 @patch("osint_core.api.routes.search.search_similar")
@@ -149,6 +193,7 @@ def test_semantic_search_skips_invalid_event_ids(mock_search_similar):
 
     result = run_async(
         search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
             q="query",
             limit=10,
             score_threshold=0.5,
@@ -173,6 +218,7 @@ def test_semantic_search_event_deleted_from_postgres(mock_search_similar):
 
     result = run_async(
         search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
             q="ghost event",
             limit=10,
             score_threshold=0.5,

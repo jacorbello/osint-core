@@ -2,6 +2,7 @@
 
 import hashlib
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -189,3 +190,65 @@ async def test_fetch_returns_empty_on_empty_body(connector: GdeltConnector, resp
     )
     items = await connector.fetch()
     assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_retries_on_429(connector: GdeltConnector, respx_mock):
+    """429 responses should be retried with Retry-After delay."""
+    respx_mock.get(connector.config.url).mock(side_effect=[
+        httpx.Response(429, headers={"Retry-After": "2"}),
+        httpx.Response(200, json=SAMPLE_GDELT_RESPONSE),
+    ])
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        items = await connector.fetch()
+    assert len(items) == 2
+    mock_sleep.assert_awaited_once_with(2)
+
+
+@pytest.mark.asyncio
+async def test_fetch_retries_on_503_with_default_delay(connector: GdeltConnector, respx_mock):
+    """503 without Retry-After uses 10s default."""
+    respx_mock.get(connector.config.url).mock(side_effect=[
+        httpx.Response(503),
+        httpx.Response(200, json=SAMPLE_GDELT_RESPONSE),
+    ])
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        items = await connector.fetch()
+    assert len(items) == 2
+    mock_sleep.assert_awaited_once_with(10)
+
+
+@pytest.mark.asyncio
+async def test_fetch_returns_empty_after_max_retries(connector: GdeltConnector, respx_mock):
+    """After 3 failed attempts, return empty list."""
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "1"}),
+    )
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        items = await connector.fetch()
+    assert items == []
+    assert mock_sleep.await_count == 2  # skip sleep on last attempt
+
+
+@pytest.mark.asyncio
+async def test_fetch_no_retry_on_success(connector: GdeltConnector, respx_mock):
+    """Successful first request does not retry."""
+    respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json=SAMPLE_GDELT_RESPONSE),
+    )
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        items = await connector.fetch()
+    assert len(items) == 2
+    mock_sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_caps_retry_after_at_60(connector: GdeltConnector, respx_mock):
+    """Retry-After values above 60s are capped."""
+    respx_mock.get(connector.config.url).mock(side_effect=[
+        httpx.Response(429, headers={"Retry-After": "300"}),
+        httpx.Response(200, json=SAMPLE_GDELT_RESPONSE),
+    ])
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        await connector.fetch()
+    mock_sleep.assert_awaited_once_with(60)
