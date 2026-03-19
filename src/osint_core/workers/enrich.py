@@ -97,6 +97,22 @@ async def _vectorize_event_async(event_id: str) -> dict[str, Any]:
     }
 
 
+@celery_app.task(name="osint.semantic_search")  # type: ignore[untyped-decorator]
+def semantic_search_task(
+    text: str, limit: int = 20, score_threshold: float = 0.5,
+) -> list[dict[str, Any]]:
+    """Run semantic search on a worker (which has ML deps and sufficient memory).
+
+    The API pod dispatches this task instead of loading the sentence-transformer
+    model locally, since the model requires ~500MB RAM and API pods are limited
+    to 512Mi.
+
+    Returns:
+        List of dicts with ``id``, ``score``, and ``payload`` keys from Qdrant.
+    """
+    return search_similar(text, limit=limit, score_threshold=score_threshold)
+
+
 @celery_app.task(bind=True, name="osint.correlate_event", max_retries=3)  # type: ignore[untyped-decorator]
 def correlate_event_task(self: Any, event_id: str) -> dict[str, Any]:
     """Search for events correlated to this one and record relationships.

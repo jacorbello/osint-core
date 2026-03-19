@@ -44,16 +44,21 @@ def _make_db(events: list[MagicMock]) -> AsyncMock:
     return db
 
 
+def _mock_dispatch(return_value):
+    """Return a mock _dispatch_and_wait that resolves to return_value."""
+    return MagicMock(return_value=return_value)
+
+
 # ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
 
 
-@patch("osint_core.api.routes.search.search_similar")
-def test_semantic_search_returns_events(mock_search_similar):
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_returns_events(mock_dispatch):
     """Route fetches events from Postgres and returns them in score order."""
     event_id = uuid.uuid4()
-    mock_search_similar.return_value = [
+    mock_dispatch.return_value = [
         {"id": "point-1", "score": 0.91, "payload": {"event_id": str(event_id)}},
     ]
 
@@ -75,18 +80,18 @@ def test_semantic_search_returns_events(mock_search_similar):
     assert result.retrieval_mode == "semantic"
     assert len(result.items) == 1
     assert result.items[0].id == event_id
-    mock_search_similar.assert_called_once_with(
-        "cyberattack on infrastructure", limit=10, score_threshold=0.5
+    mock_dispatch.assert_called_once_with(
+        "cyberattack on infrastructure", 10, 0.5,
     )
 
 
-@patch("osint_core.api.routes.search.search_similar")
-def test_semantic_search_preserves_score_order(mock_search_similar):
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_preserves_score_order(mock_dispatch):
     """Events are returned in Qdrant score order (highest first)."""
     id_high = uuid.uuid4()
     id_low = uuid.uuid4()
 
-    mock_search_similar.return_value = [
+    mock_dispatch.return_value = [
         {"id": "p1", "score": 0.95, "payload": {"event_id": str(id_high)}},
         {"id": "p2", "score": 0.60, "payload": {"event_id": str(id_low)}},
     ]
@@ -116,10 +121,10 @@ def test_semantic_search_preserves_score_order(mock_search_similar):
 # ---------------------------------------------------------------------------
 
 
-@patch("osint_core.api.routes.search.search_similar")
-def test_semantic_search_no_qdrant_hits(mock_search_similar):
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_no_qdrant_hits(mock_dispatch):
     """Returns empty list when Qdrant has no hits above threshold."""
-    mock_search_similar.return_value = []
+    mock_dispatch.return_value = []
     db = _make_db([])
 
     result = run_async(
@@ -138,52 +143,11 @@ def test_semantic_search_no_qdrant_hits(mock_search_similar):
     db.execute.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# Error handling
-# ---------------------------------------------------------------------------
-
-
-@patch("osint_core.api.routes.search.search_similar")
-def test_semantic_search_returns_503_on_exception(mock_search_similar):
-    """When search_similar raises, endpoint returns 503."""
-    mock_search_similar.side_effect = RuntimeError("Qdrant unavailable")
-    db = _make_db([])
-    result = run_async(
-        search_semantic(
-            q="terrorism Austin",
-            limit=5,
-            score_threshold=0.5,
-            db=db,
-            current_user=make_user(),
-            request=make_request("/api/v1/search/events:semantic"),
-        )
-    )
-    assert result.status_code == 503
-
-
-@patch("osint_core.api.routes.search.search_similar")
-def test_semantic_search_returns_503_on_import_error(mock_search_similar):
-    """When ML deps missing, endpoint returns 503."""
-    mock_search_similar.side_effect = ImportError("No module named 'sentence_transformers'")
-    db = _make_db([])
-    result = run_async(
-        search_semantic(
-            q="terrorism Austin",
-            limit=5,
-            score_threshold=0.5,
-            db=db,
-            current_user=make_user(),
-            request=make_request("/api/v1/search/events:semantic"),
-        )
-    )
-    assert result.status_code == 503
-
-
-@patch("osint_core.api.routes.search.search_similar")
-def test_semantic_search_skips_invalid_event_ids(mock_search_similar):
-    """Hits with malformed event_id in payload are silently skipped."""
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_skips_invalid_event_ids(mock_dispatch):
+    """Hits with malformed event_id in payload are skipped with a warning."""
     valid_id = uuid.uuid4()
-    mock_search_similar.return_value = [
+    mock_dispatch.return_value = [
         {"id": "p1", "score": 0.88, "payload": {"event_id": "not-a-uuid"}},
         {"id": "p2", "score": 0.75, "payload": {"event_id": str(valid_id)}},
     ]
@@ -206,11 +170,11 @@ def test_semantic_search_skips_invalid_event_ids(mock_search_similar):
     assert result.items[0].id == valid_id
 
 
-@patch("osint_core.api.routes.search.search_similar")
-def test_semantic_search_event_deleted_from_postgres(mock_search_similar):
-    """Qdrant hits whose events no longer exist in Postgres are omitted gracefully."""
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_event_deleted_from_postgres(mock_dispatch):
+    """Qdrant hits whose events no longer exist in Postgres are omitted."""
     ghost_id = uuid.uuid4()
-    mock_search_similar.return_value = [
+    mock_dispatch.return_value = [
         {"id": "p1", "score": 0.80, "payload": {"event_id": str(ghost_id)}},
     ]
     # Postgres returns nothing (event was deleted)
@@ -229,3 +193,45 @@ def test_semantic_search_event_deleted_from_postgres(mock_search_similar):
 
     assert result.items == []
     assert result.page.total == 0
+
+
+# ---------------------------------------------------------------------------
+# Error handling
+# ---------------------------------------------------------------------------
+
+
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_returns_503_on_task_failure(mock_dispatch):
+    """When the Celery task fails, endpoint returns 503."""
+    mock_dispatch.side_effect = RuntimeError("Worker unavailable")
+    db = _make_db([])
+    result = run_async(
+        search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
+            q="terrorism Austin",
+            limit=5,
+            score_threshold=0.5,
+            db=db,
+            current_user=make_user(),
+        )
+    )
+    assert result.status_code == 503
+
+
+@patch("osint_core.api.routes.search._dispatch_and_wait")
+def test_semantic_search_returns_503_on_timeout(mock_dispatch):
+    """When the Celery task times out, endpoint returns 503."""
+    from celery.exceptions import TimeoutError as CeleryTimeout
+    mock_dispatch.side_effect = CeleryTimeout("Task timed out")
+    db = _make_db([])
+    result = run_async(
+        search_semantic(
+            request=make_request("/api/v1/search/events:semantic"),
+            q="terrorism Austin",
+            limit=5,
+            score_threshold=0.5,
+            db=db,
+            current_user=make_user(),
+        )
+    )
+    assert result.status_code == 503
