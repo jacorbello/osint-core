@@ -440,10 +440,11 @@ def send_notification(
 
     # Resolve channel list: use provided channels, or fall back to
     # Gotify + Slack (env-var based) for backward compatibility.
+    effective_channels: list[dict[str, Any]]
     if channels is not None:
         effective_channels = channels
     else:
-        effective_channels: list[dict[str, Any]] = [{"type": "gotify"}]
+        effective_channels = [{"type": "gotify"}]
         slack_url = os.environ.get("OSINT_SLACK_WEBHOOK_URL", "")
         if slack_url:
             effective_channels.append({"type": "slack", "webhook_url": slack_url})
