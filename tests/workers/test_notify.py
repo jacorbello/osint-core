@@ -9,8 +9,11 @@ import httpx
 import pytest
 
 from osint_core.workers.notify import (
+    _SEVERITY_TO_COLOR,
+    _build_slack_blocks,
     _dispatch_channel,
     _needs_db_fetch,
+    _post_to_slack,
     _render_webhook_payload,
     send_notification,
 )
@@ -291,11 +294,12 @@ def test_no_db_fetch_when_data_complete(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_gotify_unreachable_triggers_retry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A RequestError from Gotify should trigger a Celery retry."""
+    """When Gotify fails and no other channel succeeds, the task should retry."""
     import httpx
 
     monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
     monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+    monkeypatch.delenv("OSINT_SLACK_WEBHOOK_URL", raising=False)
 
     mock_self = MagicMock()
     mock_self.request.retries = 0
@@ -319,10 +323,11 @@ def test_gotify_unreachable_triggers_retry(monkeypatch: pytest.MonkeyPatch) -> N
 # ---------------------------------------------------------------------------
 
 
-def test_no_gotify_token_returns_not_notified(monkeypatch: pytest.MonkeyPatch) -> None:
-    """If OSINT_GOTIFY_TOKEN is unset the task should skip dispatch and return notified=False."""
+def test_no_channels_configured_returns_not_notified(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If no notification channels are configured, return notified=False."""
     monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
     monkeypatch.delenv("OSINT_GOTIFY_TOKEN", raising=False)
+    monkeypatch.delenv("OSINT_SLACK_WEBHOOK_URL", raising=False)
 
     result = send_notification.run(
         "evt-006",
@@ -330,9 +335,9 @@ def test_no_gotify_token_returns_not_notified(monkeypatch: pytest.MonkeyPatch) -
          "source_id": "test"},
     )
 
-    # _post_to_gotify logs a warning and returns False when no token is set.
     assert result["notified"] is False
     assert result["event_id"] == "evt-006"
+    assert "no notification channels configured" in result["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -625,3 +630,258 @@ def test_return_shape_when_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert set(result.keys()) >= {"event_id", "notified", "reason"}
     assert result["notified"] is False
+
+
+# ---------------------------------------------------------------------------
+# Slack Block Kit message formatting
+# ---------------------------------------------------------------------------
+
+
+class TestBuildSlackBlocks:
+    """Tests for _build_slack_blocks() message formatting."""
+
+    def test_basic_structure(self) -> None:
+        """Payload should contain attachments with color and blocks."""
+        payload = _build_slack_blocks(
+            title="Test Alert",
+            summary="Something happened.",
+            severity="high",
+            indicators=[],
+        )
+        assert "attachments" in payload
+        assert len(payload["attachments"]) == 1
+        att = payload["attachments"][0]
+        assert "color" in att
+        assert "blocks" in att
+
+    def test_severity_color_mapping(self) -> None:
+        """Each severity should map to its expected color."""
+        for sev, expected_color in _SEVERITY_TO_COLOR.items():
+            payload = _build_slack_blocks("T", "S", sev, [])
+            assert payload["attachments"][0]["color"] == expected_color
+
+    def test_unknown_severity_falls_back_to_info_color(self) -> None:
+        """Unknown severity should use the info color."""
+        payload = _build_slack_blocks("T", "S", "unknown", [])
+        assert payload["attachments"][0]["color"] == _SEVERITY_TO_COLOR["info"]
+
+    def test_title_and_summary_in_first_block(self) -> None:
+        """Title and summary should appear in the first section block."""
+        payload = _build_slack_blocks("My Title", "My Summary", "critical", [])
+        first_block = payload["attachments"][0]["blocks"][0]
+        assert first_block["type"] == "section"
+        assert "*My Title*" in first_block["text"]["text"]
+        assert "My Summary" in first_block["text"]["text"]
+
+    def test_severity_field_present(self) -> None:
+        """The severity field should appear in the second section block."""
+        payload = _build_slack_blocks("T", "S", "high", [])
+        fields_block = payload["attachments"][0]["blocks"][1]
+        assert fields_block["type"] == "section"
+        sev_field = fields_block["fields"][0]
+        assert "HIGH" in sev_field["text"]
+
+    def test_indicators_included(self) -> None:
+        """Indicators should appear as a field when provided."""
+        payload = _build_slack_blocks("T", "S", "high", ["CVE-2026-0001", "10.0.0.1"])
+        fields = payload["attachments"][0]["blocks"][1]["fields"]
+        assert len(fields) == 2  # severity + indicators
+        ind_field = fields[1]
+        assert "CVE-2026-0001" in ind_field["text"]
+        assert "10.0.0.1" in ind_field["text"]
+
+    def test_no_indicators_field_when_empty(self) -> None:
+        """When no indicators provided, only severity field should be present."""
+        payload = _build_slack_blocks("T", "S", "medium", [])
+        fields = payload["attachments"][0]["blocks"][1]["fields"]
+        assert len(fields) == 1  # severity only
+
+    def test_indicators_truncated_above_ten(self) -> None:
+        """More than 10 indicators should be truncated with a count."""
+        indicators = [f"IOC-{i}" for i in range(15)]
+        payload = _build_slack_blocks("T", "S", "high", indicators)
+        ind_field = payload["attachments"][0]["blocks"][1]["fields"][1]
+        assert "(+5 more)" in ind_field["text"]
+        # First 10 should be present
+        assert "IOC-0" in ind_field["text"]
+        assert "IOC-9" in ind_field["text"]
+
+
+# ---------------------------------------------------------------------------
+# _post_to_slack
+# ---------------------------------------------------------------------------
+
+
+class TestPostToSlack:
+    """Tests for _post_to_slack() webhook dispatch."""
+
+    def test_empty_url_returns_false(self) -> None:
+        """An empty webhook URL should return False without making a request."""
+        result = _post_to_slack("", "T", "S", "high", [])
+        assert result is False
+
+    def test_successful_post(self) -> None:
+        """A successful POST should return True."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("osint_core.workers.notify.httpx.post", return_value=mock_resp):
+            result = _post_to_slack(
+                "https://hooks.slack.com/services/T/B/X",
+                "Alert Title",
+                "Alert Summary",
+                "critical",
+                ["CVE-2026-0001"],
+            )
+
+        assert result is True
+
+    def test_http_error_raised(self) -> None:
+        """An HTTP error from Slack should be raised."""
+        import httpx
+
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 403
+        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "forbidden", request=MagicMock(), response=mock_resp,
+        )
+
+        with (
+            patch("osint_core.workers.notify.httpx.post", return_value=mock_resp),
+            pytest.raises(httpx.HTTPStatusError),
+        ):
+            _post_to_slack(
+                "https://hooks.slack.com/services/T/B/X",
+                "T", "S", "high", [],
+            )
+
+    def test_connection_error_raised(self) -> None:
+        """A connection error should be raised."""
+        import httpx
+
+        with (
+            patch(
+                "osint_core.workers.notify.httpx.post",
+                side_effect=httpx.ConnectError("unreachable"),
+            ),
+            pytest.raises(httpx.ConnectError),
+        ):
+            _post_to_slack(
+                "https://hooks.slack.com/services/T/B/X",
+                "T", "S", "high", [],
+            )
+
+
+# ---------------------------------------------------------------------------
+# Slack integration in send_notification task
+# ---------------------------------------------------------------------------
+
+
+class TestSlackDispatchIntegration:
+    """Tests for Slack dispatch within send_notification."""
+
+    def test_slack_only_dispatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When only Slack is configured, it should dispatch via Slack."""
+        monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+        monkeypatch.delenv("OSINT_GOTIFY_TOKEN", raising=False)
+        monkeypatch.setenv("OSINT_SLACK_WEBHOOK_URL", "https://hooks.slack.com/test")
+
+        with patch("osint_core.workers.notify._post_to_slack", return_value=True) as mock_slack:
+            result = send_notification.run(
+                "evt-slack-1",
+                {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
+            )
+
+        assert result["notified"] is True
+        mock_slack.assert_called_once()
+
+    def test_both_channels_dispatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When both Gotify and Slack are configured, both should be called."""
+        monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+        monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+        monkeypatch.setenv("OSINT_SLACK_WEBHOOK_URL", "https://hooks.slack.com/test")
+
+        with (
+            patch("osint_core.workers.notify._post_to_gotify", return_value=True) as mock_gotify,
+            patch("osint_core.workers.notify._post_to_slack", return_value=True) as mock_slack,
+        ):
+            result = send_notification.run(
+                "evt-both-1",
+                {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
+            )
+
+        assert result["notified"] is True
+        mock_gotify.assert_called_once()
+        mock_slack.assert_called_once()
+
+    def test_gotify_fails_slack_succeeds_no_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """If Gotify fails but Slack succeeds, the task should not retry."""
+        import httpx
+
+        monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+        monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+        monkeypatch.setenv("OSINT_SLACK_WEBHOOK_URL", "https://hooks.slack.com/test")
+
+        with (
+            patch(
+                "osint_core.workers.notify._post_to_gotify",
+                side_effect=httpx.ConnectError("down"),
+            ),
+            patch("osint_core.workers.notify._post_to_slack", return_value=True),
+        ):
+            result = send_notification.run(
+                "evt-partial-1",
+                {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
+            )
+
+        # Should still report success because Slack worked.
+        assert result["notified"] is True
+
+    def test_all_channels_fail_triggers_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """If all configured channels fail, the task should retry."""
+        import httpx
+
+        monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+        monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+        monkeypatch.setenv("OSINT_SLACK_WEBHOOK_URL", "https://hooks.slack.com/test")
+
+        mock_self = MagicMock()
+        mock_self.request.retries = 0
+        mock_self.retry.side_effect = Exception("retried")
+
+        with (
+            patch(
+                "osint_core.workers.notify._post_to_gotify",
+                side_effect=httpx.ConnectError("down"),
+            ),
+            patch(
+                "osint_core.workers.notify._post_to_slack",
+                side_effect=httpx.ConnectError("also down"),
+            ),
+            pytest.raises(Exception, match="retried"),
+        ):
+            send_notification.run.__func__(
+                mock_self,
+                "evt-allfail-1",
+                {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
+            )
+
+        mock_self.retry.assert_called_once()
+
+    def test_slack_not_called_when_url_not_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When OSINT_SLACK_WEBHOOK_URL is not set, Slack should not be called."""
+        monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+        monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+        monkeypatch.delenv("OSINT_SLACK_WEBHOOK_URL", raising=False)
+
+        with (
+            patch("osint_core.workers.notify._post_to_gotify", return_value=True),
+            patch("osint_core.workers.notify._post_to_slack") as mock_slack,
+        ):
+            result = send_notification.run(
+                "evt-noslack-1",
+                {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
+            )
+
+        assert result["notified"] is True
+        mock_slack.assert_not_called()
