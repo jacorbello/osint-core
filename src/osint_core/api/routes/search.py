@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from typing import Any
 
 import structlog
 from celery import Celery
@@ -77,7 +78,7 @@ async def search_events(
     )
 
 
-def _dispatch_and_wait(query: str, limit: int, score_threshold: float) -> list[dict]:
+def _dispatch_and_wait(query: str, limit: int, score_threshold: float) -> list[dict[str, Any]]:
     """Send semantic search task to worker and block until result arrives."""
     app = _get_celery()
     task = app.send_task(
@@ -85,7 +86,8 @@ def _dispatch_and_wait(query: str, limit: int, score_threshold: float) -> list[d
         args=[query],
         kwargs={"limit": limit, "score_threshold": score_threshold},
     )
-    return task.get(timeout=_SEMANTIC_SEARCH_TIMEOUT)
+    result: list[dict[str, Any]] = task.get(timeout=_SEMANTIC_SEARCH_TIMEOUT)
+    return result
 
 
 @router.get(
@@ -108,7 +110,7 @@ async def search_semantic(
     to avoid OOM on API pods.
     """
     try:
-        hits: list[dict] = await asyncio.to_thread(
+        hits: list[dict[str, Any]] = await asyncio.to_thread(
             _dispatch_and_wait, q, limit, score_threshold,
         )
     except asyncio.CancelledError:
