@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 import structlog
+from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,11 +15,13 @@ from osint_core.api.errors import collection_page, problem_response, problem_res
 from osint_core.api.middleware.auth import UserInfo
 from osint_core.models.event import Event
 from osint_core.schemas.event import EventSearchList
-from osint_core.services.vectorize import search_similar
+from osint_core.workers.celery_app import celery_app
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/v1/search", tags=["search"])
+
+_SEMANTIC_SEARCH_TIMEOUT = 30  # seconds to wait for worker result
 
 
 @router.get(
@@ -77,13 +79,18 @@ async def search_semantic(
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
 ) -> EventSearchList:
-    """Semantic similarity search via Qdrant."""
+    """Semantic similarity search via Qdrant.
+
+    Dispatches embedding to a Celery worker (which has the ML model loaded)
+    to avoid OOM on API pods.
+    """
     try:
-        hits = await asyncio.to_thread(
-            search_similar, q, limit=limit, score_threshold=score_threshold,
+        task: AsyncResult = celery_app.send_task(
+            "osint.semantic_search",
+            args=[q],
+            kwargs={"limit": limit, "score_threshold": score_threshold},
         )
-    except asyncio.CancelledError:
-        raise
+        hits: list[dict] = task.get(timeout=_SEMANTIC_SEARCH_TIMEOUT)
     except Exception:
         logger.exception("semantic_search_failed", query=q)
         return problem_response(  # type: ignore[return-value]
@@ -122,7 +129,7 @@ async def search_semantic(
     result = await db.execute(stmt)
     events_by_id = {str(e.id): e for e in result.scalars().all()}
 
-    # Return events in Qdrant score order (highest similarity first)
+    # Qdrant returns hits sorted by score descending; preserve that order.
     ordered = [events_by_id[str(eid)] for eid in event_ids if str(eid) in events_by_id]
 
     return EventSearchList(
