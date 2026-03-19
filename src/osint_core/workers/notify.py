@@ -5,10 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from pathlib import Path
 from typing import Any
 
 import httpx
 import jinja2
+from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import NullPool
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -242,6 +247,82 @@ def _post_to_slack(
         raise
 
 
+# Jinja2 environment for email templates.
+_TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+_jinja_env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)), autoescape=True)
+
+
+def _render_email_html(
+    title: str,
+    summary: str,
+    severity: str,
+    source_id: str = "",
+    event_type: str = "",
+    indicators: list[str] | None = None,
+    link: str = "",
+) -> str:
+    """Render the HTML email alert template."""
+    template = _jinja_env.get_template("email_alert.html.j2")
+    return template.render(
+        title=title,
+        summary=summary,
+        severity=severity,
+        source_id=source_id,
+        event_type=event_type,
+        indicators=indicators or [],
+        link=link,
+    )
+
+
+def _send_email(
+    recipients: list[str],
+    subject: str,
+    html_body: str,
+) -> bool:
+    """Send an HTML email via SMTP.
+
+    Returns True on success, False on failure.  Logs warnings on errors
+    but never raises — email delivery failures must not crash the task.
+    """
+    host = settings.smtp_host
+    if not host:
+        logger.warning("OSINT_SMTP_HOST is not set; skipping email dispatch")
+        return False
+
+    port = settings.smtp_port
+    user = settings.smtp_user
+    password = settings.smtp_password
+    sender = settings.smtp_from or user
+
+    if not recipients:
+        logger.warning("No email recipients specified; skipping email dispatch")
+        return False
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = ", ".join(recipients)
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        with smtplib.SMTP(host, port, timeout=30) as server:
+            server.ehlo()
+            if port != 25:
+                server.starttls()
+                server.ehlo()
+            if user and password:
+                server.login(user, password)
+            server.sendmail(sender, recipients, msg.as_string())
+        logger.info("Email sent to %s", recipients)
+        return True
+    except smtplib.SMTPException:
+        logger.exception("SMTP error sending email to %s", recipients)
+        return False
+    except OSError:
+        logger.exception("Network error sending email to %s", recipients)
+        return False
+
+
 def _dispatch_channel(
     channel: dict[str, Any],
     *,
@@ -293,8 +374,21 @@ def _dispatch_channel(
             event_data.get("indicators", []),
         )
 
-    raise ValueError(f"Unknown notification channel type: {channel_type!r}")
+    if channel_type == "email":
+        recipients: list[str] = channel.get("recipients", [])
+        html = _render_email_html(
+            title=event_data.get("title", ""),
+            summary=event_data.get("summary", ""),
+            severity=event_data.get("severity", "info"),
+            source_id=event_data.get("source_id", ""),
+            event_type=event_data.get("event_type", ""),
+            indicators=event_data.get("indicators", []),
+        )
+        sev = event_data.get("severity", "info").upper()
+        subject = f"[OSINT {sev}] {event_data.get('title', '')}"
+        return _send_email(recipients, subject, html)
 
+    raise ValueError(f"Unknown notification channel type: {channel_type!r}")
 
 
 def _needs_db_fetch(event_data: dict[str, Any] | None) -> bool:
@@ -363,15 +457,16 @@ def send_notification(
             When omitted or incomplete, the task fetches the full event
             from the database and supplements missing fields.
         channels: Optional list of channel config dicts from plan YAML.
-            Each dict must have a ``type`` key (``"gotify"`` or ``"webhook"``).
-            Webhook channels support ``url``, ``method``, ``headers``, and
-            ``payload_template`` (Jinja2).
+            Each dict must have a ``type`` key (``"gotify"``, ``"webhook"``,
+            ``"slack"``, or ``"email"``).  Email channels require a
+            ``recipients`` list of email addresses.
 
     Returns:
         A dict with keys:
             - ``event_id``: The input event ID.
-            - ``notified``: Whether a notification was dispatched.
+            - ``notified``: Whether at least one notification was dispatched.
             - ``reason``: Human-readable explanation.
+            - ``channels_dispatched``: List of channel types that succeeded.
     """
     logger.info("send_notification called for event: %s", event_id)
 
@@ -407,6 +502,7 @@ def send_notification(
             "event_id": event_id,
             "notified": False,
             "reason": f"severity '{severity}' below threshold '{threshold}'",
+            "channels_dispatched": [],
         }
 
     # Build notification content from event data.
@@ -425,6 +521,7 @@ def send_notification(
     )
 
     priority = _SEVERITY_TO_PRIORITY.get(severity, 5)
+    channels_dispatched: list[str] = []
 
     # Template context available to Jinja2 webhook payloads.
     template_context: dict[str, Any] = {
@@ -460,6 +557,7 @@ def send_notification(
             )
             if ok:
                 dispatched_any = True
+                channels_dispatched.append(ch.get("type", "unknown"))
         except (httpx.HTTPStatusError, httpx.RequestError) as exc:
             logger.warning(
                 "Channel %s dispatch failed for event %s: %s",
@@ -482,6 +580,7 @@ def send_notification(
             "event_id": event_id,
             "notified": False,
             "reason": "no notification channels configured",
+            "channels_dispatched": [],
         }
 
     if not dispatched_any:
@@ -489,11 +588,16 @@ def send_notification(
             "event_id": event_id,
             "notified": False,
             "reason": f"All channels failed: {'; '.join(errors)}",
+            "channels_dispatched": [],
         }
 
-    logger.info("Notification dispatched for event %s (severity=%s)", event_id, severity)
+    logger.info(
+        "Notification dispatched for event %s (severity=%s) via %s",
+        event_id, severity, channels_dispatched,
+    )
     return {
         "event_id": event_id,
         "notified": True,
         "reason": f"severity '{severity}' met threshold '{threshold}'",
+        "channels_dispatched": channels_dispatched,
     }
