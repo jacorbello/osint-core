@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from osint_core.workers.notify import send_notification
+from osint_core.workers.notify import (
+    _needs_db_fetch,
+    send_notification,
+)
 
 # ---------------------------------------------------------------------------
 # Task registration
@@ -29,6 +32,42 @@ def test_send_notification_is_bound():
 
 
 # ---------------------------------------------------------------------------
+# _needs_db_fetch helper
+# ---------------------------------------------------------------------------
+
+
+def test_needs_db_fetch_none():
+    """None event_data should trigger DB fetch."""
+    assert _needs_db_fetch(None) is True
+
+
+def test_needs_db_fetch_empty_dict():
+    """Empty dict should trigger DB fetch."""
+    assert _needs_db_fetch({}) is True
+
+
+def test_needs_db_fetch_partial_data():
+    """Dict missing required fields should trigger DB fetch."""
+    assert _needs_db_fetch({"severity": "high", "title": "T"}) is True
+
+
+def test_needs_db_fetch_none_values():
+    """Dict with None values for required fields should trigger DB fetch."""
+    data = {"severity": "high", "title": None, "summary": "S", "source_id": "x"}
+    assert _needs_db_fetch(data) is True
+
+
+def test_needs_db_fetch_complete_data():
+    """Dict with all required fields should not trigger DB fetch."""
+    assert _needs_db_fetch({
+        "severity": "high",
+        "title": "T",
+        "summary": "S",
+        "source_id": "nvd",
+    }) is False
+
+
+# ---------------------------------------------------------------------------
 # Threshold / skip logic
 # ---------------------------------------------------------------------------
 
@@ -40,7 +79,8 @@ def test_below_threshold_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
 
     result = send_notification.run(
         "evt-001",
-        {"severity": "low", "title": "Minor event", "summary": "Nothing to see here."},
+        {"severity": "low", "title": "Minor event", "summary": "Nothing to see here.",
+         "source_id": "test"},
     )
 
     assert result["notified"] is False
@@ -83,7 +123,8 @@ def test_exact_threshold_severity_notifies(monkeypatch: pytest.MonkeyPatch) -> N
     with patch("osint_core.workers.notify._post_to_gotify", return_value=True) as mock_post:
         result = send_notification.run(
             "evt-003",
-            {"severity": "medium", "title": "Medium alert", "summary": "Some info."},
+            {"severity": "medium", "title": "Medium alert", "summary": "Some info.",
+             "source_id": "test"},
         )
 
     assert result["notified"] is True
@@ -94,9 +135,150 @@ def test_missing_severity_treated_as_info(monkeypatch: pytest.MonkeyPatch) -> No
     """If severity is absent the event is treated as 'info' and skipped by default."""
     monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "medium")
 
-    result = send_notification.run("evt-004", {})
+    # Provide complete data to avoid DB fetch attempt.
+    result = send_notification.run("evt-004", {
+        "title": "T", "summary": "S", "source_id": "x", "severity": None,
+    })
 
     assert result["notified"] is False
+
+
+# ---------------------------------------------------------------------------
+# DB fallback — event_data is None
+# ---------------------------------------------------------------------------
+
+
+def test_db_fetch_when_event_data_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When event_data is None, the task should fetch from DB and use those fields."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+    monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+
+    db_data = {
+        "title": "DB Title",
+        "summary": "DB Summary",
+        "severity": "high",
+        "source_id": "nvd",
+        "event_type": "cve",
+        "indicators": ["CVE-2026-1234"],
+    }
+
+    mock_fetch = patch(
+        "osint_core.workers.notify._fetch_event_data",
+        new_callable=AsyncMock, return_value=db_data,
+    )
+    mock_gotify = patch(
+        "osint_core.workers.notify._post_to_gotify", return_value=True,
+    )
+    with mock_fetch, mock_gotify as mock_post:
+        result = send_notification.run("evt-db-1", None)
+
+    assert result["notified"] is True
+    assert result["event_id"] == "evt-db-1"
+    mock_post.assert_called_once()
+
+
+def test_db_fetch_supplements_missing_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When event_data is missing title/summary, DB data should supplement."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+    monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+
+    # Caller provides severity but no title/summary.
+    partial_data = {"severity": "critical"}
+
+    db_data = {
+        "title": "DB Title",
+        "summary": "DB Summary",
+        "severity": "high",  # Should NOT overwrite caller's "critical".
+        "source_id": "nvd",
+        "event_type": "cve",
+        "indicators": ["CVE-2026-5678"],
+    }
+
+    mock_fetch = patch(
+        "osint_core.workers.notify._fetch_event_data",
+        new_callable=AsyncMock, return_value=db_data,
+    )
+    mock_gotify = patch(
+        "osint_core.workers.notify._post_to_gotify", return_value=True,
+    )
+    with mock_fetch, mock_gotify as mock_post:
+        result = send_notification.run("evt-db-2", partial_data)
+
+    assert result["notified"] is True
+    # Priority should be 10 for "critical" (caller's severity, not DB's "high").
+    call_args = mock_post.call_args
+    assert call_args.args[2] == 10
+
+
+def test_db_fetch_failure_does_not_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When DB fetch fails, task should fall back to available data gracefully."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+    monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+
+    mock_fetch = patch(
+        "osint_core.workers.notify._fetch_event_data",
+        new_callable=AsyncMock, return_value=None,
+    )
+    mock_gotify = patch(
+        "osint_core.workers.notify._post_to_gotify", return_value=True,
+    )
+    with mock_fetch, mock_gotify:
+        # event_data=None and DB returns None — still works with defaults.
+        result = send_notification.run("evt-db-3", None)
+
+    # Severity falls back to "info" which is below "low" threshold.
+    assert result["notified"] is False
+    assert result["event_id"] == "evt-db-3"
+
+
+def test_db_fetch_failure_graceful_with_partial_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When DB fetch fails but partial data exists, task uses what it has."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+    monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+
+    partial = {"severity": "high"}
+
+    mock_fetch = patch(
+        "osint_core.workers.notify._fetch_event_data",
+        new_callable=AsyncMock, return_value=None,
+    )
+    mock_gotify = patch(
+        "osint_core.workers.notify._post_to_gotify", return_value=True,
+    )
+    with mock_fetch, mock_gotify as mock_post:
+        result = send_notification.run("evt-db-4", partial)
+
+    assert result["notified"] is True
+    assert result["event_id"] == "evt-db-4"
+    mock_post.assert_called_once()
+
+
+def test_no_db_fetch_when_data_complete(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When event_data has all required fields, no DB fetch should happen."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+    monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+
+    complete_data = {
+        "severity": "high",
+        "title": "Complete Title",
+        "summary": "Complete Summary",
+        "source_id": "nvd",
+        "event_type": "cve",
+        "indicators": ["CVE-2026-0001"],
+    }
+
+    mock_fetch_p = patch(
+        "osint_core.workers.notify._fetch_event_data",
+        new_callable=AsyncMock,
+    )
+    mock_gotify = patch(
+        "osint_core.workers.notify._post_to_gotify", return_value=True,
+    )
+    with mock_fetch_p as mock_fetch, mock_gotify:
+        result = send_notification.run("evt-db-5", complete_data)
+
+    mock_fetch.assert_not_called()
+    assert result["notified"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +304,7 @@ def test_gotify_unreachable_triggers_retry(monkeypatch: pytest.MonkeyPatch) -> N
         send_notification.run.__func__(
             mock_self,
             "evt-005",
-            {"severity": "high", "title": "T", "summary": "S"},
+            {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
         )
 
     mock_self.retry.assert_called_once()
@@ -140,7 +322,8 @@ def test_no_gotify_token_returns_not_notified(monkeypatch: pytest.MonkeyPatch) -
 
     result = send_notification.run(
         "evt-006",
-        {"severity": "critical", "title": "Critical!", "summary": "Very bad."},
+        {"severity": "critical", "title": "Critical!", "summary": "Very bad.",
+         "source_id": "test"},
     )
 
     # _post_to_gotify logs a warning and returns False when no token is set.
@@ -161,7 +344,7 @@ def test_return_shape_when_notified(monkeypatch: pytest.MonkeyPatch) -> None:
     with patch("osint_core.workers.notify._post_to_gotify", return_value=True):
         result = send_notification.run(
             "evt-007",
-            {"severity": "high", "title": "T", "summary": "S"},
+            {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
         )
 
     assert set(result.keys()) >= {"event_id", "notified", "reason"}
@@ -173,7 +356,7 @@ def test_return_shape_when_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
 
     result = send_notification.run(
         "evt-008",
-        {"severity": "low"},
+        {"severity": "low", "title": "T", "summary": "S", "source_id": "x"},
     )
 
     assert set(result.keys()) >= {"event_id", "notified", "reason"}
