@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import select
+
+from osint_core.db import async_session
+from osint_core.models.brief import Brief
+from osint_core.models.event import Event
+from osint_core.models.plan import PlanVersion
 from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -43,7 +51,7 @@ def _build_severity_breakdown(events: list[dict[str, Any]]) -> dict[str, int]:
         events: List of event dicts, each with an optional ``severity`` key.
 
     Returns:
-        Mapping of severity label → count (only non-zero severities included).
+        Mapping of severity label to count (only non-zero severities included).
     """
     breakdown: dict[str, int] = {}
     for evt in events:
@@ -59,13 +67,167 @@ def _build_source_breakdown(events: list[dict[str, Any]]) -> dict[str, int]:
         events: List of event dicts, each with an optional ``source_id`` key.
 
     Returns:
-        Mapping of source_id → count (only non-zero sources included).
+        Mapping of source_id to count (only non-zero sources included).
     """
     breakdown: dict[str, int] = {}
     for evt in events:
         src = evt.get("source_id") or "unknown"
         breakdown[src] = breakdown.get(src, 0) + 1
     return {k: v for k, v in breakdown.items() if v}
+
+
+def _build_digest_markdown(
+    plan_id: str,
+    period: str,
+    now: datetime,
+    window_start: datetime,
+    events: list[dict[str, Any]],
+    severity_breakdown: dict[str, int],
+) -> str:
+    """Build markdown content for a digest brief.
+
+    Args:
+        plan_id: The plan ID this digest belongs to.
+        period: The period label (daily, weekly, shift, etc.).
+        now: The end of the time window.
+        window_start: The start of the time window.
+        events: List of event dicts included in the digest.
+        severity_breakdown: Mapping of severity to count.
+
+    Returns:
+        Markdown string summarising the digest.
+    """
+    severity_lines = ", ".join(
+        f"{count} {sev}"
+        for sev, count in sorted(
+            severity_breakdown.items(),
+            key=lambda kv: _SEVERITIES.index(kv[0]) if kv[0] in _SEVERITIES else 99,
+        )
+    )
+    return (
+        f"# OSINT Digest — {period.title()} ({now.strftime('%Y-%m-%d %H:%M UTC')})\n\n"
+        f"**Plan:** {plan_id}  \n"
+        f"**Window:** {window_start.strftime('%Y-%m-%d %H:%M')} – "
+        f"{now.strftime('%Y-%m-%d %H:%M')} UTC\n\n"
+        f"**Total events:** {len(events)}  \n"
+        f"**Severity breakdown:** {severity_lines}\n"
+    )
+
+
+async def _compile_digest_async(
+    self: Any,
+    plan_id: str,
+    period: str,
+    hours: int | None,
+    notify: bool,
+) -> dict[str, Any]:
+    """Async implementation of compile_digest."""
+    window_hrs = _window_hours(period, hours)
+    now = datetime.now(UTC)
+    window_start = now - timedelta(hours=window_hrs)
+
+    logger.info(
+        "digest_window plan_id=%s window_start=%s window_end=%s hours=%d",
+        plan_id,
+        window_start.isoformat(),
+        now.isoformat(),
+        window_hrs,
+    )
+
+    # --- Load events from DB ---
+    async with async_session() as db:
+        result = await db.execute(
+            select(Event)
+            .join(PlanVersion, Event.plan_version_id == PlanVersion.id)
+            .where(PlanVersion.plan_id == plan_id)
+            .where(Event.ingested_at >= window_start)
+            .where(Event.ingested_at <= now)
+            .where(
+                Event.metadata_["digested"].as_boolean().is_not(True)
+            )
+        )
+        events_orm = list(result.scalars().all())
+        events: list[dict[str, Any]] = [
+            {
+                "event_id": str(e.id),
+                "title": e.title,
+                "severity": e.severity,
+                "source_id": e.source_id,
+                "occurred_at": e.occurred_at.isoformat() if e.occurred_at else None,
+            }
+            for e in events_orm
+        ]
+
+        if not events:
+            logger.info("digest_empty plan_id=%s period=%s", plan_id, period)
+            return {
+                "plan_id": plan_id,
+                "period": period,
+                "window_hours": window_hrs,
+                "window_start": window_start.isoformat(),
+                "window_end": now.isoformat(),
+                "status": "empty",
+                "alert_count": 0,
+                "severity_breakdown": {},
+                "source_breakdown": {},
+                "digest_id": None,
+            }
+
+        severity_breakdown = _build_severity_breakdown(events)
+        source_breakdown = _build_source_breakdown(events)
+
+        # --- Persist digest Brief record ---
+        content_md = _build_digest_markdown(
+            plan_id, period, now, window_start, events, severity_breakdown,
+        )
+        digest_record = Brief(
+            title=f"Digest: {plan_id} ({period})",
+            content_md=content_md,
+            event_ids=[uuid.UUID(e["event_id"]) for e in events],
+            generated_by="digest",
+        )
+        db.add(digest_record)
+
+        # Mark events as digested to prevent re-inclusion
+        for e_orm in events_orm:
+            meta = dict(e_orm.metadata_) if e_orm.metadata_ else {}
+            meta["digested"] = True
+            e_orm.metadata_ = meta
+
+        await db.commit()
+        await db.refresh(digest_record)
+        digest_id = str(digest_record.id)
+
+    logger.info(
+        "digest_compiled plan_id=%s period=%s alert_count=%d severity=%s digest_id=%s",
+        plan_id,
+        period,
+        len(events),
+        severity_breakdown,
+        digest_id,
+    )
+
+    summary: dict[str, Any] = {
+        "plan_id": plan_id,
+        "period": period,
+        "window_hours": window_hrs,
+        "window_start": window_start.isoformat(),
+        "window_end": now.isoformat(),
+        "status": "ok",
+        "alert_count": len(events),
+        "severity_breakdown": severity_breakdown,
+        "source_breakdown": source_breakdown,
+        "digest_id": digest_id,
+    }
+
+    # --- Optionally chain notification ---
+    if notify and digest_id:
+        from osint_core.workers.notify import send_notification
+
+        send_notification.delay(digest_id)
+        logger.info("digest_notify_chained plan_id=%s digest_id=%s", plan_id, digest_id)
+
+    return summary
 
 
 @celery_app.task(bind=True, name="osint.compile_digest", max_retries=3)  # type: ignore[untyped-decorator]
@@ -109,124 +271,26 @@ def compile_digest(
         - ``window_start`` / ``window_end``: ISO-8601 timestamps.
         - ``status``: ``"ok"`` or ``"empty"`` when no events were found.
         - ``alert_count``: total events included in the digest.
-        - ``severity_breakdown``: mapping of severity → count.
-        - ``source_breakdown``: mapping of source_id → count.
-        - ``digest_id``: ID of the persisted digest record (stub: ``None``).
+        - ``severity_breakdown``: mapping of severity to count.
+        - ``source_breakdown``: mapping of source_id to count.
+        - ``digest_id``: ID of the persisted digest record.
     """
     logger.info("Compiling %s digest for plan: %s", period, plan_id)
 
-    window_hours = _window_hours(period, hours)
-    now = datetime.now(UTC)
-    window_start = now - timedelta(hours=window_hours)
-
-    logger.info(
-        "digest_window plan_id=%s window_start=%s window_end=%s hours=%d",
-        plan_id,
-        window_start.isoformat(),
-        now.isoformat(),
-        window_hours,
-    )
-
-    # --- Load events (DB stub) ---
-    # In production:
-    #   async with async_session() as db:
-    #       result = await db.execute(
-    #           select(Event)
-    #           .join(PlanVersion, Event.plan_version_id == PlanVersion.id)
-    #           .where(PlanVersion.plan_id == plan_id)
-    #           .where(Event.ingested_at >= window_start)
-    #           .where(Event.ingested_at <= now)
-    #           .where(Event.metadata_["digested"].as_boolean() != True)
-    #       )
-    #       events_orm = result.scalars().all()
-    #       events = [
-    #           {
-    #               "event_id": str(e.id),
-    #               "title": e.title,
-    #               "severity": e.severity,
-    #               "source_id": e.source_id,
-    #               "occurred_at": e.occurred_at.isoformat() if e.occurred_at else None,
-    #           }
-    #           for e in events_orm
-    #       ]
-    events: list[dict[str, Any]] = []
-
-    if not events:
-        logger.info("digest_empty plan_id=%s period=%s", plan_id, period)
-        return {
-            "plan_id": plan_id,
-            "period": period,
-            "window_hours": window_hours,
-            "window_start": window_start.isoformat(),
-            "window_end": now.isoformat(),
-            "status": "empty",
-            "alert_count": 0,
-            "severity_breakdown": {},
-            "source_breakdown": {},
-            "digest_id": None,
-        }
-
-    severity_breakdown = _build_severity_breakdown(events)
-    source_breakdown = _build_source_breakdown(events)
-
-    # --- Persist digest (DB stub) ---
-    # In production:
-    #   severity_lines = ", ".join(
-    #       f"{count} {sev}" for sev, count in sorted(
-    #           severity_breakdown.items(),
-    #           key=lambda kv: _SEVERITIES.index(kv[0]) if kv[0] in _SEVERITIES else 99,
-    #       )
-    #   )
-    #   content_md = (
-    #       f"# OSINT Digest — {period.title()} ({now.strftime('%Y-%m-%d %H:%M UTC')})\n\n"
-    #       f"**Plan:** {plan_id}  \n"
-    #       f"**Window:** {window_start.strftime('%Y-%m-%d %H:%M')} – "
-    #       f"{now.strftime('%Y-%m-%d %H:%M')} UTC\n\n"
-    #       f"**Total events:** {len(events)}  \n"
-    #       f"**Severity breakdown:** {severity_lines}\n"
-    #   )
-    #   digest_record = Brief(
-    #       title=f"Digest: {plan_id} ({period})",
-    #       content_md=content_md,
-    #       event_ids=[uuid.UUID(e["event_id"]) for e in events],
-    #       generated_by="digest",
-    #   )
-    #   db.add(digest_record)
-    #   # Mark events as digested
-    #   for e in events_orm:
-    #       e.metadata_["digested"] = True
-    #   await db.commit()
-    #   await db.refresh(digest_record)
-    #   digest_id = str(digest_record.id)
-    digest_id: str | None = None
-
-    logger.info(
-        "digest_compiled plan_id=%s period=%s alert_count=%d severity=%s",
-        plan_id,
-        period,
-        len(events),
-        severity_breakdown,
-    )
-
-    result: dict[str, Any] = {
-        "plan_id": plan_id,
-        "period": period,
-        "window_hours": window_hours,
-        "window_start": window_start.isoformat(),
-        "window_end": now.isoformat(),
-        "status": "ok",
-        "alert_count": len(events),
-        "severity_breakdown": severity_breakdown,
-        "source_breakdown": source_breakdown,
-        "digest_id": digest_id,
-    }
-
-    # --- Optionally notify (stub) ---
-    # In production (when digest_id is available):
-    #   if notify and digest_id:
-    #       from osint_core.workers.notify import send_notification
-    #       send_notification.delay(digest_id)
-    if notify:
-        logger.info("digest_notify_skipped_no_digest_id plan_id=%s", plan_id)
-
-    return result
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(
+            _compile_digest_async(self, plan_id, period, hours, notify)
+        )
+    except Exception as exc:
+        countdown = min(2 ** self.request.retries * 30, 900)
+        logger.warning(
+            "Digest compilation failed for plan %s (attempt %d), retrying in %ds: %s",
+            plan_id,
+            self.request.retries,
+            countdown,
+            exc,
+        )
+        raise self.retry(exc=exc, countdown=countdown) from exc
+    finally:
+        loop.close()
