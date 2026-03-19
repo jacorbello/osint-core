@@ -6,12 +6,12 @@ import asyncio
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.api.deps import get_current_user, get_db
-from osint_core.api.errors import collection_page, problem_response_docs
+from osint_core.api.errors import collection_page, problem_response, problem_response_docs
 from osint_core.api.middleware.auth import UserInfo
 from osint_core.models.event import Event
 from osint_core.schemas.event import EventSearchList
@@ -67,17 +67,29 @@ async def search_events(
     "/events:semantic",
     response_model=EventSearchList,
     operation_id="searchEventsSemantic",
-    responses=problem_response_docs(401, 422),
+    responses=problem_response_docs(401, 422, 503),
 )
 async def search_semantic(
     q: str = Query(description="Natural language query for semantic search"),
     limit: int = Query(default=20, ge=1, le=100),
     score_threshold: float = Query(default=0.5, ge=0.0, le=1.0),
+    request: Request = ...,
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
 ) -> EventSearchList:
     """Semantic similarity search via Qdrant."""
-    hits = await asyncio.to_thread(search_similar, q, limit=limit, score_threshold=score_threshold)
+    try:
+        hits = await asyncio.to_thread(
+            search_similar, q, limit=limit, score_threshold=score_threshold,
+        )
+    except Exception:
+        logger.exception("semantic_search_failed", query=q)
+        return problem_response(  # type: ignore[return-value]
+            request,
+            status_code=503,
+            code="dependency_unavailable",
+            detail="Semantic search is temporarily unavailable",
+        )
 
     if not hits:
         logger.debug("Semantic search for %r returned 0 Qdrant hits", q)

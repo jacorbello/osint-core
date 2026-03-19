@@ -1,6 +1,7 @@
 """GDELT DOC 2.0 API connector with geographic and language filtering."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import json
@@ -51,8 +52,25 @@ class GdeltConnector(BaseConnector):
             params["timespan"] = timespan
 
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(self.config.url, params=params)
-            resp.raise_for_status()
+            for attempt in range(3):
+                resp = await client.get(self.config.url, params=params)
+                if resp.status_code in (429, 503):
+                    retry_after = min(
+                        int(resp.headers.get("Retry-After", "10")), 60,
+                    )
+                    logger.warning(
+                        "gdelt_rate_limited",
+                        status=resp.status_code,
+                        retry_after=retry_after,
+                        attempt=attempt + 1,
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
+                resp.raise_for_status()
+                break
+            else:
+                logger.error("gdelt_max_retries_exceeded", attempts=3)
+                return []
 
         try:
             data = resp.json()
