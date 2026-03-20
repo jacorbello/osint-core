@@ -10,6 +10,7 @@ from osint_core.models.event import Event, event_artifacts, event_entities, even
 from osint_core.models.indicator import Indicator
 from osint_core.models.job import Job
 from osint_core.models.plan import PlanVersion
+from osint_core.models.user_preference import UserPreference
 from osint_core.models.watch import Watch, watch_events
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "Indicator",
     "Job",
     "PlanVersion",
+    "UserPreference",
     "Watch",
     "event_artifacts",
     "event_entities",
