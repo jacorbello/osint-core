@@ -5,9 +5,10 @@ from __future__ import annotations
 import io
 import logging
 from datetime import UTC, datetime
+from html import escape
 
 import markdown as markdown_lib  # type: ignore[import-untyped]
-from minio import Minio  # type: ignore[import-untyped]
+from minio import Minio, S3Error  # type: ignore[import-untyped]
 from weasyprint import HTML  # type: ignore[import-untyped]
 
 from osint_core.config import settings
@@ -43,9 +44,14 @@ def _markdown_to_html(
 
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
-    header_parts = [f"<strong>{classification}</strong>"]
-    if plan_name:
-        header_parts.append(f"Plan: {plan_name}")
+    # Escape user-supplied values to prevent XSS/injection in the PDF.
+    safe_title = escape(title) if title else "Intelligence Brief"
+    safe_classification = escape(classification)
+    safe_plan_name = escape(plan_name)
+
+    header_parts = [f"<strong>{safe_classification}</strong>"]
+    if safe_plan_name:
+        header_parts.append(f"Plan: {safe_plan_name}")
     header_parts.append(f"Generated: {timestamp}")
 
     header_line = " &mdash; ".join(header_parts)
@@ -54,13 +60,13 @@ def _markdown_to_html(
 <html>
 <head>
 <meta charset="utf-8">
-<title>{title or 'Intelligence Brief'}</title>
+<title>{safe_title}</title>
 <style>
   @page {{
     size: A4;
     margin: 2cm;
     @top-center {{
-      content: "{classification}";
+      content: "{safe_classification}";
       font-size: 10px;
       color: #666;
     }}
@@ -141,7 +147,11 @@ def render_brief_pdf(
         plan_name=plan_name,
     )
 
-    pdf_bytes: bytes = HTML(string=html_str).write_pdf()
+    # Disable URL fetching to prevent SSRF via embedded resources.
+    pdf_bytes: bytes = HTML(
+        string=html_str,
+        url_fetcher=lambda url, **kw: {"string": "", "mime_type": "text/plain"},
+    ).write_pdf()
     logger.info("pdf_rendered title=%s size=%d", title, len(pdf_bytes))
     return pdf_bytes
 
@@ -169,9 +179,13 @@ def upload_pdf_to_minio(
         secure=settings.minio_secure,
     )
 
-    # Ensure the bucket exists.
+    # Ensure the bucket exists (handle race with concurrent requests).
     if not client.bucket_exists(bucket):
-        client.make_bucket(bucket)
+        try:
+            client.make_bucket(bucket)
+        except S3Error as exc:
+            if exc.code != "BucketAlreadyOwnedByYou":
+                raise
 
     data = io.BytesIO(pdf_bytes)
     client.put_object(
@@ -194,11 +208,9 @@ def generate_and_upload_pdf(
     title: str = "",
     classification: str = "UNCLASSIFIED",
     plan_name: str = "",
+    pdf_bytes: bytes | None = None,
 ) -> str:
     """Render a brief to PDF and upload to MinIO.
-
-    This is the main entry point for PDF export. It renders the markdown
-    to PDF, uploads to MinIO, and returns the URI.
 
     Args:
         brief_id: UUID of the brief (used for the object key).
@@ -206,16 +218,18 @@ def generate_and_upload_pdf(
         title: Brief title for the PDF header.
         classification: Classification marking.
         plan_name: Optional plan name for the PDF header.
+        pdf_bytes: Pre-rendered PDF bytes. If provided, skips rendering.
 
     Returns:
         MinIO URI for the uploaded PDF.
     """
-    pdf_bytes = render_brief_pdf(
-        content_md,
-        title=title,
-        classification=classification,
-        plan_name=plan_name,
-    )
+    if pdf_bytes is None:
+        pdf_bytes = render_brief_pdf(
+            content_md,
+            title=title,
+            classification=classification,
+            plan_name=plan_name,
+        )
 
     object_name = f"briefs/{brief_id}.pdf"
     return upload_pdf_to_minio(pdf_bytes, object_name)

@@ -92,7 +92,10 @@ async def get_brief_pdf(
     from the current markdown content (ensuring the latest version).  The
     generated PDF is uploaded to MinIO and the URI is stored on the brief.
     """
-    from osint_core.services.pdf_export import generate_and_upload_pdf, render_brief_pdf
+    from osint_core.services.pdf_export import (  # noqa: I001
+        generate_and_upload_pdf,
+        render_brief_pdf,
+    )
 
     result = await db.execute(select(Brief).where(Brief.id == brief_id))
     brief = result.scalar_one_or_none()
@@ -104,10 +107,16 @@ async def get_brief_pdf(
             detail="Brief not found",
         )  # type: ignore[return-value]
 
+    # Extract plan context if available for the PDF header.
+    plan_name = ""
+    if hasattr(brief, "plan_version") and brief.plan_version:
+        plan_name = getattr(brief.plan_version, "name", "") or ""
+
     try:
         pdf_bytes = render_brief_pdf(
             brief.content_md,
             title=brief.title,
+            plan_name=plan_name,
         )
     except Exception:
         logger.exception("PDF rendering failed for brief %s", brief_id)
@@ -119,15 +128,19 @@ async def get_brief_pdf(
         )  # type: ignore[return-value]
 
     # Upload to MinIO and store URI (best-effort; don't fail the request).
+    # Pass pre-rendered pdf_bytes to avoid rendering a second time.
     try:
         uri = generate_and_upload_pdf(
             str(brief.id),
             brief.content_md,
             title=brief.title,
+            plan_name=plan_name,
+            pdf_bytes=pdf_bytes,
         )
         brief.content_pdf_uri = uri
         await db.commit()
     except Exception:
+        await db.rollback()
         logger.warning("MinIO upload failed for brief %s; returning PDF directly", brief_id)
 
     return Response(
