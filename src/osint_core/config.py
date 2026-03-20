@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     # --- Rate Limiting ---
     rate_limit_per_ip: int = 100
     rate_limit_per_user: int = 300
+    rate_limit_trust_proxy: bool = True
 
     # --- Application ---
     plan_dir: str = "/app/plans"

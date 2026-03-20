@@ -34,6 +34,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     logger.info("osint-core starting", version="0.1.0")
     yield
+    # Close Redis connections held by middleware.
+    for route in getattr(app, "middleware", []):
+        mw = getattr(route, "cls", None)
+        if mw is RateLimitMiddleware:
+            # Walk the built middleware stack to find the instance.
+            obj = app.middleware_stack
+            while obj is not None:
+                if isinstance(obj, RateLimitMiddleware):
+                    await obj.close()
+                    break
+                obj = getattr(obj, "app", None)
     logger.info("osint-core shutting down")
 
 

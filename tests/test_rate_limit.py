@@ -5,8 +5,9 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 from osint_core.api.middleware.rate_limit import (
@@ -21,7 +22,7 @@ from osint_core.api.middleware.rate_limit import (
 # ---------------------------------------------------------------------------
 
 
-def _build_app(redis_mock: AsyncMock | None = None) -> FastAPI:
+def _build_app() -> FastAPI:
     """Build a minimal FastAPI app with rate limiting middleware."""
     test_app = FastAPI()
 
@@ -50,13 +51,6 @@ def _build_app(redis_mock: AsyncMock | None = None) -> FastAPI:
         return {"data": "events"}
 
     test_app.add_middleware(RateLimitMiddleware)
-
-    if redis_mock is not None:
-        # Inject mock redis into middleware instances
-        for mw in test_app.middleware_stack.__dict__.get("app", test_app).__dict__.values():
-            if isinstance(mw, RateLimitMiddleware):
-                mw._redis = redis_mock
-
     return test_app
 
 
@@ -77,6 +71,14 @@ def _make_redis_mock(counts: list[int] | None = None) -> AsyncMock:
     return mock_redis
 
 
+def _patch_redis(mock_redis: AsyncMock):
+    """Patch aioredis.from_url to return a mock Redis client."""
+    return patch(
+        "osint_core.api.middleware.rate_limit.aioredis.from_url",
+        return_value=mock_redis,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Unit: _get_client_ip
 # ---------------------------------------------------------------------------
@@ -88,23 +90,40 @@ class TestGetClientIp:
         request.headers = {}
         request.client = MagicMock()
         request.client.host = "192.168.1.1"
-        assert _get_client_ip(request) == "192.168.1.1"
+        with patch("osint_core.api.middleware.rate_limit.settings") as mock_settings:
+            mock_settings.rate_limit_trust_proxy = True
+            assert _get_client_ip(request) == "192.168.1.1"
 
     def test_x_forwarded_for_single(self) -> None:
         request = MagicMock(spec=Request)
         request.headers = {"x-forwarded-for": "10.0.0.1"}
-        assert _get_client_ip(request) == "10.0.0.1"
+        with patch("osint_core.api.middleware.rate_limit.settings") as mock_settings:
+            mock_settings.rate_limit_trust_proxy = True
+            assert _get_client_ip(request) == "10.0.0.1"
 
     def test_x_forwarded_for_multiple(self) -> None:
         request = MagicMock(spec=Request)
         request.headers = {"x-forwarded-for": "10.0.0.1, 10.0.0.2, 10.0.0.3"}
-        assert _get_client_ip(request) == "10.0.0.1"
+        with patch("osint_core.api.middleware.rate_limit.settings") as mock_settings:
+            mock_settings.rate_limit_trust_proxy = True
+            assert _get_client_ip(request) == "10.0.0.1"
 
     def test_no_client(self) -> None:
         request = MagicMock(spec=Request)
         request.headers = {}
         request.client = None
-        assert _get_client_ip(request) == "unknown"
+        with patch("osint_core.api.middleware.rate_limit.settings") as mock_settings:
+            mock_settings.rate_limit_trust_proxy = True
+            assert _get_client_ip(request) == "unknown"
+
+    def test_x_forwarded_for_ignored_when_trust_proxy_off(self) -> None:
+        request = MagicMock(spec=Request)
+        request.headers = {"x-forwarded-for": "10.0.0.1"}
+        request.client = MagicMock()
+        request.client.host = "192.168.1.1"
+        with patch("osint_core.api.middleware.rate_limit.settings") as mock_settings:
+            mock_settings.rate_limit_trust_proxy = False
+            assert _get_client_ip(request) == "192.168.1.1"
 
 
 # ---------------------------------------------------------------------------
@@ -192,23 +211,21 @@ class TestRateLimitResponse:
     def test_returns_429_when_limit_exceeded(self) -> None:
         """Requests exceeding the IP limit should get 429 with Retry-After."""
         mock_redis = _make_redis_mock()
-        # Override execute to always return over-limit count
         mock_pipe = AsyncMock()
         mock_pipe.execute = AsyncMock(return_value=[101, True])
         mock_pipe.incr = MagicMock(return_value=mock_pipe)
         mock_pipe.expire = MagicMock(return_value=mock_pipe)
         mock_redis.pipeline = MagicMock(return_value=mock_pipe)
 
-        app = _build_app()
-        # Inject redis mock into middleware
-        # Walk the middleware stack to find our middleware
-        _inject_redis(app, mock_redis)
-
-        with patch("osint_core.api.middleware.rate_limit.settings") as mock_settings:
+        with _patch_redis(mock_redis), patch(
+            "osint_core.api.middleware.rate_limit.settings"
+        ) as mock_settings:
             mock_settings.rate_limit_per_ip = 100
             mock_settings.rate_limit_per_user = 300
             mock_settings.redis_url = "redis://localhost:6379/0"
+            mock_settings.rate_limit_trust_proxy = True
 
+            app = _build_app()
             client = TestClient(app)
             resp = client.get("/api/v1/events")
             assert resp.status_code == 429
@@ -224,17 +241,19 @@ class TestRateLimitResponse:
         mock_pipe.expire = MagicMock(return_value=mock_pipe)
         mock_redis.pipeline = MagicMock(return_value=mock_pipe)
 
-        app = _build_app()
-        _inject_redis(app, mock_redis)
-
-        with patch("osint_core.api.middleware.rate_limit.settings") as mock_settings:
+        with _patch_redis(mock_redis), patch(
+            "osint_core.api.middleware.rate_limit.settings"
+        ) as mock_settings:
             mock_settings.rate_limit_per_ip = 100
             mock_settings.rate_limit_per_user = 300
             mock_settings.redis_url = "redis://localhost:6379/0"
+            mock_settings.rate_limit_trust_proxy = True
 
+            app = _build_app()
             client = TestClient(app)
             resp = client.get("/api/v1/events")
             assert resp.status_code == 200
+            assert "X-RateLimit-Remaining" in resp.headers
 
     def test_fails_open_when_redis_unavailable(self) -> None:
         """When Redis is unreachable, requests should be allowed (fail open)."""
@@ -263,6 +282,7 @@ class TestConfig:
         )
         assert s.rate_limit_per_ip == 100
         assert s.rate_limit_per_user == 300
+        assert s.rate_limit_trust_proxy is True
 
     def test_custom_rate_limits(self) -> None:
         from osint_core.config import Settings
@@ -272,21 +292,27 @@ class TestConfig:
             redis_url="redis://localhost:6379/0",
             rate_limit_per_ip=50,
             rate_limit_per_user=150,
+            rate_limit_trust_proxy=False,
         )
         assert s.rate_limit_per_ip == 50
         assert s.rate_limit_per_user == 150
+        assert s.rate_limit_trust_proxy is False
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Unit: close() method
 # ---------------------------------------------------------------------------
 
 
-def _inject_redis(app: FastAPI, mock_redis: AsyncMock) -> None:
-    """Walk middleware stack and inject a mock Redis into RateLimitMiddleware."""
-    obj = app.middleware_stack
-    while obj is not None:
-        if isinstance(obj, RateLimitMiddleware):
-            obj._redis = mock_redis
-            return
-        obj = getattr(obj, "app", None)
+class TestMiddlewareClose:
+    @pytest.mark.asyncio
+    async def test_close_when_redis_open(self) -> None:
+        mw = RateLimitMiddleware(MagicMock())
+        mw._redis = AsyncMock()
+        await mw.close()
+        mw._redis is None  # noqa: B015
+
+    @pytest.mark.asyncio
+    async def test_close_when_redis_none(self) -> None:
+        mw = RateLimitMiddleware(MagicMock())
+        await mw.close()  # should not raise
