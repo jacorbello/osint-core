@@ -14,7 +14,9 @@ from osint_core.workers.notify import (
     _dispatch_channel,
     _needs_db_fetch,
     _post_to_slack,
+    _render_email_html,
     _render_webhook_payload,
+    _send_email,
     send_notification,
 )
 
@@ -93,6 +95,7 @@ def test_below_threshold_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["notified"] is False
     assert "below threshold" in result["reason"]
     assert result["event_id"] == "evt-001"
+    assert result["channels_dispatched"] == []
 
 
 def test_above_threshold_sends_notification(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,6 +119,7 @@ def test_above_threshold_sends_notification(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert result["notified"] is True
     assert result["event_id"] == "evt-002"
+    assert "gotify" in result["channels_dispatched"]
     mock_post.assert_called_once()
     call_kwargs = mock_post.call_args
     # Priority should be 8 for "high"
@@ -606,7 +610,7 @@ def test_no_channels_falls_back_to_gotify(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_return_shape_when_notified(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The return dict must have event_id, notified, and reason keys."""
+    """The return dict must have event_id, notified, reason, and channels_dispatched keys."""
     monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
     monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
 
@@ -616,11 +620,11 @@ def test_return_shape_when_notified(monkeypatch: pytest.MonkeyPatch) -> None:
             {"severity": "high", "title": "T", "summary": "S", "source_id": "x"},
         )
 
-    assert set(result.keys()) >= {"event_id", "notified", "reason"}
+    assert set(result.keys()) >= {"event_id", "notified", "reason", "channels_dispatched"}
 
 
 def test_return_shape_when_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The return dict must have event_id, notified, and reason keys when skipped."""
+    """The return dict must have event_id, notified, reason, and channels_dispatched keys."""
     monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "critical")
 
     result = send_notification.run(
@@ -628,7 +632,7 @@ def test_return_shape_when_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
         {"severity": "low", "title": "T", "summary": "S", "source_id": "x"},
     )
 
-    assert set(result.keys()) >= {"event_id", "notified", "reason"}
+    assert set(result.keys()) >= {"event_id", "notified", "reason", "channels_dispatched"}
     assert result["notified"] is False
 
 
@@ -885,3 +889,272 @@ class TestSlackDispatchIntegration:
 
         assert result["notified"] is True
         mock_slack.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Email template rendering
+# ---------------------------------------------------------------------------
+
+
+def test_render_email_html_contains_title():
+    """The rendered HTML should contain the event title."""
+    html = _render_email_html(
+        title="Test Alert",
+        summary="Something happened.",
+        severity="high",
+    )
+    assert "Test Alert" in html
+
+
+def test_render_email_html_severity_class():
+    """The rendered HTML should contain the severity CSS class."""
+    html = _render_email_html(
+        title="Alert",
+        summary="Summary",
+        severity="critical",
+    )
+    assert "severity-critical" in html
+
+
+def test_render_email_html_includes_indicators():
+    """The rendered HTML should list indicators when provided."""
+    html = _render_email_html(
+        title="Alert",
+        summary="Summary",
+        severity="high",
+        indicators=["CVE-2026-1234", "10.0.0.1"],
+    )
+    assert "CVE-2026-1234" in html
+    assert "10.0.0.1" in html
+
+
+def test_render_email_html_no_indicators():
+    """The rendered HTML should not have an indicators section when none given."""
+    html = _render_email_html(
+        title="Alert",
+        summary="Summary",
+        severity="low",
+        indicators=[],
+    )
+    # The indicators div should not appear (Jinja2 {% if indicators %} guard).
+    assert "indicator" not in html.lower() or "Indicators" not in html
+
+
+def test_render_email_html_includes_source():
+    """The rendered HTML should display source_id and event_type."""
+    html = _render_email_html(
+        title="Alert",
+        summary="Summary",
+        severity="medium",
+        source_id="nvd",
+        event_type="cve",
+    )
+    assert "nvd" in html
+    assert "cve" in html
+
+
+def test_render_email_html_summary_content():
+    """The rendered HTML should contain the summary text."""
+    html = _render_email_html(
+        title="Alert",
+        summary="A critical vulnerability was discovered in OpenSSL.",
+        severity="critical",
+    )
+    assert "A critical vulnerability was discovered in OpenSSL." in html
+
+
+# ---------------------------------------------------------------------------
+# _send_email — SMTP mock tests
+# ---------------------------------------------------------------------------
+
+
+def test_send_email_no_smtp_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When SMTP host is not configured, _send_email returns False."""
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_host", "")
+    assert _send_email(["user@example.com"], "Subject", "<p>Body</p>") is False
+
+
+def test_send_email_no_recipients(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When recipients list is empty, _send_email returns False."""
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_host", "smtp.example.com")
+    assert _send_email([], "Subject", "<p>Body</p>") is False
+
+
+def test_send_email_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When SMTP is configured, _send_email sends the email and returns True."""
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_host", "smtp.example.com")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_port", 587)
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_user", "user")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_password", "pass")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_from", "alerts@example.com")
+
+    mock_smtp_instance = MagicMock()
+    mock_smtp_instance.__enter__ = MagicMock(return_value=mock_smtp_instance)
+    mock_smtp_instance.__exit__ = MagicMock(return_value=False)
+
+    with patch("osint_core.workers.notify.smtplib.SMTP", return_value=mock_smtp_instance):
+        result = _send_email(
+            ["admin@example.com"],
+            "[OSINT HIGH] Test Alert",
+            "<p>Alert body</p>",
+        )
+
+    assert result is True
+    mock_smtp_instance.ehlo.assert_called()
+    mock_smtp_instance.starttls.assert_called_once()
+    mock_smtp_instance.login.assert_called_once_with("user", "pass")
+    mock_smtp_instance.sendmail.assert_called_once()
+    call_args = mock_smtp_instance.sendmail.call_args
+    assert call_args.args[0] == "alerts@example.com"
+    assert call_args.args[1] == ["admin@example.com"]
+
+
+def test_send_email_smtp_error_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SMTP errors should be caught and return False, not crash."""
+    import smtplib
+
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_host", "smtp.example.com")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_port", 587)
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_user", "")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_password", "")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_from", "alerts@example.com")
+
+    with patch(
+        "osint_core.workers.notify.smtplib.SMTP",
+        side_effect=smtplib.SMTPConnectError(421, b"Service not available"),
+    ):
+        result = _send_email(["admin@example.com"], "Subject", "<p>Body</p>")
+
+    assert result is False
+
+
+def test_send_email_network_error_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Network errors should be caught and return False, not crash."""
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_host", "smtp.example.com")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_port", 587)
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_user", "")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_password", "")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_from", "alerts@example.com")
+
+    with patch(
+        "osint_core.workers.notify.smtplib.SMTP",
+        side_effect=OSError("Connection refused"),
+    ):
+        result = _send_email(["admin@example.com"], "Subject", "<p>Body</p>")
+
+    assert result is False
+
+
+def test_send_email_port_25_no_starttls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When port is 25, STARTTLS should not be called."""
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_host", "smtp.example.com")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_port", 25)
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_user", "")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_password", "")
+    monkeypatch.setattr("osint_core.workers.notify.settings.smtp_from", "alerts@example.com")
+
+    mock_smtp_instance = MagicMock()
+    mock_smtp_instance.__enter__ = MagicMock(return_value=mock_smtp_instance)
+    mock_smtp_instance.__exit__ = MagicMock(return_value=False)
+
+    with patch("osint_core.workers.notify.smtplib.SMTP", return_value=mock_smtp_instance):
+        result = _send_email(["admin@example.com"], "Subject", "<p>Body</p>")
+
+    assert result is True
+    mock_smtp_instance.starttls.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Email channel integration via send_notification
+# ---------------------------------------------------------------------------
+
+
+def test_email_channel_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An email channel config should trigger email dispatch."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+    with patch("osint_core.workers.notify._send_email", return_value=True) as mock_email:
+        result = send_notification.run(
+            "evt-email-1",
+            {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+            channels=[{"type": "email", "recipients": ["admin@example.com"]}],
+        )
+
+    assert result["notified"] is True
+    assert "email" in result["channels_dispatched"]
+    mock_email.assert_called_once()
+    call_args = mock_email.call_args
+    assert call_args.args[0] == ["admin@example.com"]
+    assert "[OSINT HIGH]" in call_args.args[1]
+
+
+def test_email_and_gotify_channels(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Both email and gotify channels should dispatch when configured."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+    monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+
+    with (
+        patch("osint_core.workers.notify._post_to_gotify", return_value=True),
+        patch("osint_core.workers.notify._send_email", return_value=True),
+    ):
+        result = send_notification.run(
+            "evt-multi-1",
+            {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+            channels=[
+                {"type": "gotify"},
+                {"type": "email", "recipients": ["admin@example.com"]},
+            ],
+        )
+
+    assert result["notified"] is True
+    assert "gotify" in result["channels_dispatched"]
+    assert "email" in result["channels_dispatched"]
+
+
+def test_email_only_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When only email channel is configured, gotify should not be called."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+    with (
+        patch("osint_core.workers.notify._post_to_gotify") as mock_gotify,
+        patch("osint_core.workers.notify._send_email", return_value=True),
+    ):
+        result = send_notification.run(
+            "evt-email-only",
+            {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+            channels=[{"type": "email", "recipients": ["admin@example.com"]}],
+        )
+
+    mock_gotify.assert_not_called()
+    assert result["notified"] is True
+    assert result["channels_dispatched"] == ["email"]
+
+
+def test_unknown_channel_type_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unknown channel types should be logged and skipped."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+    result = send_notification.run(
+        "evt-unknown",
+        {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+        channels=[{"type": "sms"}],
+    )
+
+    assert result["notified"] is False
+    assert result["channels_dispatched"] == []
+
+
+def test_default_channels_is_gotify(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When no channels argument is passed, Gotify should be used by default."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+    monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+
+    with patch("osint_core.workers.notify._post_to_gotify", return_value=True) as mock_gotify:
+        result = send_notification.run(
+            "evt-default",
+            {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+        )
+
+    mock_gotify.assert_called_once()
+    assert result["notified"] is True
+    assert "gotify" in result["channels_dispatched"]

@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     gotify_url: str = "http://gotify/message"
     gotify_token: str = ""
 
+    # --- SMTP (email notifications) ---
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+
     # --- Shodan ---
     shodan_api_key: str = ""
 
