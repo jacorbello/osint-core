@@ -22,17 +22,30 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.create_table(
         "user_preferences",
-        sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("user_sub", sa.Text(), nullable=False),
-        sa.Column("notification_prefs", JSONB(), server_default="{}", nullable=False),
-        sa.Column("saved_searches", JSONB(), server_default="[]", nullable=False),
-        sa.Column("timezone", sa.Text(), server_default="UTC", nullable=False),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column(
-            "updated_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
+            "id", sa.UUID(), nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
+        sa.Column("user_sub", sa.Text(), nullable=False),
+        sa.Column(
+            "notification_prefs", JSONB(), nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+        sa.Column(
+            "saved_searches", JSONB(), nullable=False,
+            server_default=sa.text("'[]'::jsonb"),
+        ),
+        sa.Column(
+            "timezone", sa.Text(), nullable=False,
+            server_default=sa.text("'UTC'"),
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column(
+            "updated_at", sa.TIMESTAMP(timezone=True), nullable=False,
+            server_default=sa.text("now()"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_user_preferences")),
         sa.UniqueConstraint("user_sub", name=op.f("uq_user_preferences_user_sub")),

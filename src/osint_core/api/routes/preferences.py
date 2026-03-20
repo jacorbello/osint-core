@@ -6,7 +6,9 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.api.deps import get_current_user, get_db
@@ -26,17 +28,31 @@ router = APIRouter(prefix="/api/v1", tags=["preferences"])
 async def _get_or_create_preference(
     db: AsyncSession, user_sub: str
 ) -> UserPreference:
-    """Return the preference row for this user, creating one if absent."""
+    """Return the preference row for this user, creating one if absent.
+
+    Handles the race condition where two concurrent requests both try to
+    create the row: on IntegrityError we roll back and re-select.
+    """
     result = await db.execute(
         select(UserPreference).where(UserPreference.user_sub == user_sub)
     )
     pref = result.scalar_one_or_none()
-    if pref is None:
+    if pref is not None:
+        return pref
+
+    try:
         pref = UserPreference(user_sub=user_sub)
         db.add(pref)
         await db.flush()
         await db.refresh(pref)
-    return pref
+        return pref
+    except IntegrityError:
+        await db.rollback()
+        result = await db.execute(
+            select(UserPreference).where(UserPreference.user_sub == user_sub)
+        )
+        pref = result.scalar_one()
+        return pref
 
 
 # ── Preferences CRUD ────────────────────────────────────────────────
@@ -137,7 +153,7 @@ async def delete_saved_search(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: UserInfo = Depends(get_current_user),
-) -> None:
+) -> Response:
     """Delete a saved search by ID."""
     pref = await _get_or_create_preference(db, current_user.sub)
     original_count = len(pref.saved_searches)
@@ -145,11 +161,11 @@ async def delete_saved_search(
         s for s in pref.saved_searches if s.get("id") != search_id
     ]
     if len(pref.saved_searches) == original_count:
-        return problem_response(  # type: ignore[return-value]
+        return problem_response(
             request,
             status_code=404,
             code="not_found",
             detail="Saved search not found",
         )
     await db.commit()
-    return None
+    return Response(status_code=204)

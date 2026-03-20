@@ -1,6 +1,7 @@
 """UserPreference model — per-user settings and saved searches."""
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Index, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
@@ -15,10 +16,10 @@ class UserPreference(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "user_preferences"
 
     user_sub: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    notification_prefs: Mapped[dict] = mapped_column(
+    notification_prefs: Mapped[dict[str, Any]] = mapped_column(
         JSONB, server_default="{}", nullable=False
     )
-    saved_searches: Mapped[list] = mapped_column(
+    saved_searches: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, server_default="[]", nullable=False
     )
     timezone: Mapped[str] = mapped_column(
@@ -28,6 +29,7 @@ class UserPreference(UUIDMixin, TimestampMixin, Base):
         TIMESTAMP(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
+        nullable=False,
     )
 
     __table_args__ = (

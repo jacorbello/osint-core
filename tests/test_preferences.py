@@ -221,7 +221,7 @@ class TestDeleteSavedSearch:
             )
         )
 
-        assert result is None
+        assert result.status_code == 204
         assert len(pref.saved_searches) == 0
         db.commit.assert_awaited_once()
 
