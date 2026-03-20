@@ -24,6 +24,7 @@ from osint_core.api.routes import (
 )
 from osint_core.config import settings
 from osint_core.logging import configure_logging
+from osint_core.tracing import init_fastapi_tracing
 
 logger = structlog.get_logger()
 
@@ -56,6 +57,8 @@ app = FastAPI(
     docs_url=f"{settings.api_prefix}/docs",
     openapi_url=f"{settings.api_prefix}/openapi.json",
 )
+
+init_fastapi_tracing(app)
 
 app.add_exception_handler(ProblemError, problem_exception_handler)  # type: ignore[arg-type]
 app.add_middleware(RateLimitMiddleware)
