@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     rate_limit_per_user: int = 300
     rate_limit_trust_proxy: bool = True
 
+    # --- OpenTelemetry ---
+    otel_endpoint: str = ""
+    otel_sample_rate: float = 0.1
+
     # --- Application ---
     plan_dir: str = "/app/plans"
     log_level: str = "INFO"

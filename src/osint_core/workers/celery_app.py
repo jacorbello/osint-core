@@ -6,7 +6,7 @@ import time
 import structlog
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import beat_init
+from celery.signals import beat_init, worker_process_init
 
 from osint_core.config import settings
 
@@ -129,6 +129,14 @@ def load_beat_schedule() -> None:
     if last_exc is None:
         raise RuntimeError("Unexpected: no exception captured after retries")
     raise last_exc
+
+
+@worker_process_init.connect  # type: ignore[untyped-decorator]
+def on_worker_process_init(sender: object, **kwargs: object) -> None:
+    """Signal handler: initialise OpenTelemetry tracing in each worker process."""
+    from osint_core.tracing import init_celery_tracing
+
+    init_celery_tracing()
 
 
 @beat_init.connect  # type: ignore[untyped-decorator]
