@@ -450,10 +450,111 @@ def test_list_audit_entries():
     assert result.page.total == 1
 
 
+def test_get_brief_pdf_returns_pdf_response():
+    brief = _make_brief(content_md="# Test\n\nPDF content", title="PDF Brief")
+    db = _mock_db()
+    db.execute = AsyncMock(return_value=_mock_single_result(brief))
+
+    fake_pdf = b"%PDF-1.4 test content"
+    with (
+        patch(
+            "osint_core.services.pdf_export.render_brief_pdf",
+            return_value=fake_pdf,
+        ),
+        patch(
+            "osint_core.services.pdf_export.generate_and_upload_pdf",
+            return_value="minio://osint-briefs/briefs/test.pdf",
+        ),
+    ):
+        result = run_async(
+            briefs.get_brief_pdf(
+                brief_id=brief.id,
+                request=make_request(f"/api/v1/briefs/{brief.id}/pdf"),
+                db=db,
+                current_user=make_user(),
+            )
+        )
+
+    assert result.status_code == 200
+    assert result.media_type == "application/pdf"
+    assert result.body == fake_pdf
+    assert "Content-Disposition" in result.headers
+
+
+def test_get_brief_pdf_returns_404_for_missing_brief():
+    db = _mock_db()
+    db.execute = AsyncMock(return_value=_mock_single_result(None))
+
+    result = run_async(
+        briefs.get_brief_pdf(
+            brief_id=uuid.uuid4(),
+            request=make_request("/api/v1/briefs/missing/pdf"),
+            db=db,
+            current_user=make_user(),
+        )
+    )
+
+    assert result.status_code == 404
+    assert json.loads(result.body)["code"] == "not_found"
+
+
+def test_get_brief_pdf_returns_503_on_render_failure():
+    brief = _make_brief(content_md="# Test")
+    db = _mock_db()
+    db.execute = AsyncMock(return_value=_mock_single_result(brief))
+
+    with patch(
+        "osint_core.services.pdf_export.render_brief_pdf",
+        side_effect=RuntimeError("weasyprint failed"),
+    ):
+        result = run_async(
+            briefs.get_brief_pdf(
+                brief_id=brief.id,
+                request=make_request(f"/api/v1/briefs/{brief.id}/pdf"),
+                db=db,
+                current_user=make_user(),
+            )
+        )
+
+    assert result.status_code == 503
+    assert json.loads(result.body)["code"] == "pdf_render_failed"
+
+
+def test_get_brief_pdf_still_returns_pdf_when_minio_fails():
+    brief = _make_brief(content_md="# Test", title="Fallback Brief")
+    db = _mock_db()
+    db.execute = AsyncMock(return_value=_mock_single_result(brief))
+
+    fake_pdf = b"%PDF-1.4 fallback"
+    with (
+        patch(
+            "osint_core.services.pdf_export.render_brief_pdf",
+            return_value=fake_pdf,
+        ),
+        patch(
+            "osint_core.services.pdf_export.generate_and_upload_pdf",
+            side_effect=ConnectionError("MinIO down"),
+        ),
+    ):
+        result = run_async(
+            briefs.get_brief_pdf(
+                brief_id=brief.id,
+                request=make_request(f"/api/v1/briefs/{brief.id}/pdf"),
+                db=db,
+                current_user=make_user(),
+            )
+        )
+
+    # Should still return the PDF even though MinIO upload failed.
+    assert result.status_code == 200
+    assert result.body == fake_pdf
+
+
 def test_openapi_schema_loads():
     schema = app.openapi()
     assert "/api/v1/jobs" in schema["paths"]
     assert "/api/v1/plans" in schema["paths"]
+    assert "/api/v1/briefs/{brief_id}/pdf" in schema["paths"]
     assert "ProblemDetails" in schema["components"]["schemas"]
     assert schema["components"]["securitySchemes"]["BearerAuth"]["type"] == "http"
     assert schema["components"]["securitySchemes"]["BearerAuth"]["scheme"] == "bearer"

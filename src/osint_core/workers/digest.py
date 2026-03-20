@@ -220,8 +220,36 @@ async def _compile_digest_async(
         "digest_id": digest_id,
     }
 
-    # --- Optionally chain notification ---
+    # --- Optionally generate PDF and attach to email ---
     if notify and digest_id:
+        try:
+            from osint_core.services.pdf_export import generate_and_upload_pdf
+
+            uri = generate_and_upload_pdf(
+                digest_id,
+                content_md,
+                title=f"Digest: {plan_id} ({period})",
+                plan_name=plan_id,
+            )
+            # Update the brief record with the PDF URI.
+            async with async_session() as db_pdf:
+                result_pdf = await db_pdf.execute(
+                    select(Brief).where(Brief.id == digest_record.id)
+                )
+                brief_row = result_pdf.scalar_one_or_none()
+                if brief_row is not None:
+                    brief_row.content_pdf_uri = uri
+                    await db_pdf.commit()
+            summary["pdf_uri"] = uri
+            logger.info("digest_pdf_generated plan_id=%s uri=%s", plan_id, uri)
+        except Exception:
+            logger.warning(
+                "digest_pdf_failed plan_id=%s digest_id=%s",
+                plan_id,
+                digest_id,
+                exc_info=True,
+            )
+
         from osint_core.workers.notify import send_notification
 
         send_notification.delay(digest_id)
