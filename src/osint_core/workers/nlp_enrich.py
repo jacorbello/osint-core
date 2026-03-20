@@ -1,4 +1,4 @@
-"""NLP enrichment task using vLLM for summary, relevance, entities.
+"""NLP enrichment task using vLLM for summary, relevance, entities, ATT&CK techniques.
 
 NOTE: This file is separate from enrich.py which contains vectorize_event_task
 and correlate_event_task.
@@ -23,10 +23,20 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM_MESSAGE = (
     "You are an intelligence analyst. Respond with JSON only.\n"
-    'Respond with exactly this JSON structure:\n'
+    "Respond with exactly this JSON structure:\n"
     '{"summary": "1-2 sentence English summary of the event",\n'
     '"relevance": "relevant|tangential|irrelevant",\n'
-    '"entities": [{"name": "...", "type": "person|organization|location|indicator"}]}'
+    '"entities": [{"name": "...", "type": "person|organization|location|indicator"}],\n'
+    '"attack_techniques": [{"id": "T1566", "name": "Phishing"}]}\n'
+    "\n"
+    "For attack_techniques, classify the event using MITRE ATT&CK technique IDs.\n"
+    "Common techniques include: T1566 Phishing, T1190 Exploit Public-Facing Application,\n"
+    "T1059 Command and Scripting Interpreter, T1071 Application Layer Protocol,\n"
+    "T1486 Data Encrypted for Impact, T1070 Indicator Removal, T1110 Brute Force,\n"
+    "T1027 Obfuscated Files or Information, T1078 Valid Accounts, T1562 Impair Defenses,\n"
+    "T1595 Active Scanning, T1583 Acquire Infrastructure, T1498 Network Denial of Service,\n"
+    "T1557 Adversary-in-the-Middle, T1040 Network Sniffing.\n"
+    "Return an empty list if no techniques apply."
 )
 
 _USER_TEMPLATE = """Event title: {title}
@@ -42,6 +52,29 @@ def _strip_markdown_fences(text: str) -> str:
     if match:
         return match.group(1)
     return text.strip()
+
+
+def _validate_attack_techniques(raw: Any) -> list[dict[str, str]]:
+    """Validate and normalize attack_techniques from the LLM response.
+
+    Returns a list of dicts with ``id`` and ``name`` keys.  Invalid or
+    missing entries are silently dropped so that the enrichment pipeline
+    never fails due to unexpected LLM output.
+    """
+    if not isinstance(raw, list):
+        return []
+    validated: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        tid = item.get("id")
+        tname = item.get("name")
+        if isinstance(tid, str) and tid:
+            validated.append({
+                "id": tid,
+                "name": tname if isinstance(tname, str) else "",
+            })
+    return validated
 
 
 async def _call_vllm(prompt: str) -> dict[str, Any]:
@@ -125,6 +158,12 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
         relevance = result.get("relevance", "")
         if relevance in ("relevant", "tangential", "irrelevant"):
             event.nlp_relevance = relevance
+
+        # Store ATT&CK technique classifications in event metadata
+        techniques = _validate_attack_techniques(result.get("attack_techniques"))
+        meta = dict(event.metadata_ or {})
+        meta["attack_techniques"] = techniques
+        event.metadata_ = meta
 
         await db.commit()
 
