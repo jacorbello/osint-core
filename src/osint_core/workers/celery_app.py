@@ -52,7 +52,7 @@ celery_app.conf.update(
 celery_app.conf.beat_schedule = {
     "purge-expired-events-daily": {
         "task": "osint.purge_expired_events",
-        "schedule": crontab(hour=3, minute=0),  # daily at 03:00 UTC
+        "schedule": crontab(hour=3, minute=0),  # daily at 03:00 America/Chicago
     },
 }
 
@@ -104,7 +104,11 @@ def load_beat_schedule() -> None:
         try:
             schedule = asyncio.run(_fetch_active_plans_schedule())
             celery_app.conf.beat_schedule.update(schedule)
-            logger.info("beat_schedule_loaded", total_tasks=len(schedule))
+            logger.info(
+                "beat_schedule_loaded",
+                plan_tasks=len(schedule),
+                total_tasks=len(celery_app.conf.beat_schedule),
+            )
             return
         except Exception as exc:
             last_exc = exc

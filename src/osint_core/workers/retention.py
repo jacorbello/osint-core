@@ -21,7 +21,7 @@ from sqlalchemy import delete, select
 
 from osint_core.db import async_session
 from osint_core.models.audit import AuditLog
-from osint_core.models.event import Event, event_entities, event_indicators
+from osint_core.models.event import Event
 from osint_core.models.plan import PlanVersion
 from osint_core.workers.celery_app import celery_app
 
@@ -45,13 +45,13 @@ BATCH_SIZE = 500
 def purge_expired_events(self: Any) -> dict[str, Any]:
     """Purge events that have exceeded their retention period.
 
-    Wraps the async implementation with asyncio.run().
+    Wraps the async implementation with loop.run_until_complete().
     """
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(_purge_expired_events_async())
     except Exception as exc:
-        countdown = min(2 ** self.request.retries * 60, 900)
+        countdown = min(2 ** self.request.retries * 30, 900)
         raise self.retry(exc=exc, countdown=countdown) from exc
     finally:
         loop.close()
@@ -140,20 +140,9 @@ async def _purge_events_by_retention_class(
             # Collect IDs for Qdrant cleanup
             purged_event_ids.extend(str(eid) for eid in event_ids)
 
-            # Delete from association tables first (cascade should handle this,
-            # but being explicit for safety)
-            await db.execute(
-                delete(event_entities).where(
-                    event_entities.c.event_id.in_(event_ids),
-                )
-            )
-            await db.execute(
-                delete(event_indicators).where(
-                    event_indicators.c.event_id.in_(event_ids),
-                )
-            )
-
-            # Delete events
+            # Delete events — association tables (event_entities,
+            # event_indicators, event_artifacts, watch_events) are
+            # cleaned up by DB CASCADE (all FKs use ondelete="CASCADE").
             await db.execute(
                 delete(Event).where(Event.id.in_(event_ids))
             )

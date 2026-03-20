@@ -73,8 +73,8 @@ def test_beat_schedule_includes_retention():
     assert entry["task"] == "osint.purge_expired_events"
 
 
-def test_beat_schedule_runs_at_0300_utc():
-    """The retention purge should be scheduled daily at 03:00 UTC."""
+def test_beat_schedule_runs_at_0300():
+    """The retention purge should be scheduled daily at 03:00 (app timezone)."""
     from celery.schedules import crontab
 
     from osint_core.workers.celery_app import celery_app
@@ -124,10 +124,10 @@ def _make_mock_db(
             # First call: plan_version IDs
             return pv_result
 
-        # Subsequent calls alternate between select (event IDs) and deletes
+        # Subsequent calls alternate between select (event IDs) and delete
         # Select queries return event batches; deletes return MagicMock
-        batch_idx = (idx - 1) // 4  # 1 select + 3 deletes per batch cycle
-        step_in_cycle = (idx - 1) % 4
+        batch_idx = (idx - 1) // 2  # 1 select + 1 delete per batch cycle
+        step_in_cycle = (idx - 1) % 2
 
         if step_in_cycle == 0:
             # Event ID select
