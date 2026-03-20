@@ -53,6 +53,11 @@ async def list_events(
     severity: str | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
+    attack_technique: str | None = Query(
+        default=None,
+        description="Filter by MITRE ATT&CK technique ID (e.g., T1566). "
+                    "Matches events whose metadata contains the given technique.",
+    ),
     sort: str | None = Query(
         default=None,
         description="Sort field. Prefix with '-' for descending. "
@@ -78,6 +83,14 @@ async def list_events(
     if date_to is not None:
         stmt = stmt.where(Event.ingested_at <= date_to)
         count_stmt = count_stmt.where(Event.ingested_at <= date_to)
+    if attack_technique is not None:
+        # Use PostgreSQL JSONB containment operator (@>) to check if any
+        # element in the attack_techniques array has the given technique ID.
+        technique_filter = Event.metadata_.contains(
+            {"attack_techniques": [{"id": attack_technique}]}
+        )
+        stmt = stmt.where(technique_filter)
+        count_stmt = count_stmt.where(technique_filter)
 
     stmt = stmt.order_by(_parse_sort(sort)).limit(limit).offset(offset)
 
