@@ -5,6 +5,7 @@ import time
 
 import structlog
 from celery import Celery
+from celery.schedules import crontab
 from celery.signals import beat_init
 
 from osint_core.config import settings
@@ -22,6 +23,7 @@ celery_app = Celery(
         "osint_core.workers.notify",
         "osint_core.workers.digest",
         "osint_core.workers.nlp_enrich",
+        "osint_core.workers.retention",
     ],
 )
 
@@ -42,11 +44,17 @@ celery_app.conf.update(
         "osint_core.workers.notify.*": {"queue": "notify"},
         "osint_core.workers.digest.*": {"queue": "digest"},
         "osint_core.workers.nlp_enrich.*": {"queue": "enrich"},
+        "osint_core.workers.retention.*": {"queue": "osint"},
     },
 )
 
-# Beat schedule starts empty; populated from active plans via beat_init signal
-celery_app.conf.beat_schedule = {}
+# Static beat schedule — tasks that run regardless of active plans
+celery_app.conf.beat_schedule = {
+    "purge-expired-events-daily": {
+        "task": "osint.purge_expired_events",
+        "schedule": crontab(hour=3, minute=0),  # daily at 03:00 UTC
+    },
+}
 
 celery_app.autodiscover_tasks(["osint_core.workers"])
 
@@ -95,7 +103,7 @@ def load_beat_schedule() -> None:
     for attempt in range(1, _BEAT_SCHEDULE_MAX_RETRIES + 1):
         try:
             schedule = asyncio.run(_fetch_active_plans_schedule())
-            celery_app.conf.beat_schedule = schedule
+            celery_app.conf.beat_schedule.update(schedule)
             logger.info("beat_schedule_loaded", total_tasks=len(schedule))
             return
         except Exception as exc:
