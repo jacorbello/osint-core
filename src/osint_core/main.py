@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 import osint_core.metrics as metrics  # noqa: F401 — register custom Prometheus metrics
 from osint_core.api.errors import ProblemError, problem_exception_handler
+from osint_core.api.middleware.rate_limit import RateLimitMiddleware
 from osint_core.api.routes import (
     alerts,
     audit,
@@ -46,6 +47,7 @@ app = FastAPI(
 )
 
 app.add_exception_handler(ProblemError, problem_exception_handler)  # type: ignore[arg-type]
+app.add_middleware(RateLimitMiddleware)
 
 app.include_router(health.router)
 app.include_router(plan.router)
