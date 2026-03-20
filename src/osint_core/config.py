@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     # --- Auth ---
     auth_disabled: bool = True
 
+    # --- Rate Limiting ---
+    rate_limit_per_ip: int = 100
+    rate_limit_per_user: int = 300
+    rate_limit_trust_proxy: bool = True
+
     # --- Application ---
     plan_dir: str = "/app/plans"
     log_level: str = "INFO"
