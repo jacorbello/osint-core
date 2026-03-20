@@ -7,9 +7,8 @@ import logging
 from datetime import UTC, datetime
 from html import escape
 
-import markdown as markdown_lib  # type: ignore[import-untyped]
-from minio import Minio, S3Error  # type: ignore[import-untyped]
-from weasyprint import HTML  # type: ignore[import-untyped]
+import markdown as markdown_lib
+from minio import Minio, S3Error
 
 from osint_core.config import settings
 
@@ -146,6 +145,8 @@ def render_brief_pdf(
         classification=classification,
         plan_name=plan_name,
     )
+
+    from weasyprint import HTML  # lazy import — requires native libs (pango/cairo)
 
     # Disable URL fetching to prevent SSRF via embedded resources.
     pdf_bytes: bytes = HTML(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, patch
 
 from osint_core.services.pdf_export import (
@@ -57,6 +58,15 @@ class TestMarkdownToHtml:
         html = _markdown_to_html(md)
         assert "<code>" in html
 
+    def test_escapes_html_in_title(self):
+        html = _markdown_to_html("test", title='<script>alert("xss")</script>')
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+
+    def test_escapes_html_in_classification(self):
+        html = _markdown_to_html("test", classification='<img src=x onerror=alert(1)>')
+        assert "onerror" not in html or "&lt;" in html
+
 
 # ---------------------------------------------------------------------------
 # render_brief_pdf
@@ -66,25 +76,25 @@ class TestMarkdownToHtml:
 class TestRenderBriefPdf:
     """Tests for PDF rendering (mocks weasyprint)."""
 
-    @patch("osint_core.services.pdf_export.HTML")
-    def test_returns_pdf_bytes(self, mock_html_cls: MagicMock):
+    def test_returns_pdf_bytes(self):
         mock_html_instance = MagicMock()
         mock_html_instance.write_pdf.return_value = b"%PDF-1.4 fake"
-        mock_html_cls.return_value = mock_html_instance
+        mock_html_cls = MagicMock(return_value=mock_html_instance)
 
-        result = render_brief_pdf("# Hello", title="Test Brief")
+        with patch.dict(sys.modules, {"weasyprint": MagicMock(HTML=mock_html_cls)}):
+            result = render_brief_pdf("# Hello", title="Test Brief")
 
         assert result == b"%PDF-1.4 fake"
         mock_html_cls.assert_called_once()
         mock_html_instance.write_pdf.assert_called_once()
 
-    @patch("osint_core.services.pdf_export.HTML")
-    def test_passes_title_to_html(self, mock_html_cls: MagicMock):
+    def test_passes_title_to_html(self):
         mock_html_instance = MagicMock()
         mock_html_instance.write_pdf.return_value = b"%PDF"
-        mock_html_cls.return_value = mock_html_instance
+        mock_html_cls = MagicMock(return_value=mock_html_instance)
 
-        render_brief_pdf("content", title="My Title", classification="TOP SECRET")
+        with patch.dict(sys.modules, {"weasyprint": MagicMock(HTML=mock_html_cls)}):
+            render_brief_pdf("content", title="My Title", classification="TOP SECRET")
 
         html_string = mock_html_cls.call_args[1]["string"]
         assert "My Title" in html_string
@@ -187,4 +197,18 @@ class TestGenerateAndUploadPdf:
             plan_name="plan-1",
         )
         mock_upload.assert_called_once_with(b"%PDF-fake", "briefs/abc-123.pdf")
+        assert uri == "minio://osint-briefs/briefs/abc-123.pdf"
+
+    @patch("osint_core.services.pdf_export.upload_pdf_to_minio")
+    def test_skips_render_when_pdf_bytes_provided(self, mock_upload: MagicMock):
+        """When pre-rendered pdf_bytes are provided, rendering is skipped."""
+        mock_upload.return_value = "minio://osint-briefs/briefs/abc-123.pdf"
+
+        uri = generate_and_upload_pdf(
+            "abc-123",
+            "# Brief content",
+            pdf_bytes=b"%PDF-pre-rendered",
+        )
+
+        mock_upload.assert_called_once_with(b"%PDF-pre-rendered", "briefs/abc-123.pdf")
         assert uri == "minio://osint-briefs/briefs/abc-123.pdf"

@@ -105,7 +105,7 @@ async def get_brief_pdf(
             status_code=404,
             code="not_found",
             detail="Brief not found",
-        )  # type: ignore[return-value]
+        )
 
     # Extract plan context if available for the PDF header.
     plan_name = ""
@@ -125,7 +125,7 @@ async def get_brief_pdf(
             status_code=503,
             code="pdf_render_failed",
             detail="PDF rendering failed",
-        )  # type: ignore[return-value]
+        )
 
     # Upload to MinIO and store URI (best-effort; don't fail the request).
     # Pass pre-rendered pdf_bytes to avoid rendering a second time.
