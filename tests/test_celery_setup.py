@@ -33,9 +33,12 @@ def test_celery_default_queue():
     assert celery_app.conf.task_default_queue == "osint"
 
 
-def test_celery_beat_schedule_empty_at_import():
-    """Beat schedule is empty at import time; populated by beat_init signal."""
-    assert celery_app.conf.beat_schedule == {}
+def test_celery_beat_schedule_has_static_tasks_at_import():
+    """Beat schedule contains only static tasks at import time; plan tasks added by beat_init."""
+    schedule = celery_app.conf.beat_schedule
+    # Only the retention purge task should be present before beat_init
+    assert "purge-expired-events-daily" in schedule
+    assert schedule["purge-expired-events-daily"]["task"] == "osint.purge_expired_events"
 
 
 def test_load_beat_schedule_with_active_plan():
@@ -74,12 +77,15 @@ def test_load_beat_schedule_with_active_plan():
     assert schedule["ingest-test-plan-cisa_kev"]["options"]["queue"] == "ingest"
     assert schedule["ingest-test-plan-gdelt"]["args"] == ["gdelt", "test-plan"]
 
-    # Reset for other tests
-    celery_app.conf.beat_schedule = {}
+    # Reset to static-only schedule for other tests
+    celery_app.conf.beat_schedule = {
+        k: v for k, v in celery_app.conf.beat_schedule.items()
+        if k == "purge-expired-events-daily"
+    }
 
 
 def test_load_beat_schedule_no_active_plans():
-    """When no active plans exist, beat_schedule stays empty and no crash."""
+    """When no active plans exist, beat_schedule retains only static tasks."""
     mock_session = AsyncMock()
     mock_session_factory = MagicMock()
     mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -95,7 +101,11 @@ def test_load_beat_schedule_no_active_plans():
     ):
         load_beat_schedule()
 
-    assert celery_app.conf.beat_schedule == {}
+    schedule = celery_app.conf.beat_schedule
+    # Static tasks remain, no plan-based tasks added
+    assert "purge-expired-events-daily" in schedule
+    # No ingest tasks added
+    assert not any(k.startswith("ingest-") for k in schedule)
 
 
 def test_load_beat_schedule_db_error_raises_after_retries():
@@ -177,8 +187,11 @@ def test_load_beat_schedule_multiple_active_plans():
     assert schedule["ingest-plan-a-src_a"]["args"] == ["src_a", "plan-a"]
     assert schedule["ingest-plan-b-src_b"]["args"] == ["src_b", "plan-b"]
 
-    # Reset for other tests
-    celery_app.conf.beat_schedule = {}
+    # Reset to static-only schedule for other tests
+    celery_app.conf.beat_schedule = {
+        k: v for k, v in celery_app.conf.beat_schedule.items()
+        if k == "purge-expired-events-daily"
+    }
 
 
 def test_load_beat_schedule_same_source_id_different_plans_no_collision():
@@ -219,5 +232,8 @@ def test_load_beat_schedule_same_source_id_different_plans_no_collision():
     assert schedule["ingest-plan-a-shared_src"]["args"] == ["shared_src", "plan-a"]
     assert schedule["ingest-plan-b-shared_src"]["args"] == ["shared_src", "plan-b"]
 
-    # Reset for other tests
-    celery_app.conf.beat_schedule = {}
+    # Reset to static-only schedule for other tests
+    celery_app.conf.beat_schedule = {
+        k: v for k, v in celery_app.conf.beat_schedule.items()
+        if k == "purge-expired-events-daily"
+    }
