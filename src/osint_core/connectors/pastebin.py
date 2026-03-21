@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -19,6 +19,7 @@ from osint_core.connectors.base import BaseConnector, RawItem
 from osint_core.services.indicators import extract_indicators
 
 _DEFAULT_API_URL = "https://psbdmp.ws/api/v3/search/"
+_DEFAULT_LOOKBACK_HOURS = 24
 _CONTENT_EXCERPT_LENGTH = 2000
 _RAW_DATA_CONTENT_LIMIT = 500
 
@@ -30,17 +31,39 @@ class PasteSiteConnector(BaseConnector):
         keywords: list[str] = self.config.extra.get("keywords", [])
         max_items: int = int(self.config.extra.get("max_items", 100))
         timeout: int = int(self.config.extra.get("timeout", 30))
+        lookback_hours: int = int(
+            self.config.extra.get("lookback_hours", _DEFAULT_LOOKBACK_HOURS)
+        )
 
         if not keywords:
             return []
+
+        if lookback_hours < 1:
+            raise ValueError(
+                f"lookback_hours must be >= 1, got {lookback_hours}"
+            )
+
+        cutoff = datetime.now(tz=UTC) - timedelta(hours=lookback_hours)
 
         all_items: list[RawItem] = []
         seen_ids: set[str] = set()
 
         async with httpx.AsyncClient(timeout=timeout) as client:
             for keyword in keywords:
-                items = await self._search_keyword(client, keyword, seen_ids)
-                all_items.extend(items)
+                raw_pastes = await self._search_keyword(
+                    client, keyword, seen_ids
+                )
+                for paste in raw_pastes:
+                    # Filter by lookback window before running full
+                    # parsing/indicator extraction to avoid unnecessary work.
+                    # Keep pastes with no timestamp (missing dates should not
+                    # cause data loss).
+                    ts = self._parse_timestamp(paste)
+                    if ts is not None and ts < cutoff:
+                        continue
+                    all_items.append(self._parse_paste(paste, occurred_at=ts))
+                    if len(all_items) >= max_items:
+                        break
                 if len(all_items) >= max_items:
                     break
 
@@ -51,7 +74,8 @@ class PasteSiteConnector(BaseConnector):
         client: httpx.AsyncClient,
         keyword: str,
         seen_ids: set[str],
-    ) -> list[RawItem]:
+    ) -> list[dict[str, Any]]:
+        """Return deduplicated raw paste dicts for *keyword*."""
         # URL-encode the keyword to handle spaces and special characters
         base_url = (self.config.url or _DEFAULT_API_URL).rstrip("/")
         url = f"{base_url}/{quote(keyword, safe='')}"
@@ -61,36 +85,45 @@ class PasteSiteConnector(BaseConnector):
         data = resp.json()
         pastes: list[dict[str, Any]] = data if isinstance(data, list) else data.get("data", [])
 
-        items: list[RawItem] = []
+        results: list[dict[str, Any]] = []
         for paste in pastes:
             paste_id = paste.get("id", paste.get("key", ""))
             if not paste_id or paste_id in seen_ids:
                 continue
             seen_ids.add(paste_id)
-            items.append(self._parse_paste(paste))
+            results.append(paste)
 
-        return items
+        return results
 
-    def _parse_paste(self, paste: dict[str, Any]) -> RawItem:
+    @staticmethod
+    def _parse_timestamp(paste: dict[str, Any]) -> datetime | None:
+        """Extract and normalise the paste timestamp to a UTC datetime."""
+        timestamp_raw = paste.get("time", paste.get("date", paste.get("timestamp", "")))
+        if timestamp_raw is None or timestamp_raw == "":
+            return None
+        with contextlib.suppress(ValueError, TypeError, OSError):
+            if isinstance(timestamp_raw, (int, float)):
+                return datetime.fromtimestamp(timestamp_raw, tz=UTC)
+            parsed = datetime.fromisoformat(str(timestamp_raw))
+            parsed = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+            return parsed
+        return None
+
+    def _parse_paste(
+        self,
+        paste: dict[str, Any],
+        *,
+        occurred_at: datetime | None = None,
+    ) -> RawItem:
         paste_id = paste.get("id", paste.get("key", ""))
         title = paste.get("title", "") or f"Paste {paste_id}"
         content = paste.get("content", paste.get("text", ""))
         author = paste.get("author", paste.get("user", "")) or "anonymous"
-        timestamp_raw = paste.get("time", paste.get("date", paste.get("timestamp", "")))
 
-        occurred_at: datetime | None = None
-        if timestamp_raw:
-            with contextlib.suppress(ValueError, TypeError, OSError):
-                if isinstance(timestamp_raw, (int, float)):
-                    occurred_at = datetime.fromtimestamp(timestamp_raw, tz=UTC)
-                else:
-                    parsed = datetime.fromisoformat(str(timestamp_raw))
-                    # Only set UTC if the timestamp has no timezone info
-                    if parsed.tzinfo is None:
-                        parsed = parsed.replace(tzinfo=UTC)
-                    else:
-                        parsed = parsed.astimezone(UTC)
-                    occurred_at = parsed
+        # Use the pre-parsed timestamp when provided to avoid redundant
+        # parsing; fall back to parsing here for standalone calls.
+        if occurred_at is None:
+            occurred_at = self._parse_timestamp(paste)
 
         # Run indicator extraction on the paste content.
         # Note: the ingest pipeline re-extracts from summary/title, so storing
@@ -110,7 +143,7 @@ class PasteSiteConnector(BaseConnector):
             "url": paste_url,
             "content_excerpt": content[:_RAW_DATA_CONTENT_LIMIT] if content else "",
             "content_length": len(content) if content else 0,
-            "timestamp": timestamp_raw,
+            "timestamp": paste.get("time", paste.get("date", paste.get("timestamp", ""))),
         }
 
         return RawItem(
