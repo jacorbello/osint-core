@@ -1,0 +1,132 @@
+version: 2
+plan_id: tpl-physical-security
+plan_type: child
+description: >-
+  Physical security monitoring template covering conflict events, natural
+  disasters, severe weather alerts, and local news.  Combines GDELT event
+  monitoring, ACLED conflict data, NWS weather alerts, and regional news
+  RSS feeds for situational awareness.
+retention_class: standard
+
+keywords:
+  - shooting
+  - bombing
+  - explosion
+  - protest
+  - riot
+  - earthquake
+  - hurricane
+  - tornado
+  - wildfire
+  - flood
+  - evacuation
+  - active shooter
+  - critical infrastructure
+
+source_profiles:
+  gdelt_events:
+    reliability: B
+    credibility: 3
+    corroboration_required: true
+    license: "open"
+  acled_conflict:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "api-key"
+  nws_alerts:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public-domain"
+  rss_local_news:
+    reliability: B
+    credibility: 3
+    corroboration_required: false
+    license: "public"
+  rss_reuters_world:
+    reliability: A
+    credibility: 2
+    corroboration_required: false
+    license: "excerpts-only"
+
+sources:
+  - id: gdelt_events
+    type: gdelt_api
+    url: "https://api.gdeltproject.org/api/v2/doc/doc"
+    schedule_cron: "*/15 * * * *"
+    params:
+      query: "shooting OR bombing OR explosion OR protest OR riot OR evacuation"
+      mode: "ArtList"
+      format: "json"
+      maxrecords: 75
+      timespan: "15min"
+
+  - id: acled_conflict
+    type: acled_api
+    url: "https://api.acleddata.com/acled/read"
+    schedule_cron: "0 */4 * * *"
+    params:
+      api_key: "${OSINT_ACLED_API_KEY}"
+      email: "${OSINT_ACLED_EMAIL}"
+      max_items: 100
+
+  - id: nws_alerts
+    type: nws_alerts
+    url: "https://api.weather.gov/alerts/active"
+    schedule_cron: "*/10 * * * *"
+
+  - id: rss_local_news
+    type: rss
+    url: "https://news.google.com/rss/search?q=breaking+news&hl=en-US&gl=US&ceid=US:en"
+    schedule_cron: "0 */1 * * *"
+
+  - id: rss_reuters_world
+    type: rss
+    url: "https://www.reutersagency.com/feed/"
+    schedule_cron: "0 */2 * * *"
+
+scoring:
+  recency_half_life_hours: 6
+  source_reputation:
+    gdelt_events: 0.70
+    acled_conflict: 0.75
+    nws_alerts: 0.95
+    rss_local_news: 0.50
+    rss_reuters_world: 0.80
+  ioc_match_boost: 1.5
+  severity_promotions:
+    - condition: {field: "source_id", op: "eq", value: "nws_alerts"}
+      promote_to: high
+
+enrichment:
+  nlp_enabled: true
+  mission: "Monitor physical security threats including conflict events, severe weather, natural disasters, and local incidents"
+  classify_relevance: true
+  extract_entities: true
+  generate_summaries: true
+
+notifications:
+  default_dedupe_window_minutes: 30
+  routes:
+    - name: immediate_alerts
+      when:
+        severity_gte: high
+      channels:
+        - type: gotify
+          application: "osint-physical-alerts"
+          priority: 9
+    - name: situation_updates
+      when:
+        severity_gte: medium
+      channels:
+        - type: gotify
+          application: "osint-physical-updates"
+          priority: 5
+    - name: daily_digest
+      when:
+        severity_gte: low
+      channels:
+        - type: gotify
+          application: "osint-physical-digest"
+          priority: 3

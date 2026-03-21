@@ -1,0 +1,146 @@
+version: 2
+plan_id: tpl-geopolitical-monitoring
+plan_type: child
+description: >-
+  Geopolitical monitoring template for tracking international affairs, armed
+  conflicts, diplomatic developments, and humanitarian crises.  Combines
+  GDELT media analysis, ACLED conflict data, ReliefWeb situation reports,
+  and international news RSS feeds.
+retention_class: standard
+
+keywords:
+  - sanctions
+  - diplomacy
+  - treaty
+  - ceasefire
+  - coup
+  - election
+  - military
+  - NATO
+  - United Nations
+  - refugee
+  - humanitarian
+  - territorial dispute
+  - nuclear
+
+source_profiles:
+  gdelt_geopolitical:
+    reliability: B
+    credibility: 3
+    corroboration_required: true
+    license: "open"
+  acled_global:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "api-key"
+  reliefweb_reports:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "free"
+  rss_bbc_world:
+    reliability: A
+    credibility: 2
+    corroboration_required: false
+    license: "excerpts-only"
+  rss_aljazeera:
+    reliability: A
+    credibility: 2
+    corroboration_required: false
+    license: "public"
+  rss_foreign_affairs:
+    reliability: A
+    credibility: 2
+    corroboration_required: false
+    license: "public"
+  rss_crisisgroup:
+    reliability: A
+    credibility: 2
+    corroboration_required: false
+    license: "public"
+
+sources:
+  - id: gdelt_geopolitical
+    type: gdelt_api
+    url: "https://api.gdeltproject.org/api/v2/doc/doc"
+    schedule_cron: "*/15 * * * *"
+    params:
+      query: "sanctions OR diplomacy OR treaty OR military OR coup OR election OR ceasefire"
+      mode: "ArtList"
+      format: "json"
+      maxrecords: 75
+      timespan: "15min"
+
+  - id: acled_global
+    type: acled_api
+    url: "https://api.acleddata.com/acled/read"
+    schedule_cron: "0 */4 * * *"
+    params:
+      api_key: "${OSINT_ACLED_API_KEY}"
+      email: "${OSINT_ACLED_EMAIL}"
+      max_items: 100
+
+  - id: reliefweb_reports
+    type: reliefweb_api
+    url: "https://api.reliefweb.int/v2/reports"
+    schedule_cron: "0 */4 * * *"
+    params:
+      appname: "osint-core"
+
+  - id: rss_bbc_world
+    type: rss
+    url: "https://feeds.bbci.co.uk/news/world/rss.xml"
+    schedule_cron: "0 */2 * * *"
+
+  - id: rss_aljazeera
+    type: rss
+    url: "https://www.aljazeera.com/xml/rss/all.xml"
+    schedule_cron: "0 */2 * * *"
+
+  - id: rss_foreign_affairs
+    type: rss
+    url: "https://www.foreignaffairs.com/rss.xml"
+    schedule_cron: "0 */6 * * *"
+
+  - id: rss_crisisgroup
+    type: rss
+    url: "https://www.crisisgroup.org/rss"
+    schedule_cron: "0 */6 * * *"
+
+scoring:
+  recency_half_life_hours: 12
+  source_reputation:
+    gdelt_geopolitical: 0.70
+    acled_global: 0.75
+    reliefweb_reports: 0.70
+    rss_bbc_world: 0.80
+    rss_aljazeera: 0.75
+    rss_foreign_affairs: 0.85
+    rss_crisisgroup: 0.85
+  ioc_match_boost: 1.5
+
+enrichment:
+  nlp_enabled: true
+  mission: "Track geopolitical developments, armed conflicts, diplomatic shifts, and humanitarian crises globally"
+  classify_relevance: true
+  extract_entities: true
+  generate_summaries: true
+
+notifications:
+  default_dedupe_window_minutes: 60
+  routes:
+    - name: critical_alerts
+      when:
+        severity_gte: high
+      channels:
+        - type: gotify
+          application: "osint-geopolitical-alerts"
+          priority: 8
+    - name: daily_digest
+      when:
+        severity_gte: low
+      channels:
+        - type: gotify
+          application: "osint-geopolitical-digest"
+          priority: 4
