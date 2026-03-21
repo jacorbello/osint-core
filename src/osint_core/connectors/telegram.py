@@ -18,8 +18,8 @@ class TelegramConnector(BaseConnector):
       - ``lookback_hours`` – how far back to fetch (default ``24``)
     """
 
-    # Telegram Bot API base URL
-    _API_BASE = "https://api.telegram.org"
+    # Default Telegram Bot API base URL (can be overridden via config.url)
+    _DEFAULT_API_BASE = "https://api.telegram.org"
 
     def _resolve_bot_token(self) -> str:
         """Return the bot token from source config or global settings."""
@@ -35,6 +35,10 @@ class TelegramConnector(BaseConnector):
             )
         return token
 
+    def _api_base(self) -> str:
+        """Return the API base URL, preferring config.url if set."""
+        return self.config.url or self._DEFAULT_API_BASE
+
     async def fetch(self) -> list[RawItem]:
         token = self._resolve_bot_token()
         channel = self.config.extra.get("channel_username", "")
@@ -45,11 +49,19 @@ class TelegramConnector(BaseConnector):
         keywords: list[str] = self.config.extra.get("keywords", [])
         cutoff = datetime.now(tz=UTC) - timedelta(hours=lookback_hours)
 
-        url = f"{self._API_BASE}/bot{token}/getUpdates"
+        api_base = self._api_base()
+        url = f"{api_base}/bot{token}/getUpdates"
+
+        # Track offset to acknowledge processed updates and avoid
+        # re-fetching the same messages on subsequent polls.
+        offset = int(self.config.extra.get("_update_offset", 0)) or None
+
         params: dict[str, Any] = {
             "allowed_updates": '["channel_post"]',
             "timeout": 0,
         }
+        if offset is not None:
+            params["offset"] = offset
 
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, params=params, timeout=30.0)
@@ -63,8 +75,14 @@ class TelegramConnector(BaseConnector):
 
         results = data.get("result", [])
         items: list[RawItem] = []
+        max_update_id = offset or 0
 
         for update in results:
+            # Track highest update_id for offset
+            update_id = update.get("update_id", 0)
+            if update_id > max_update_id:
+                max_update_id = update_id
+
             message = update.get("channel_post") or update.get("message")
             if message is None:
                 continue
@@ -76,7 +94,7 @@ class TelegramConnector(BaseConnector):
                 continue
 
             # Parse the message
-            item = self._parse_message(message, update)
+            item = self._parse_message(message, update, token)
             if item is None:
                 continue
 
@@ -90,10 +108,14 @@ class TelegramConnector(BaseConnector):
 
             items.append(item)
 
+        # Store offset for next poll (offset = last_id + 1)
+        if max_update_id:
+            self.config.extra["_update_offset"] = max_update_id + 1
+
         return items
 
     def _parse_message(
-        self, message: dict[str, Any], update: dict[str, Any]
+        self, message: dict[str, Any], update: dict[str, Any], token: str
     ) -> RawItem | None:
         """Convert a Telegram message dict into a RawItem."""
         text = message.get("text") or message.get("caption") or ""
@@ -118,8 +140,8 @@ class TelegramConnector(BaseConnector):
         if date_val is not None:
             occurred_at = datetime.fromtimestamp(date_val, tz=UTC)
 
-        # Media URLs
-        media_urls = self._extract_media_urls(message)
+        # Media URLs — resolve via Bot API file download URL
+        media_urls = self._extract_media_urls(message, token)
 
         raw_data: dict[str, Any] = {
             "update_id": update.get("update_id"),
@@ -143,14 +165,22 @@ class TelegramConnector(BaseConnector):
         )
 
     @staticmethod
-    def _extract_media_urls(message: dict[str, Any]) -> list[str]:
-        """Extract media file references from a Telegram message."""
+    def _extract_media_urls(message: dict[str, Any], token: str) -> list[str]:
+        """Extract media download URLs from a Telegram message.
+
+        Constructs Bot API file download URLs using the file_id. Consumers
+        can fetch the actual file via ``/file/bot{token}/{file_path}`` after
+        calling ``getFile``, but the file_id URL is the standard reference.
+        """
+        base = f"https://api.telegram.org/bot{token}/getFile?file_id="
         urls: list[str] = []
 
         # Photo — pick the largest resolution
         photos = message.get("photo")
         if photos and isinstance(photos, list):
-            urls.append(f"file_id:{photos[-1].get('file_id', '')}")
+            file_id = photos[-1].get("file_id", "")
+            if file_id:
+                urls.append(f"{base}{file_id}")
 
         # Document, video, audio, voice, animation
         for media_key in ("document", "video", "audio", "voice", "animation"):
@@ -158,7 +188,7 @@ class TelegramConnector(BaseConnector):
             if media and isinstance(media, dict):
                 file_id = media.get("file_id", "")
                 if file_id:
-                    urls.append(f"file_id:{file_id}")
+                    urls.append(f"{base}{file_id}")
 
         return urls
 

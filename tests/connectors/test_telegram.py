@@ -122,7 +122,8 @@ async def test_fetch_extracts_timestamp(connector: TelegramConnector, respx_mock
     _mock_telegram_api(respx_mock, connector, SAMPLE_UPDATES)
     items = await connector.fetch()
     assert items[0].occurred_at is not None
-    assert items[0].occurred_at.year >= 2024
+    # Verify timestamp matches the fixed _RECENT_TS from test data
+    assert items[0].occurred_at.timestamp() == pytest.approx(_RECENT_TS, abs=1)
 
 
 @pytest.mark.asyncio
@@ -150,7 +151,10 @@ async def test_fetch_extracts_media_urls(connector: TelegramConnector, respx_moc
     _mock_telegram_api(respx_mock, connector, updates)
     items = await connector.fetch()
     assert len(items) == 1
-    assert "file_id:large_photo" in items[0].raw_data["media_urls"]
+    # Media URLs should be Bot API getFile URLs, not raw file_id references
+    media = items[0].raw_data["media_urls"]
+    assert len(media) == 1
+    assert "getFile?file_id=large_photo" in media[0]
 
 
 @pytest.mark.asyncio
