@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -19,6 +20,7 @@ from osint_core.services.indicators import extract_indicators
 
 _DEFAULT_API_URL = "https://psbdmp.ws/api/v3/search/"
 _CONTENT_EXCERPT_LENGTH = 2000
+_RAW_DATA_CONTENT_LIMIT = 500
 
 
 class PasteSiteConnector(BaseConnector):
@@ -26,8 +28,8 @@ class PasteSiteConnector(BaseConnector):
 
     async def fetch(self) -> list[RawItem]:
         keywords: list[str] = self.config.extra.get("keywords", [])
-        max_items: int = self.config.extra.get("max_items", 100)
-        timeout: int = self.config.extra.get("timeout", 30)
+        max_items: int = int(self.config.extra.get("max_items", 100))
+        timeout: int = int(self.config.extra.get("timeout", 30))
 
         if not keywords:
             return []
@@ -50,7 +52,9 @@ class PasteSiteConnector(BaseConnector):
         keyword: str,
         seen_ids: set[str],
     ) -> list[RawItem]:
-        url = self.config.url.rstrip("/") + f"/{keyword}"
+        # URL-encode the keyword to handle spaces and special characters
+        base_url = (self.config.url or _DEFAULT_API_URL).rstrip("/")
+        url = f"{base_url}/{quote(keyword, safe='')}"
         resp = await client.get(url)
         resp.raise_for_status()
 
@@ -80,27 +84,45 @@ class PasteSiteConnector(BaseConnector):
                 if isinstance(timestamp_raw, (int, float)):
                     occurred_at = datetime.fromtimestamp(timestamp_raw, tz=UTC)
                 else:
-                    occurred_at = datetime.fromisoformat(str(timestamp_raw)).replace(
-                        tzinfo=UTC
-                    )
+                    parsed = datetime.fromisoformat(str(timestamp_raw))
+                    # Only set UTC if the timestamp has no timezone info
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=UTC)
+                    else:
+                        parsed = parsed.astimezone(timezone.utc)
+                    occurred_at = parsed
 
-        # Run indicator extraction on the paste content
+        # Run indicator extraction on the paste content.
+        # Note: the ingest pipeline re-extracts from summary/title, so storing
+        # indicators here is supplementary for direct API consumers.
         indicators = extract_indicators(content) if content else []
 
         excerpt = content[:_CONTENT_EXCERPT_LENGTH] if content else ""
 
         paste_url = paste.get("url", f"https://pastebin.com/{paste_id}")
 
+        # Store only a bounded subset of paste data to avoid persisting
+        # large content or sensitive credentials in event metadata.
+        raw_data: dict[str, Any] = {
+            "id": paste_id,
+            "title": title,
+            "author": author,
+            "url": paste_url,
+            "content_excerpt": content[:_RAW_DATA_CONTENT_LIMIT] if content else "",
+            "content_length": len(content) if content else 0,
+            "timestamp": timestamp_raw,
+        }
+
         return RawItem(
             title=title,
             url=paste_url,
             summary=f"Author: {author} | Excerpt: {excerpt[:200]}",
-            raw_data=paste,
+            raw_data=raw_data,
             occurred_at=occurred_at,
             indicators=indicators,
             source_category="cyber",
         )
 
     def dedupe_key(self, item: RawItem) -> str:
-        paste_id = item.raw_data.get("id", item.raw_data.get("key", item.url))
+        paste_id = item.raw_data.get("id", item.url)
         return f"pastebin:{hashlib.sha256(str(paste_id).encode()).hexdigest()[:16]}"
