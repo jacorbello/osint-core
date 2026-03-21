@@ -163,7 +163,7 @@ def _remove_qdrant_vectors(event_ids: list[str]) -> int:
         return 0
 
     try:
-        from qdrant_client.http.models import PointIdsList
+        from qdrant_client.models import PointIdsList
 
         from osint_core.config import settings
         from osint_core.services.vectorize import get_qdrant

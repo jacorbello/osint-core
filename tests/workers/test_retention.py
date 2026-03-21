@@ -318,7 +318,16 @@ class TestRemoveQdrantVectors:
         event_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
         mock_client = MagicMock()
 
+        # Build a lightweight stand-in for PointIdsList so the import
+        # inside the try-block always succeeds, even when qdrant-client
+        # is not installed in the test environment.
+        def _init(self: Any, **kw: Any) -> None:
+            self.__dict__.update(kw)
+
+        fake_pids_cls = type("PointIdsList", (), {"__init__": _init})
+
         with (
+            patch("qdrant_client.models.PointIdsList", fake_pids_cls),
             patch("osint_core.services.vectorize.get_qdrant", return_value=mock_client),
             patch("osint_core.config.settings") as mock_settings,
         ):
