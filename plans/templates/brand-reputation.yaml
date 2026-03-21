@@ -10,7 +10,7 @@ description: >-
   and competitor names.
 retention_class: standard
 
-keywords:
+keywords: &brand_keywords
   - "YOUR_BRAND_NAME"
   - "YOUR_PRODUCT_NAME"
   - data breach
@@ -96,12 +96,7 @@ sources:
         - sysadmin
       sort: new
       limit: 50
-      keyword_filter:
-        - "YOUR_BRAND_NAME"
-        - "YOUR_PRODUCT_NAME"
-        - data breach
-        - hack
-        - leak
+      keyword_filter: *brand_keywords
 
 scoring:
   recency_half_life_hours: 24
