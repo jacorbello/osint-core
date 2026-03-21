@@ -9,6 +9,7 @@ from osint_core.connectors.nvd import NvdConnector
 from osint_core.connectors.nws import NwsConnector
 from osint_core.connectors.osv import OsvConnector
 from osint_core.connectors.otx import OtxConnector
+from osint_core.connectors.pastebin import PasteSiteConnector
 from osint_core.connectors.reddit import RedditConnector
 from osint_core.connectors.registry import ConnectorRegistry
 from osint_core.connectors.reliefweb import ReliefWebConnector
@@ -30,6 +31,7 @@ __all__ = [
     "NwsConnector",
     "OsvConnector",
     "OtxConnector",
+    "PasteSiteConnector",
     "RawItem",
     "RedditConnector",
     "ReliefWebConnector",
@@ -59,3 +61,4 @@ registry.register("abusech_feodotracker", FeodoTrackerConnector)
 registry.register("acled_api", AcledConnector)
 registry.register("telegram", TelegramConnector)
 registry.register("reddit", RedditConnector)
+registry.register("pastebin", PasteSiteConnector)
