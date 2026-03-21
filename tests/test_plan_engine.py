@@ -233,3 +233,71 @@ def test_validate_austin_terror_watch_yaml():
     result = engine.validate_yaml(yaml_str)
     assert result.is_valid, f"Errors: {result.errors}"
     assert result.parsed["scoring"]["recency_half_life_hours"] == 168
+
+
+def test_validate_brand_reputation_template_yaml():
+    """brand-reputation.yaml template must pass v2 validation (includes reddit source)."""
+    engine = PlanEngine()
+    plan_path = (
+        Path(__file__).resolve().parents[1] / "plans" / "templates" / "brand-reputation.yaml"
+    )
+    yaml_str = plan_path.read_text()
+    result = engine.validate_yaml(yaml_str)
+    assert result.is_valid, f"Errors: {result.errors}"
+    assert result.parsed["version"] == 2
+    source_types = [s["type"] for s in result.parsed["sources"]]
+    assert "reddit" in source_types, "reddit source type must be present and valid"
+
+
+def test_validate_v2_reddit_source_type():
+    """v2 schema must accept 'reddit' as a valid source type."""
+    engine = PlanEngine()
+    yaml_str = """
+version: 2
+plan_id: reddit-test-v2
+plan_type: child
+retention_class: standard
+sources:
+  - id: reddit_brand
+    type: reddit
+    schedule_cron: "*/30 * * * *"
+scoring:
+  recency_half_life_hours: 24
+  source_reputation:
+    reddit_brand: 0.45
+  ioc_match_boost: 1.0
+notifications:
+  routes:
+    - name: alerts
+      channels:
+        - type: gotify
+"""
+    result = engine.validate_yaml(yaml_str)
+    assert result.is_valid, f"Errors: {result.errors}"
+    assert result.parsed["sources"][0]["type"] == "reddit"
+
+
+def test_validate_v1_reddit_source_type():
+    """v1 schema must accept 'reddit' as a valid source type."""
+    engine = PlanEngine()
+    yaml_str = """
+version: 1
+plan_id: reddit-test-v1
+sources:
+  - id: reddit_brand
+    type: reddit
+    schedule_cron: "*/30 * * * *"
+scoring:
+  recency_half_life_hours: 24
+  source_reputation:
+    reddit_brand: 0.45
+  ioc_match_boost: 1.0
+notifications:
+  routes:
+    - name: alerts
+      channels:
+        - type: gotify
+"""
+    result = engine.validate_yaml(yaml_str)
+    assert result.is_valid, f"Errors: {result.errors}"
+    assert result.parsed["sources"][0]["type"] == "reddit"
