@@ -164,6 +164,24 @@ async def test_max_items_limits_results():
     assert len(items) == 2
 
 
+@pytest.mark.asyncio
+async def test_lookback_hours_rejects_negative_values():
+    """lookback_hours < 1 raises ValueError."""
+    cfg = _make_config(lookback_hours=-5)
+    conn = PasteSiteConnector(cfg)
+    with pytest.raises(ValueError, match="lookback_hours must be >= 1"):
+        await conn.fetch()
+
+
+@pytest.mark.asyncio
+async def test_lookback_hours_rejects_zero():
+    """lookback_hours of 0 raises ValueError."""
+    cfg = _make_config(lookback_hours=0)
+    conn = PasteSiteConnector(cfg)
+    with pytest.raises(ValueError, match="lookback_hours must be >= 1"):
+        await conn.fetch()
+
+
 @respx.mock
 @pytest.mark.asyncio
 async def test_lookback_filters_old_pastes():
