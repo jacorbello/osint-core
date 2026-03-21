@@ -13,6 +13,7 @@ from osint_core.connectors.registry import ConnectorRegistry
 from osint_core.connectors.reliefweb import ReliefWebConnector
 from osint_core.connectors.rss import RssConnector
 from osint_core.connectors.shodan import ShodanConnector
+from osint_core.connectors.telegram import TelegramConnector
 from osint_core.connectors.threatfox import ThreatFoxConnector
 from osint_core.connectors.urlhaus import UrlhausConnector
 
@@ -33,6 +34,7 @@ __all__ = [
     "RssConnector",
     "ShodanConnector",
     "SourceConfig",
+    "TelegramConnector",
     "ThreatFoxConnector",
     "UrlhausConnector",
     "registry",
@@ -53,3 +55,4 @@ registry.register("nws_alerts", NwsConnector)
 registry.register("abusech_malwarebazaar", MalwareBazaarConnector)
 registry.register("abusech_feodotracker", FeodoTrackerConnector)
 registry.register("acled_api", AcledConnector)
+registry.register("telegram", TelegramConnector)
