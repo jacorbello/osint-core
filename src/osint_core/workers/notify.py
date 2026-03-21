@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import smtplib
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -274,10 +275,56 @@ def _render_email_html(
     )
 
 
+def _fetch_pdf_from_minio(pdf_uri: str) -> bytes | None:
+    """Fetch PDF bytes from a MinIO URI.
+
+    Args:
+        pdf_uri: MinIO URI in the form ``minio://<bucket>/<object_name>``.
+
+    Returns:
+        PDF bytes on success, or ``None`` on any failure.
+    """
+    try:
+        from minio import Minio
+
+        # Parse minio://<bucket>/<object_name>
+        if not pdf_uri.startswith("minio://"):
+            logger.warning("Invalid MinIO URI: %s", pdf_uri)
+            return None
+
+        path = pdf_uri[len("minio://"):]
+        bucket, _, object_name = path.partition("/")
+        if not bucket or not object_name:
+            logger.warning("Malformed MinIO URI: %s", pdf_uri)
+            return None
+
+        client = Minio(
+            settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            secure=settings.minio_secure,
+        )
+        response = client.get_object(bucket, object_name)
+        try:
+            pdf_bytes = response.read()
+        finally:
+            response.close()
+            response.release_conn()
+
+        logger.info("pdf_fetched uri=%s size=%d", pdf_uri, len(pdf_bytes))
+        return pdf_bytes
+    except Exception:
+        logger.warning("Failed to fetch PDF from %s", pdf_uri, exc_info=True)
+        return None
+
+
 def _send_email(
     recipients: list[str],
     subject: str,
     html_body: str,
+    *,
+    pdf_bytes: bytes | None = None,
+    pdf_filename: str = "",
 ) -> bool:
     """Send an HTML email via SMTP.
 
@@ -298,11 +345,21 @@ def _send_email(
         logger.warning("No email recipients specified; skipping email dispatch")
         return False
 
-    msg = MIMEMultipart("alternative")
+    # Use "mixed" when we have an attachment so both the HTML body and PDF
+    # are included; otherwise stick with "alternative" for plain HTML emails.
+    msg = MIMEMultipart("mixed") if pdf_bytes is not None else MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
     msg.attach(MIMEText(html_body, "html"))
+
+    if pdf_bytes is not None:
+        filename = pdf_filename or "digest.pdf"
+        attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
+        attachment.add_header(
+            "Content-Disposition", "attachment", filename=filename,
+        )
+        msg.attach(attachment)
 
     try:
         with smtplib.SMTP(host, port, timeout=30) as server:
@@ -329,6 +386,7 @@ def _dispatch_channel(
     msg: dict[str, str],
     event_data: dict[str, Any],
     priority: int,
+    pdf_uri: str | None = None,
 ) -> bool:
     """Dispatch a notification to a single channel.
 
@@ -337,6 +395,7 @@ def _dispatch_channel(
         msg: Formatted message dict with ``title`` and ``body``.
         event_data: Full event data dict for webhook template rendering.
         priority: Gotify priority level.
+        pdf_uri: Optional MinIO URI for a PDF attachment (email channels only).
 
     Returns:
         True if the notification was dispatched successfully.
@@ -375,7 +434,18 @@ def _dispatch_channel(
         )
 
     if channel_type == "email":
+        # Accept both schema-defined "to" (string) and "recipients" (list).
         recipients: list[str] = channel.get("recipients", [])
+        to_field = channel.get("to")
+        if to_field and not recipients:
+            recipients = [addr.strip() for addr in to_field.split(",") if addr.strip()]
+
+        # Short-circuit before the potentially slow MinIO fetch when there
+        # are no recipients — _send_email would skip anyway.
+        if not recipients:
+            logger.warning("No email recipients specified; skipping email dispatch")
+            return False
+
         html = _render_email_html(
             title=event_data.get("title", ""),
             summary=event_data.get("summary", ""),
@@ -386,7 +456,21 @@ def _dispatch_channel(
         )
         sev = event_data.get("severity", "info").upper()
         subject = f"[OSINT {sev}] {event_data.get('title', '')}"
-        return _send_email(recipients, subject, html)
+
+        # Fetch PDF from MinIO if a URI was provided (graceful on failure).
+        fetched_pdf: bytes | None = None
+        pdf_filename = ""
+        if pdf_uri:
+            fetched_pdf = _fetch_pdf_from_minio(pdf_uri)
+            # Derive filename from a digest identifier when available,
+            # falling back to event_id or "report".
+            eid = event_data.get("digest_id") or event_data.get("event_id") or "report"
+            pdf_filename = f"digest-{eid}.pdf"
+
+        return _send_email(
+            recipients, subject, html,
+            pdf_bytes=fetched_pdf, pdf_filename=pdf_filename,
+        )
 
     raise ValueError(f"Unknown notification channel type: {channel_type!r}")
 
@@ -443,6 +527,7 @@ def send_notification(
     event_id: str,
     event_data: dict[str, Any] | None = None,
     channels: list[dict[str, Any]] | None = None,
+    pdf_uri: str | None = None,
 ) -> dict[str, Any]:
     """Send notifications for a scored event via configured channels.
 
@@ -458,8 +543,11 @@ def send_notification(
             from the database and supplements missing fields.
         channels: Optional list of channel config dicts from plan YAML.
             Each dict must have a ``type`` key (``"gotify"``, ``"webhook"``,
-            ``"slack"``, or ``"email"``).  Email channels require a
-            ``recipients`` list of email addresses.
+            ``"slack"``, or ``"email"``).  Email channels may specify
+            recipients via a ``recipients`` list of email addresses or a
+            schema-defined ``to`` string (optionally comma-separated).
+        pdf_uri: Optional MinIO URI for a PDF to attach to email
+            notifications (e.g. ``minio://osint-briefs/briefs/<id>.pdf``).
 
     Returns:
         A dict with keys:
@@ -554,6 +642,7 @@ def send_notification(
         try:
             ok = _dispatch_channel(
                 ch, msg=msg, event_data=template_context, priority=priority,
+                pdf_uri=pdf_uri,
             )
             if ok:
                 dispatched_any = True
