@@ -315,15 +315,42 @@ class TestRemoveQdrantVectors:
 
     def test_removes_vectors_by_deterministic_ids(self):
         """Qdrant points are deleted using UUID5-derived IDs."""
+        import sys
+
         event_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
         mock_client = MagicMock()
 
-        with (
-            patch("osint_core.services.vectorize.get_qdrant", return_value=mock_client),
-            patch("osint_core.config.settings") as mock_settings,
-        ):
-            mock_settings.qdrant_collection = "osint-events"
-            result = _remove_qdrant_vectors(event_ids)
+        # Build a lightweight stand-in for PointIdsList so the import
+        # inside the try-block always succeeds, even when qdrant-client
+        # is not installed in the test environment.
+        class FakePointIdsList:
+            def __init__(self, **kw: Any) -> None:
+                self.__dict__.update(kw)
+
+        # Ensure qdrant_client.models is importable even without the package
+        fake_models = MagicMock()
+        fake_models.PointIdsList = FakePointIdsList
+        saved = {
+            k: sys.modules.get(k)
+            for k in ("qdrant_client", "qdrant_client.models")
+        }
+        sys.modules.setdefault("qdrant_client", MagicMock())
+        sys.modules["qdrant_client.models"] = fake_models
+
+        try:
+            with (
+                patch("osint_core.services.vectorize.get_qdrant", return_value=mock_client),
+                patch("osint_core.config.settings") as mock_settings,
+            ):
+                mock_settings.qdrant_collection = "osint-events"
+                result = _remove_qdrant_vectors(event_ids)
+        finally:
+            # Restore original module state
+            for k, v in saved.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
 
         assert result == 2
         mock_client.delete.assert_called_once()
@@ -333,7 +360,8 @@ class TestRemoveQdrantVectors:
         expected_ids = [
             str(uuid.uuid5(uuid.NAMESPACE_URL, eid)) for eid in event_ids
         ]
-        assert call_kwargs[1]["points_selector"] == expected_ids
+        selector = call_kwargs[1]["points_selector"]
+        assert selector.points == expected_ids
 
     def test_qdrant_failure_returns_zero(self):
         """Qdrant failures are logged but don't raise."""
