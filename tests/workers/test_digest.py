@@ -260,7 +260,7 @@ class TestCompileDigestAsync:
 
         assert result["status"] == "ok"
         assert result["digest_id"] == str(brief_id)
-        mock_send.delay.assert_called_once_with(str(brief_id))
+        mock_send.delay.assert_called_once_with(str(brief_id), pdf_uri=None)
 
     @pytest.mark.asyncio
     async def test_no_notification_when_notify_false(self):
@@ -311,6 +311,31 @@ class TestCompileDigestAsync:
         added_brief = mock_db.add.call_args[0][0]
         assert evt1.id in added_brief.event_ids
         assert evt2.id in added_brief.event_ids
+
+    @pytest.mark.asyncio
+    async def test_chains_notification_with_pdf_uri(self):
+        """When PDF generation succeeds, pdf_uri is forwarded to send_notification."""
+        evt = _make_mock_event()
+        brief_id = uuid.uuid4()
+        mock_db = _make_mock_db([evt], brief_id)
+        mock_self = MagicMock()
+        mock_send = MagicMock()
+
+        pdf_uri = f"minio://osint-briefs/briefs/{brief_id}.pdf"
+
+        with (
+            patch("osint_core.workers.digest.async_session", return_value=mock_db),
+            patch("osint_core.workers.notify.send_notification", mock_send),
+            patch(
+                "osint_core.services.pdf_export.generate_and_upload_pdf",
+                return_value=pdf_uri,
+            ),
+        ):
+            result = await _compile_digest_async(mock_self, "plan-abc", "daily", None, True)
+
+        assert result["status"] == "ok"
+        assert result.get("pdf_uri") == pdf_uri
+        mock_send.delay.assert_called_once_with(str(brief_id), pdf_uri=pdf_uri)
 
     @pytest.mark.asyncio
     async def test_iso8601_timestamps(self):

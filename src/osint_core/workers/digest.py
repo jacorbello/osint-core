@@ -252,7 +252,7 @@ async def _compile_digest_async(
 
         from osint_core.workers.notify import send_notification
 
-        send_notification.delay(digest_id)
+        send_notification.delay(digest_id, pdf_uri=summary.get("pdf_uri"))
         logger.info("digest_notify_chained plan_id=%s digest_id=%s", plan_id, digest_id)
 
     return summary

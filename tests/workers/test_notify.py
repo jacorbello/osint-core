@@ -12,6 +12,7 @@ from osint_core.workers.notify import (
     _SEVERITY_TO_COLOR,
     _build_slack_blocks,
     _dispatch_channel,
+    _fetch_pdf_from_minio,
     _needs_db_fetch,
     _post_to_slack,
     _render_email_html,
@@ -1158,3 +1159,220 @@ def test_default_channels_is_gotify(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_gotify.assert_called_once()
     assert result["notified"] is True
     assert "gotify" in result["channels_dispatched"]
+
+
+# ---------------------------------------------------------------------------
+# _fetch_pdf_from_minio
+# ---------------------------------------------------------------------------
+
+
+class TestFetchPdfFromMinio:
+    """Tests for _fetch_pdf_from_minio() helper."""
+
+    def test_invalid_uri_scheme(self) -> None:
+        """Non-minio:// URIs should return None."""
+        assert _fetch_pdf_from_minio("s3://bucket/key.pdf") is None
+
+    def test_malformed_uri_no_object(self) -> None:
+        """URI with bucket but no object name should return None."""
+        assert _fetch_pdf_from_minio("minio://bucket") is None
+
+    def test_successful_fetch(self) -> None:
+        """A valid URI should fetch and return PDF bytes."""
+        mock_response = MagicMock()
+        mock_response.read.return_value = b"%PDF-1.4 test content"
+        mock_response.close = MagicMock()
+        mock_response.release_conn = MagicMock()
+
+        mock_client = MagicMock()
+        mock_client.get_object.return_value = mock_response
+
+        with patch("minio.Minio", return_value=mock_client):
+            result = _fetch_pdf_from_minio("minio://osint-briefs/briefs/abc.pdf")
+
+        assert result == b"%PDF-1.4 test content"
+        mock_client.get_object.assert_called_once_with("osint-briefs", "briefs/abc.pdf")
+
+    def test_minio_error_returns_none(self) -> None:
+        """MinIO errors should be caught and return None."""
+        mock_client = MagicMock()
+        mock_client.get_object.side_effect = Exception("connection refused")
+
+        with patch("minio.Minio", return_value=mock_client):
+            result = _fetch_pdf_from_minio("minio://osint-briefs/briefs/abc.pdf")
+
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _send_email with PDF attachment
+# ---------------------------------------------------------------------------
+
+
+class TestSendEmailWithPdf:
+    """Tests for _send_email() with PDF attachment."""
+
+    def test_email_with_pdf_attachment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Email should include PDF as MIMEApplication attachment."""
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_host", "smtp.example.com")
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_port", 587)
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_user", "user")
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_password", "pass")
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_from", "alerts@example.com")
+
+        mock_smtp_instance = MagicMock()
+        mock_smtp_instance.__enter__ = MagicMock(return_value=mock_smtp_instance)
+        mock_smtp_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch("osint_core.workers.notify.smtplib.SMTP", return_value=mock_smtp_instance):
+            result = _send_email(
+                ["admin@example.com"],
+                "[OSINT HIGH] Test Alert",
+                "<p>Alert body</p>",
+                pdf_bytes=b"%PDF-1.4 test",
+                pdf_filename="digest-plan123.pdf",
+            )
+
+        assert result is True
+        mock_smtp_instance.sendmail.assert_called_once()
+        # Verify the sent message contains the PDF attachment.
+        sent_msg = mock_smtp_instance.sendmail.call_args.args[2]
+        assert "digest-plan123.pdf" in sent_msg
+        assert "application/pdf" in sent_msg
+
+    def test_email_without_pdf_still_works(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Email without PDF bytes should send normally (no attachment)."""
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_host", "smtp.example.com")
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_port", 587)
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_user", "user")
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_password", "pass")
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_from", "alerts@example.com")
+
+        mock_smtp_instance = MagicMock()
+        mock_smtp_instance.__enter__ = MagicMock(return_value=mock_smtp_instance)
+        mock_smtp_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch("osint_core.workers.notify.smtplib.SMTP", return_value=mock_smtp_instance):
+            result = _send_email(
+                ["admin@example.com"],
+                "[OSINT HIGH] Test Alert",
+                "<p>Alert body</p>",
+            )
+
+        assert result is True
+        sent_msg = mock_smtp_instance.sendmail.call_args.args[2]
+        assert "application/pdf" not in sent_msg
+
+    def test_email_with_pdf_default_filename(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When no pdf_filename is given, default to 'digest.pdf'."""
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_host", "smtp.example.com")
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_port", 587)
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_user", "user")
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_password", "pass")
+        monkeypatch.setattr("osint_core.workers.notify.settings.smtp_from", "alerts@example.com")
+
+        mock_smtp_instance = MagicMock()
+        mock_smtp_instance.__enter__ = MagicMock(return_value=mock_smtp_instance)
+        mock_smtp_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch("osint_core.workers.notify.smtplib.SMTP", return_value=mock_smtp_instance):
+            result = _send_email(
+                ["admin@example.com"],
+                "Subject",
+                "<p>Body</p>",
+                pdf_bytes=b"%PDF-1.4 test",
+            )
+
+        assert result is True
+        sent_msg = mock_smtp_instance.sendmail.call_args.args[2]
+        assert "digest.pdf" in sent_msg
+
+
+# ---------------------------------------------------------------------------
+# Email channel with PDF via send_notification
+# ---------------------------------------------------------------------------
+
+
+class TestEmailPdfIntegration:
+    """Tests for PDF attachment flow through send_notification."""
+
+    def test_email_channel_with_pdf_uri(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When pdf_uri is provided, email channel should fetch and attach PDF."""
+        monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+        with (
+            patch(
+                "osint_core.workers.notify._fetch_pdf_from_minio",
+                return_value=b"%PDF-test",
+            ) as mock_fetch,
+            patch("osint_core.workers.notify._send_email", return_value=True) as mock_email,
+        ):
+            result = send_notification.run(
+                "evt-pdf-1",
+                {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+                channels=[{"type": "email", "recipients": ["admin@example.com"]}],
+                pdf_uri="minio://osint-briefs/briefs/evt-pdf-1.pdf",
+            )
+
+        assert result["notified"] is True
+        assert "email" in result["channels_dispatched"]
+        mock_fetch.assert_called_once_with("minio://osint-briefs/briefs/evt-pdf-1.pdf")
+        # Verify _send_email was called with pdf_bytes and pdf_filename
+        call_kwargs = mock_email.call_args
+        assert call_kwargs.kwargs["pdf_bytes"] == b"%PDF-test"
+        assert call_kwargs.kwargs["pdf_filename"] == "digest-evt-pdf-1.pdf"
+
+    def test_email_pdf_fetch_fails_gracefully(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When PDF fetch fails, email should still send without attachment."""
+        monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+        with (
+            patch("osint_core.workers.notify._fetch_pdf_from_minio", return_value=None),
+            patch("osint_core.workers.notify._send_email", return_value=True) as mock_email,
+        ):
+            result = send_notification.run(
+                "evt-pdf-2",
+                {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+                channels=[{"type": "email", "recipients": ["admin@example.com"]}],
+                pdf_uri="minio://osint-briefs/briefs/evt-pdf-2.pdf",
+            )
+
+        assert result["notified"] is True
+        call_kwargs = mock_email.call_args
+        assert call_kwargs.kwargs["pdf_bytes"] is None
+
+    def test_non_email_channel_ignores_pdf_uri(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Non-email channels should ignore pdf_uri (no MinIO fetch)."""
+        monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+        monkeypatch.setenv("OSINT_GOTIFY_TOKEN", "tok")
+
+        with (
+            patch("osint_core.workers.notify._fetch_pdf_from_minio") as mock_fetch,
+            patch("osint_core.workers.notify._post_to_gotify", return_value=True),
+        ):
+            result = send_notification.run(
+                "evt-pdf-3",
+                {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+                channels=[{"type": "gotify"}],
+                pdf_uri="minio://osint-briefs/briefs/evt-pdf-3.pdf",
+            )
+
+        assert result["notified"] is True
+        mock_fetch.assert_not_called()
+
+    def test_no_pdf_uri_no_fetch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When no pdf_uri is provided, no MinIO fetch should occur."""
+        monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+        with (
+            patch("osint_core.workers.notify._fetch_pdf_from_minio") as mock_fetch,
+            patch("osint_core.workers.notify._send_email", return_value=True),
+        ):
+            result = send_notification.run(
+                "evt-pdf-4",
+                {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+                channels=[{"type": "email", "recipients": ["admin@example.com"]}],
+            )
+
+        assert result["notified"] is True
+        mock_fetch.assert_not_called()
