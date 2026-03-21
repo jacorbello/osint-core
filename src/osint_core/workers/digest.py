@@ -252,7 +252,41 @@ async def _compile_digest_async(
 
         from osint_core.workers.notify import send_notification
 
-        send_notification.delay(digest_id, pdf_uri=summary.get("pdf_uri"))
+        # Derive an overall digest severity from the breakdown, highest first.
+        digest_severity = "info"
+        for sev in _SEVERITIES:
+            if severity_breakdown.get(sev):
+                digest_severity = sev
+                break
+
+        # Build event_data payload so the notification task does not rely on
+        # an Event row (digest_id is a Brief ID, not an Event ID).
+        event_data: dict[str, Any] = {
+            "title": f"Digest: {plan_id} ({period})",
+            "summary": (
+                f"{len(events)} alerts for plan '{plan_id}' over the last "
+                f"{window_hrs}h ({period})"
+            ),
+            "severity": digest_severity,
+            "source_id": plan_id,
+            "metadata": {
+                "digest_id": str(digest_id),
+                "period": period,
+                "window_start": summary.get("window_start"),
+                "window_end": summary.get("window_end"),
+                "alert_count": summary.get("alert_count"),
+                "severity_breakdown": severity_breakdown,
+                "source_breakdown": source_breakdown,
+                "pdf_uri": summary.get("pdf_uri"),
+            },
+        }
+
+        send_notification.delay(
+            None,
+            event_data=event_data,
+            channels=[{"type": "email"}],
+            pdf_uri=summary.get("pdf_uri"),
+        )
         logger.info("digest_notify_chained plan_id=%s digest_id=%s", plan_id, digest_id)
 
     return summary

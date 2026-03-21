@@ -260,7 +260,16 @@ class TestCompileDigestAsync:
 
         assert result["status"] == "ok"
         assert result["digest_id"] == str(brief_id)
-        mock_send.delay.assert_called_once_with(str(brief_id), pdf_uri=None)
+        mock_send.delay.assert_called_once()
+        call_kwargs = mock_send.delay.call_args
+        # event_id should be None (digest uses event_data instead of DB lookup).
+        assert call_kwargs.args[0] is None
+        # event_data should contain digest metadata.
+        ed = call_kwargs.kwargs["event_data"]
+        assert "Digest:" in ed["title"]
+        assert ed["source_id"] == "plan-abc"
+        assert ed["severity"] in ("info", "low", "medium", "high", "critical")
+        assert call_kwargs.kwargs["pdf_uri"] is None
 
     @pytest.mark.asyncio
     async def test_no_notification_when_notify_false(self):
@@ -335,7 +344,12 @@ class TestCompileDigestAsync:
 
         assert result["status"] == "ok"
         assert result.get("pdf_uri") == pdf_uri
-        mock_send.delay.assert_called_once_with(str(brief_id), pdf_uri=pdf_uri)
+        mock_send.delay.assert_called_once()
+        call_kwargs = mock_send.delay.call_args
+        assert call_kwargs.args[0] is None
+        assert call_kwargs.kwargs["pdf_uri"] == pdf_uri
+        ed = call_kwargs.kwargs["event_data"]
+        assert ed["metadata"]["pdf_uri"] == pdf_uri
 
     @pytest.mark.asyncio
     async def test_iso8601_timestamps(self):

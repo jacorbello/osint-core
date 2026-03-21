@@ -347,13 +347,13 @@ def _send_email(
 
     # Use "mixed" when we have an attachment so both the HTML body and PDF
     # are included; otherwise stick with "alternative" for plain HTML emails.
-    msg = MIMEMultipart("mixed") if pdf_bytes else MIMEMultipart("alternative")
+    msg = MIMEMultipart("mixed") if pdf_bytes is not None else MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
     msg.attach(MIMEText(html_body, "html"))
 
-    if pdf_bytes:
+    if pdf_bytes is not None:
         filename = pdf_filename or "digest.pdf"
         attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
         attachment.add_header(
@@ -434,7 +434,18 @@ def _dispatch_channel(
         )
 
     if channel_type == "email":
+        # Accept both schema-defined "to" (string) and "recipients" (list).
         recipients: list[str] = channel.get("recipients", [])
+        to_field = channel.get("to")
+        if to_field and not recipients:
+            recipients = [addr.strip() for addr in to_field.split(",") if addr.strip()]
+
+        # Short-circuit before the potentially slow MinIO fetch when there
+        # are no recipients — _send_email would skip anyway.
+        if not recipients:
+            logger.warning("No email recipients specified; skipping email dispatch")
+            return False
+
         html = _render_email_html(
             title=event_data.get("title", ""),
             summary=event_data.get("summary", ""),

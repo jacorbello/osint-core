@@ -1131,6 +1131,53 @@ def test_email_only_channel(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["channels_dispatched"] == ["email"]
 
 
+def test_email_channel_uses_to_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An email channel with schema-defined 'to' field should normalize to recipients."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+    with patch("osint_core.workers.notify._send_email", return_value=True) as mock_email:
+        result = send_notification.run(
+            "evt-email-to",
+            {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+            channels=[{"type": "email", "to": "admin@example.com"}],
+        )
+
+    assert result["notified"] is True
+    assert "email" in result["channels_dispatched"]
+    mock_email.assert_called_once()
+    call_args = mock_email.call_args
+    assert call_args.args[0] == ["admin@example.com"]
+
+
+def test_email_channel_to_field_multiple_addresses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Comma-separated 'to' field should be split into multiple recipients."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+    with patch("osint_core.workers.notify._send_email", return_value=True) as mock_email:
+        result = send_notification.run(
+            "evt-email-to-multi",
+            {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+            channels=[{"type": "email", "to": "a@example.com, b@example.com"}],
+        )
+
+    assert result["notified"] is True
+    call_args = mock_email.call_args
+    assert call_args.args[0] == ["a@example.com", "b@example.com"]
+
+
+def test_email_channel_no_recipients_returns_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Email channel with neither 'to' nor 'recipients' should return not notified."""
+    monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
+
+    result = send_notification.run(
+        "evt-email-no-rcpt",
+        {"severity": "high", "title": "Alert", "summary": "S", "source_id": "x"},
+        channels=[{"type": "email"}],
+    )
+
+    assert result["notified"] is False
+
+
 def test_unknown_channel_type_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unknown channel types should be logged and skipped."""
     monkeypatch.setenv("OSINT_NOTIFY_THRESHOLD", "low")
