@@ -67,8 +67,8 @@ sources:
     url: "https://api.acleddata.com/acled/read"
     schedule_cron: "0 */4 * * *"
     params:
-      api_key: "${OSINT_ACLED_API_KEY}"
-      email: "${OSINT_ACLED_EMAIL}"
+      api_key: "YOUR_ACLED_API_KEY"
+      email: "YOUR_ACLED_EMAIL"
       max_items: 100
 
   - id: nws_alerts

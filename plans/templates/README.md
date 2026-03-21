@@ -1,8 +1,9 @@
 # Plan Templates
 
 Pre-built OSINT collection plan templates for common use cases. Each template
-is a valid v2 plan YAML that can be loaded directly via the plan sync endpoint
-or customized for your environment.
+is a valid v2 plan YAML that should be copied to your `plans/` directory and
+customized before loading. The sync endpoint scans the plan directory for
+`*.yaml` files but does not recurse into subdirectories.
 
 ## Available Templates
 
@@ -73,8 +74,9 @@ RSS, Ars Technica RSS
    `tpl-cyber-threat-intel` to `acme-cyber-threat-intel`).
 3. **Customize** keywords, sources, scoring weights, and notification channels
    to match your requirements.
-4. **Set environment variables** for any required API keys (listed above).
-5. **Load** the plan via the sync endpoint:
+4. **Replace placeholder values** (e.g., `YOUR_OTX_API_KEY`) with your actual
+   API keys. The plan loader does not expand environment variable placeholders.
+5. **Load** the plan via the sync endpoint (scans `plans/` directory):
    ```
    POST /api/v1/plans:sync-from-disk
    ```
@@ -102,8 +104,8 @@ RSS, Ars Technica RSS
 - `recency_half_life_hours` controls how quickly old items lose relevance.
   Lower values (6-12) suit fast-moving situations; higher values (48-168) suit
   slower intelligence cycles.
-- `source_reputation` weights range from 0.0 to 10.0. Higher values give more
-  influence to that source in the final score.
+- `source_reputation` weights range from 0.0 to 1.0. Higher values give more
+  influence to that source in the final score (values above 1.0 will saturate).
 - `ioc_match_boost` amplifies items that match known indicators of compromise.
 - `severity_promotions` can automatically escalate items matching specific
   conditions.
@@ -112,8 +114,8 @@ RSS, Ars Technica RSS
 
 Each route needs at least one channel. Supported types:
 - `gotify` — requires `application` and `priority` (0-10)
-- `slack` — requires `url` (webhook URL)
-- `email` — requires `to` (recipient address)
+- `slack` — requires `webhook_url`
+- `email` — requires `recipients` (list of email addresses)
 - `webhook` — requires `url`
 
 ### Keywords

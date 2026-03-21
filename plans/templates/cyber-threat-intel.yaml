@@ -88,7 +88,7 @@ sources:
     url: "https://otx.alienvault.com/api/v1/pulses/subscribed"
     schedule_cron: "0 */4 * * *"
     params:
-      api_key: "${OSINT_OTX_API_KEY}"
+      api_key: "YOUR_OTX_API_KEY"
       max_items: 50
 
   - id: mb_recent
