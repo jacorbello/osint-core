@@ -1,5 +1,7 @@
 """Tests for paste site monitor connector."""
 
+from datetime import UTC, datetime, timedelta
+
 import httpx
 import pytest
 import respx
@@ -21,6 +23,7 @@ def _make_config(**extra: object) -> SourceConfig:
 @respx.mock
 @pytest.mark.asyncio
 async def test_fetches_pastes_and_parses_fields():
+    recent_ts = (datetime.now(tz=UTC) - timedelta(hours=1)).isoformat()
     cfg = _make_config()
     respx.get("https://psbdmp.ws/api/v3/search/password").mock(
         return_value=httpx.Response(
@@ -31,7 +34,7 @@ async def test_fetches_pastes_and_parses_fields():
                     "title": "Leaked credentials",
                     "content": "admin:password123 server 10.0.0.1",
                     "author": "anon_user",
-                    "time": "2026-03-15T10:00:00",
+                    "time": recent_ts,
                     "url": "https://pastebin.com/abc123",
                 }
             ],
@@ -134,11 +137,12 @@ async def test_empty_keywords_returns_no_items():
 @respx.mock
 @pytest.mark.asyncio
 async def test_unix_timestamp_parsing():
+    recent_unix = datetime.now(tz=UTC).timestamp() - 3600  # 1 hour ago
     cfg = _make_config()
     respx.get("https://psbdmp.ws/api/v3/search/password").mock(
         return_value=httpx.Response(
             200,
-            json=[{"id": "ts1", "content": "data", "time": 1710500000}],
+            json=[{"id": "ts1", "content": "data", "time": recent_unix}],
         )
     )
     conn = PasteSiteConnector(cfg)
@@ -158,3 +162,48 @@ async def test_max_items_limits_results():
     conn = PasteSiteConnector(cfg)
     items = await conn.fetch()
     assert len(items) == 2
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_lookback_filters_old_pastes():
+    """Pastes older than lookback_hours are excluded."""
+    now = datetime.now(tz=UTC)
+    old_ts = (now - timedelta(hours=50)).isoformat()
+    recent_ts = (now - timedelta(hours=2)).isoformat()
+
+    cfg = _make_config(lookback_hours=24)
+    respx.get("https://psbdmp.ws/api/v3/search/password").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": "old1", "content": "old data", "time": old_ts},
+                {"id": "new1", "content": "new data", "time": recent_ts},
+            ],
+        )
+    )
+    conn = PasteSiteConnector(cfg)
+    items = await conn.fetch()
+
+    assert len(items) == 1
+    assert items[0].raw_data["id"] == "new1"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_lookback_keeps_pastes_without_timestamp():
+    """Pastes with no timestamp are included regardless of lookback."""
+    cfg = _make_config(lookback_hours=1)
+    respx.get("https://psbdmp.ws/api/v3/search/password").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": "nots1", "content": "no timestamp paste"},
+            ],
+        )
+    )
+    conn = PasteSiteConnector(cfg)
+    items = await conn.fetch()
+
+    assert len(items) == 1
+    assert items[0].occurred_at is None

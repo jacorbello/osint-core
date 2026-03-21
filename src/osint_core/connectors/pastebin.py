@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -19,6 +19,7 @@ from osint_core.connectors.base import BaseConnector, RawItem
 from osint_core.services.indicators import extract_indicators
 
 _DEFAULT_API_URL = "https://psbdmp.ws/api/v3/search/"
+_DEFAULT_LOOKBACK_HOURS = 24
 _CONTENT_EXCERPT_LENGTH = 2000
 _RAW_DATA_CONTENT_LIMIT = 500
 
@@ -30,9 +31,14 @@ class PasteSiteConnector(BaseConnector):
         keywords: list[str] = self.config.extra.get("keywords", [])
         max_items: int = int(self.config.extra.get("max_items", 100))
         timeout: int = int(self.config.extra.get("timeout", 30))
+        lookback_hours: int = int(
+            self.config.extra.get("lookback_hours", _DEFAULT_LOOKBACK_HOURS)
+        )
 
         if not keywords:
             return []
+
+        cutoff = datetime.now(tz=UTC) - timedelta(hours=lookback_hours)
 
         all_items: list[RawItem] = []
         seen_ids: set[str] = set()
@@ -43,6 +49,15 @@ class PasteSiteConnector(BaseConnector):
                 all_items.extend(items)
                 if len(all_items) >= max_items:
                     break
+
+        # Filter by lookback window: exclude pastes with a timestamp older
+        # than the cutoff, but keep pastes with no timestamp (missing dates
+        # should not cause data loss).
+        all_items = [
+            item
+            for item in all_items
+            if item.occurred_at is None or item.occurred_at >= cutoff
+        ]
 
         return all_items[:max_items]
 
