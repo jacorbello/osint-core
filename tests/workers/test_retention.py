@@ -333,7 +333,8 @@ class TestRemoveQdrantVectors:
         expected_ids = [
             str(uuid.uuid5(uuid.NAMESPACE_URL, eid)) for eid in event_ids
         ]
-        assert call_kwargs[1]["points_selector"] == expected_ids
+        selector = call_kwargs[1]["points_selector"]
+        assert selector.points == expected_ids
 
     def test_qdrant_failure_returns_zero(self):
         """Qdrant failures are logged but don't raise."""
