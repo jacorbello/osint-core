@@ -261,7 +261,7 @@ async def _compile_digest_async(
 
         # Build event_data payload so the notification task does not rely on
         # an Event row (digest_id is a Brief ID, not an Event ID).
-        event_data: dict[str, Any] = {
+        notify_event_data: dict[str, Any] = {
             "title": f"Digest: {plan_id} ({period})",
             "summary": (
                 f"{len(events)} alerts for plan '{plan_id}' over the last "
@@ -269,6 +269,7 @@ async def _compile_digest_async(
             ),
             "severity": digest_severity,
             "source_id": plan_id,
+            "digest_id": str(digest_id),
             "metadata": {
                 "digest_id": str(digest_id),
                 "period": period,
@@ -281,10 +282,36 @@ async def _compile_digest_async(
             },
         }
 
+        # Resolve email channels from the plan's notification routes so that
+        # the ``to`` addresses defined in the plan schema are forwarded to
+        # send_notification.  Fall back to a bare email channel if no routes
+        # are configured (the dispatcher will log a warning and skip).
+        email_channels: list[dict[str, Any]] = []
+        async with async_session() as db_plan:
+            plan_row = await db_plan.execute(
+                select(PlanVersion)
+                .where(PlanVersion.plan_id == plan_id)
+                .where(PlanVersion.is_active.is_(True))
+            )
+            active_plan = plan_row.scalar_one_or_none()
+            if active_plan and active_plan.content:
+                routes = (
+                    active_plan.content
+                    .get("notifications", {})
+                    .get("routes", [])
+                )
+                for route in routes:
+                    for ch in route.get("channels", []):
+                        if ch.get("type") == "email":
+                            email_channels.append(dict(ch))
+
+        if not email_channels:
+            email_channels = [{"type": "email"}]
+
         send_notification.delay(
-            None,
-            event_data=event_data,
-            channels=[{"type": "email"}],
+            str(digest_id),
+            event_data=notify_event_data,
+            channels=email_channels,
             pdf_uri=summary.get("pdf_uri"),
         )
         logger.info("digest_notify_chained plan_id=%s digest_id=%s", plan_id, digest_id)

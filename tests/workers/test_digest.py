@@ -171,13 +171,61 @@ def _make_mock_event(
     return evt
 
 
-def _make_mock_db(events_orm, brief_id=None):
-    """Build an AsyncMock DB session that returns the given events."""
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = events_orm
+def _make_mock_plan(plan_id="plan-abc", email_to="admin@example.com"):
+    """Create a mock PlanVersion ORM object with email notification config."""
+    plan = MagicMock()
+    plan.plan_id = plan_id
+    plan.is_active = True
+    plan.content = {
+        "notifications": {
+            "routes": [
+                {
+                    "name": "default",
+                    "channels": [
+                        {"type": "email", "to": email_to},
+                    ],
+                },
+            ],
+        },
+    }
+    return plan
+
+
+def _make_mock_db(events_orm, brief_id=None, plan=None, *, pdf_path=False):
+    """Build an AsyncMock DB session that returns the given events.
+
+    Args:
+        events_orm: List of mock Event ORM objects.
+        brief_id: Optional UUID to assign to the Brief record.
+        plan: Optional mock PlanVersion returned by the plan-lookup query.
+        pdf_path: When ``True`` the PDF-update DB query is expected
+            (i.e. ``generate_and_upload_pdf`` is patched successfully).
+    """
+    mock_event_result = MagicMock()
+    mock_event_result.scalars.return_value.all.return_value = events_orm
+
+    # Result for the PDF-update query.
+    mock_brief_result = MagicMock()
+    mock_brief_result.scalar_one_or_none.return_value = MagicMock()
+
+    # Result for the plan-lookup query.
+    mock_plan_result = MagicMock()
+    mock_plan_result.scalar_one_or_none.return_value = plan
 
     mock_db = AsyncMock()
-    mock_db.execute.return_value = mock_result
+    # execute is called multiple times across different async-session scopes.
+    # Because the same mock_db is returned by the patched async_session
+    # factory each time, we use side_effect to return the right result for
+    # each successive call.
+    if events_orm:
+        results: list[Any] = [mock_event_result]
+        if pdf_path:
+            results.append(mock_brief_result)
+        results.append(mock_plan_result)
+        mock_db.execute = AsyncMock(side_effect=results)
+    else:
+        mock_db.execute = AsyncMock(return_value=mock_event_result)
+
     mock_db.add = MagicMock()
     mock_db.commit = AsyncMock()
     mock_db.refresh = AsyncMock(
@@ -248,7 +296,8 @@ class TestCompileDigestAsync:
         """Chains send_notification.delay when notify=True and digest exists."""
         evt = _make_mock_event()
         brief_id = uuid.uuid4()
-        mock_db = _make_mock_db([evt], brief_id)
+        plan = _make_mock_plan(plan_id="plan-abc", email_to="ops@example.com")
+        mock_db = _make_mock_db([evt], brief_id, plan=plan)
         mock_self = MagicMock()
         mock_send = MagicMock()
 
@@ -262,14 +311,18 @@ class TestCompileDigestAsync:
         assert result["digest_id"] == str(brief_id)
         mock_send.delay.assert_called_once()
         call_kwargs = mock_send.delay.call_args
-        # event_id should be None (digest uses event_data instead of DB lookup).
-        assert call_kwargs.args[0] is None
+        # event_id should be the digest_id (Brief ID) so filenames are stable.
+        assert call_kwargs.args[0] == str(brief_id)
         # event_data should contain digest metadata.
         ed = call_kwargs.kwargs["event_data"]
         assert "Digest:" in ed["title"]
         assert ed["source_id"] == "plan-abc"
         assert ed["severity"] in ("info", "low", "medium", "high", "critical")
+        assert ed["digest_id"] == str(brief_id)
         assert call_kwargs.kwargs["pdf_uri"] is None
+        # channels should include the plan's email config with the "to" field.
+        channels = call_kwargs.kwargs["channels"]
+        assert any(ch.get("to") == "ops@example.com" for ch in channels)
 
     @pytest.mark.asyncio
     async def test_no_notification_when_notify_false(self):
@@ -326,7 +379,8 @@ class TestCompileDigestAsync:
         """When PDF generation succeeds, pdf_uri is forwarded to send_notification."""
         evt = _make_mock_event()
         brief_id = uuid.uuid4()
-        mock_db = _make_mock_db([evt], brief_id)
+        plan = _make_mock_plan(plan_id="plan-abc")
+        mock_db = _make_mock_db([evt], brief_id, plan=plan, pdf_path=True)
         mock_self = MagicMock()
         mock_send = MagicMock()
 
@@ -346,10 +400,11 @@ class TestCompileDigestAsync:
         assert result.get("pdf_uri") == pdf_uri
         mock_send.delay.assert_called_once()
         call_kwargs = mock_send.delay.call_args
-        assert call_kwargs.args[0] is None
+        assert call_kwargs.args[0] == str(brief_id)
         assert call_kwargs.kwargs["pdf_uri"] == pdf_uri
         ed = call_kwargs.kwargs["event_data"]
         assert ed["metadata"]["pdf_uri"] == pdf_uri
+        assert ed["digest_id"] == str(brief_id)
 
     @pytest.mark.asyncio
     async def test_iso8601_timestamps(self):

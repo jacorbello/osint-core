@@ -462,8 +462,9 @@ def _dispatch_channel(
         pdf_filename = ""
         if pdf_uri:
             fetched_pdf = _fetch_pdf_from_minio(pdf_uri)
-            # Derive filename from the event_id (digest ID).
-            eid = event_data.get("event_id", "report")
+            # Derive filename from a digest identifier when available,
+            # falling back to event_id or "report".
+            eid = event_data.get("digest_id") or event_data.get("event_id") or "report"
             pdf_filename = f"digest-{eid}.pdf"
 
         return _send_email(
@@ -542,8 +543,9 @@ def send_notification(
             from the database and supplements missing fields.
         channels: Optional list of channel config dicts from plan YAML.
             Each dict must have a ``type`` key (``"gotify"``, ``"webhook"``,
-            ``"slack"``, or ``"email"``).  Email channels require a
-            ``recipients`` list of email addresses.
+            ``"slack"``, or ``"email"``).  Email channels may specify
+            recipients via a ``recipients`` list of email addresses or a
+            schema-defined ``to`` string (optionally comma-separated).
         pdf_uri: Optional MinIO URI for a PDF to attach to email
             notifications (e.g. ``minio://osint-briefs/briefs/<id>.pdf``).
 
