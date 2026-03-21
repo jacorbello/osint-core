@@ -1,0 +1,121 @@
+version: 2
+plan_id: tpl-brand-reputation
+plan_type: child
+description: >-
+  Brand and reputation monitoring template for tracking public mentions,
+  media coverage, data breaches, and sentiment around an organization or
+  product.  Uses GDELT media analysis and curated RSS feeds to surface
+  brand-relevant events.  Customize the GDELT query and RSS feeds to
+  match your brand, product names, and competitor names.
+retention_class: standard
+
+keywords:
+  - "YOUR_BRAND_NAME"
+  - "YOUR_PRODUCT_NAME"
+  - data breach
+  - lawsuit
+  - recall
+  - outage
+  - hack
+  - leak
+  - reputation
+  - review
+
+source_profiles:
+  gdelt_brand:
+    reliability: B
+    credibility: 3
+    corroboration_required: true
+    license: "open"
+  rss_google_alerts:
+    reliability: C
+    credibility: 4
+    corroboration_required: true
+    license: "public"
+  rss_techcrunch:
+    reliability: B
+    credibility: 3
+    corroboration_required: false
+    license: "public"
+  rss_verge:
+    reliability: B
+    credibility: 3
+    corroboration_required: false
+    license: "public"
+  rss_ars_technica:
+    reliability: B
+    credibility: 3
+    corroboration_required: false
+    license: "public"
+
+sources:
+  - id: gdelt_brand
+    type: gdelt_api
+    url: "https://api.gdeltproject.org/api/v2/doc/doc"
+    schedule_cron: "*/30 * * * *"
+    params:
+      query: "YOUR_BRAND_NAME OR YOUR_PRODUCT_NAME"
+      mode: "ArtList"
+      format: "json"
+      maxrecords: 50
+      timespan: "30min"
+
+  - id: rss_google_alerts
+    type: rss
+    url: "https://news.google.com/rss/search?q=YOUR_BRAND_NAME&hl=en-US&gl=US&ceid=US:en"
+    schedule_cron: "0 */1 * * *"
+
+  - id: rss_techcrunch
+    type: rss
+    url: "https://techcrunch.com/feed/"
+    schedule_cron: "0 */2 * * *"
+
+  - id: rss_verge
+    type: rss
+    url: "https://www.theverge.com/rss/index.xml"
+    schedule_cron: "0 */2 * * *"
+
+  - id: rss_ars_technica
+    type: rss
+    url: "https://feeds.arstechnica.com/arstechnica/index"
+    schedule_cron: "0 */2 * * *"
+
+scoring:
+  recency_half_life_hours: 24
+  source_reputation:
+    gdelt_brand: 0.65
+    rss_google_alerts: 0.50
+    rss_techcrunch: 0.70
+    rss_verge: 0.65
+    rss_ars_technica: 0.70
+  ioc_match_boost: 1.0
+  severity_promotions:
+    - condition: {field: "keywords_matched", op: "contains", value: "data breach"}
+      promote_to: high
+    - condition: {field: "keywords_matched", op: "contains", value: "lawsuit"}
+      promote_to: high
+
+enrichment:
+  nlp_enabled: true
+  mission: "Monitor brand mentions, media coverage, and reputation-relevant events for early warning"
+  classify_relevance: true
+  extract_entities: true
+  generate_summaries: true
+
+notifications:
+  default_dedupe_window_minutes: 120
+  routes:
+    - name: urgent_alerts
+      when:
+        severity_gte: high
+      channels:
+        - type: gotify
+          application: "osint-brand-alerts"
+          priority: 8
+    - name: daily_digest
+      when:
+        severity_gte: low
+      channels:
+        - type: gotify
+          application: "osint-brand-digest"
+          priority: 4

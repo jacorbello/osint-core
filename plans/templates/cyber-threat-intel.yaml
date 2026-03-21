@@ -1,0 +1,156 @@
+version: 2
+plan_id: tpl-cyber-threat-intel
+plan_type: child
+description: >-
+  Cyber threat intelligence template covering vulnerability disclosures,
+  malware indicators of compromise, and security news feeds.  Monitors
+  CISA KEV, NVD, ThreatFox, URLhaus, OTX, MalwareBazaar, and curated
+  RSS feeds on a continuous schedule.
+retention_class: standard
+
+keywords:
+  - vulnerability
+  - CVE
+  - exploit
+  - ransomware
+  - malware
+  - phishing
+  - zero-day
+  - botnet
+  - APT
+  - data breach
+
+source_profiles:
+  cisa_kev:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public-domain"
+  nvd_recent:
+    reliability: A
+    credibility: 2
+    corroboration_required: false
+    license: "public-domain"
+  threatfox_iocs:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "cc0"
+  urlhaus_recent:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "cc0"
+  otx_pulses:
+    reliability: B
+    credibility: 3
+    corroboration_required: false
+    license: "api-key"
+  mb_recent:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "cc0"
+  rss_hackernews:
+    reliability: B
+    credibility: 3
+    corroboration_required: false
+    license: "public"
+  rss_bleeping:
+    reliability: B
+    credibility: 3
+    corroboration_required: false
+    license: "public"
+
+sources:
+  - id: cisa_kev
+    type: cisa_kev
+    url: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    schedule_cron: "0 */4 * * *"
+
+  - id: nvd_recent
+    type: nvd_json_feed
+    url: "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    schedule_cron: "15 */2 * * *"
+
+  - id: threatfox_iocs
+    type: threatfox_api
+    url: "https://threatfox-api.abuse.ch/api/v1/"
+    schedule_cron: "45 */4 * * *"
+
+  - id: urlhaus_recent
+    type: urlhaus_api
+    url: "https://urlhaus-api.abuse.ch/v1/"
+    schedule_cron: "0 */3 * * *"
+
+  - id: otx_pulses
+    type: otx_api
+    url: "https://otx.alienvault.com/api/v1/pulses/subscribed"
+    schedule_cron: "0 */4 * * *"
+    params:
+      api_key: "YOUR_OTX_API_KEY"
+      max_items: 50
+
+  - id: mb_recent
+    type: abusech_malwarebazaar
+    url: "https://mb-api.abuse.ch/api/v1/"
+    schedule_cron: "30 */4 * * *"
+    params:
+      max_items: 50
+
+  - id: rss_hackernews
+    type: rss
+    url: "https://feeds.feedburner.com/TheHackersNews"
+    schedule_cron: "0 */1 * * *"
+
+  - id: rss_bleeping
+    type: rss
+    url: "https://www.bleepingcomputer.com/feed/"
+    schedule_cron: "0 */1 * * *"
+
+scoring:
+  recency_half_life_hours: 48
+  source_reputation:
+    cisa_kev: 0.90
+    nvd_recent: 0.70
+    threatfox_iocs: 0.80
+    urlhaus_recent: 0.75
+    otx_pulses: 0.70
+    mb_recent: 0.65
+    rss_hackernews: 0.55
+    rss_bleeping: 0.55
+  ioc_match_boost: 2.5
+  severity_promotions:
+    - condition: {field: "indicators.cvss", op: "gte", value: 9.0}
+      promote_to: critical
+    - condition: {field: "source_id", op: "eq", value: "cisa_kev"}
+      promote_to: high
+
+enrichment:
+  nlp_enabled: true
+  mission: "Track vulnerabilities, malware campaigns, and IOC indicators affecting enterprise infrastructure"
+  classify_relevance: true
+  extract_entities: true
+  generate_summaries: true
+
+notifications:
+  default_dedupe_window_minutes: 90
+  quiet_hours:
+    timezone: "UTC"
+    start: "22:00"
+    end: "07:00"
+  routes:
+    - name: critical_alerts
+      when:
+        severity_gte: high
+      channels:
+        - type: gotify
+          application: "osint-cyber-alerts"
+          priority: 8
+    - name: daily_digest
+      when:
+        severity_gte: low
+      channels:
+        - type: gotify
+          application: "osint-cyber-digest"
+          priority: 4
