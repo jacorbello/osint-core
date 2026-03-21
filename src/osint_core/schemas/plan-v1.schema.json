@@ -63,7 +63,8 @@
               "abusech_malwarebazaar",
               "abusech_feodotracker",
               "acled_api",
-              "nws_alerts"
+              "nws_alerts",
+              "reddit"
             ],
             "description": "Source collector type."
           },
