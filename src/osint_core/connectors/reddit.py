@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,6 +15,9 @@ from .base import BaseConnector, RawItem
 logger = structlog.get_logger()
 
 _USER_AGENT = "osint-core/1.0 (reddit connector)"
+_VALID_SORTS = frozenset({"hot", "new", "top", "rising"})
+_SUBREDDIT_RE = re.compile(r"^[A-Za-z0-9_]+$")
+_DEFAULT_BASE_URL = "https://www.reddit.com"
 
 
 class RedditConnector(BaseConnector):
@@ -21,16 +25,29 @@ class RedditConnector(BaseConnector):
 
     Config ``extra`` params:
         subreddits: list[str]  — subreddit names (without ``r/`` prefix)
-        sort: str              — ``hot``, ``new``, or ``top`` (default ``hot``)
+        sort: str              — ``hot``, ``new``, ``top``, or ``rising`` (default ``hot``)
         limit: int             — max posts per subreddit (default 25, max 100)
         keyword_filter: list[str] — if set, only include posts matching any keyword
     """
 
+    def _base_url(self) -> str:
+        """Return the base URL, preferring config.url if set."""
+        return self.config.url or _DEFAULT_BASE_URL
+
     async def fetch(self) -> list[RawItem]:
-        subreddits: list[str] = self.config.extra.get("subreddits", [])
-        sort = self.config.extra.get("sort", "hot")
-        limit = min(self.config.extra.get("limit", 25), 100)
-        keyword_filter: list[str] = self.config.extra.get("keyword_filter", [])
+        raw_subs = self.config.extra.get("subreddits", [])
+        subreddits: list[str] = (
+            raw_subs if isinstance(raw_subs, list) else [raw_subs]
+        )
+        sort = str(self.config.extra.get("sort", "hot"))
+        if sort not in _VALID_SORTS:
+            logger.warning("reddit_invalid_sort", sort=sort, using="hot")
+            sort = "hot"
+        limit = min(int(self.config.extra.get("limit", 25)), 100)
+        raw_kw = self.config.extra.get("keyword_filter", [])
+        keyword_filter: list[str] = (
+            raw_kw if isinstance(raw_kw, list) else [raw_kw]
+        )
 
         if not subreddits:
             logger.warning("reddit_no_subreddits_configured")
@@ -42,6 +59,12 @@ class RedditConnector(BaseConnector):
             headers={"User-Agent": _USER_AGENT},
         ) as client:
             for subreddit in subreddits:
+                # Validate subreddit name to prevent path injection
+                if not _SUBREDDIT_RE.match(subreddit):
+                    logger.warning(
+                        "reddit_invalid_subreddit", subreddit=subreddit
+                    )
+                    continue
                 items = await self._fetch_subreddit(client, subreddit, sort, limit)
                 all_items.extend(items)
 
@@ -62,7 +85,8 @@ class RedditConnector(BaseConnector):
         sort: str,
         limit: int,
     ) -> list[RawItem]:
-        url = f"https://www.reddit.com/r/{subreddit}/{sort}.json"
+        base = self._base_url()
+        url = f"{base}/r/{subreddit}/{sort}.json"
         params = {"limit": str(limit), "raw_json": "1"}
 
         for attempt in range(3):
@@ -115,15 +139,21 @@ class RedditConnector(BaseConnector):
         created_utc = post.get("created_utc")
         occurred_at = None
         if created_utc is not None:
-            occurred_at = datetime.fromtimestamp(float(created_utc), tz=UTC)
+            try:
+                occurred_at = datetime.fromtimestamp(float(created_utc), tz=UTC)
+            except (ValueError, TypeError, OSError):
+                logger.warning("reddit_invalid_timestamp", value=created_utc)
 
         # Use selftext for text posts, otherwise the link URL
         post_url = post.get("url", "")
         permalink = post.get("permalink", "")
+        base = self._base_url()
         full_permalink = (
-            f"https://www.reddit.com{permalink}" if permalink else post_url
+            f"{base}{permalink}" if permalink else post_url
         )
 
+        # Exclude volatile fields (score, num_comments) from raw_data
+        # to keep dedupe fingerprint stable across fetches.
         return RawItem(
             title=post.get("title", ""),
             url=full_permalink,
@@ -132,11 +162,9 @@ class RedditConnector(BaseConnector):
                 "reddit_id": post.get("id", ""),
                 "subreddit": post.get("subreddit", ""),
                 "author": post.get("author", ""),
-                "score": post.get("score", 0),
                 "selftext": post.get("selftext", ""),
                 "link_url": post_url,
                 "created_utc": created_utc,
-                "num_comments": post.get("num_comments", 0),
             },
             occurred_at=occurred_at,
             source_category="social_media",

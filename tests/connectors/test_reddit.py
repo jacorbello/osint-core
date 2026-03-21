@@ -179,8 +179,9 @@ async def test_fetch_stores_raw_data(connector: RedditConnector, respx_mock):
     assert items[0].raw_data["reddit_id"] == "abc123"
     assert items[0].raw_data["subreddit"] == "netsec"
     assert items[0].raw_data["author"] == "threat_researcher"
-    assert items[0].raw_data["score"] == 452
-    assert items[0].raw_data["num_comments"] == 87
+    # Volatile fields (score, num_comments) excluded from raw_data for stable dedupe
+    assert "score" not in items[0].raw_data
+    assert "num_comments" not in items[0].raw_data
 
 
 # --- Multi-subreddit aggregation ---
