@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     # --- Shodan ---
     shodan_api_key: str = ""
 
+    # --- Telegram ---
+    telegram_bot_token: str = ""
+
     # --- Keycloak ---
     keycloak_url: str = "https://keycloak.corbello.io"
     keycloak_realm: str = "cortech"
