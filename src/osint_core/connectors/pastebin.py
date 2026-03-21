@@ -61,7 +61,7 @@ class PasteSiteConnector(BaseConnector):
                     ts = self._parse_timestamp(paste)
                     if ts is not None and ts < cutoff:
                         continue
-                    all_items.append(self._parse_paste(paste))
+                    all_items.append(self._parse_paste(paste, occurred_at=ts))
                     if len(all_items) >= max_items:
                         break
                 if len(all_items) >= max_items:
@@ -99,7 +99,7 @@ class PasteSiteConnector(BaseConnector):
     def _parse_timestamp(paste: dict[str, Any]) -> datetime | None:
         """Extract and normalise the paste timestamp to a UTC datetime."""
         timestamp_raw = paste.get("time", paste.get("date", paste.get("timestamp", "")))
-        if not timestamp_raw:
+        if timestamp_raw is None or timestamp_raw == "":
             return None
         with contextlib.suppress(ValueError, TypeError, OSError):
             if isinstance(timestamp_raw, (int, float)):
@@ -109,13 +109,21 @@ class PasteSiteConnector(BaseConnector):
             return parsed
         return None
 
-    def _parse_paste(self, paste: dict[str, Any]) -> RawItem:
+    def _parse_paste(
+        self,
+        paste: dict[str, Any],
+        *,
+        occurred_at: datetime | None = None,
+    ) -> RawItem:
         paste_id = paste.get("id", paste.get("key", ""))
         title = paste.get("title", "") or f"Paste {paste_id}"
         content = paste.get("content", paste.get("text", ""))
         author = paste.get("author", paste.get("user", "")) or "anonymous"
 
-        occurred_at = self._parse_timestamp(paste)
+        # Use the pre-parsed timestamp when provided to avoid redundant
+        # parsing; fall back to parsing here for standalone calls.
+        if occurred_at is None:
+            occurred_at = self._parse_timestamp(paste)
 
         # Run indicator extraction on the paste content.
         # Note: the ingest pipeline re-extracts from summary/title, so storing

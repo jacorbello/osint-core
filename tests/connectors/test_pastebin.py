@@ -225,3 +225,24 @@ async def test_lookback_keeps_pastes_without_timestamp():
 
     assert len(items) == 1
     assert items[0].occurred_at is None
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_epoch_zero_timestamp_is_parsed_not_treated_as_missing():
+    """A numeric timestamp of 0 should be parsed as epoch, not as missing."""
+    cfg = _make_config(lookback_hours=1)
+    respx.get("https://psbdmp.ws/api/v3/search/password").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": "epoch0", "content": "data", "time": 0},
+            ],
+        )
+    )
+    conn = PasteSiteConnector(cfg)
+    items = await conn.fetch()
+
+    # Epoch-zero is well outside a 1-hour lookback window, so it should
+    # be filtered out rather than slipping through as "no timestamp".
+    assert len(items) == 0
