@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -89,7 +89,7 @@ class PasteSiteConnector(BaseConnector):
                     if parsed.tzinfo is None:
                         parsed = parsed.replace(tzinfo=UTC)
                     else:
-                        parsed = parsed.astimezone(timezone.utc)
+                        parsed = parsed.astimezone(UTC)
                     occurred_at = parsed
 
         # Run indicator extraction on the paste content.
