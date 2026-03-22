@@ -1,28 +1,73 @@
-"""ACLED conflict event data connector."""
+"""ACLED conflict event data connector — OAuth-based auth."""
 from __future__ import annotations
 
 import contextlib
 import hashlib
+import time
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+import structlog
 
 from .base import BaseConnector, RawItem
+
+logger = structlog.get_logger()
+
+_TOKEN_URL = "https://acleddata.com/oauth/token"
+_DEFAULT_API_URL = "https://acleddata.com/api/acled/read"
+
+# Module-level token cache keyed by email so different accounts stay isolated.
+_token_cache: dict[str, dict[str, Any]] = {}
+
+
+async def _get_access_token(email: str, password: str) -> str:
+    """Return a cached Bearer token, refreshing via OAuth if expired."""
+    if not email or not password:
+        raise ValueError("ACLED email and password must be non-empty")
+
+    entry = _token_cache.get(email)
+    if entry and entry["access_token"] and time.monotonic() < entry["expires_at"]:
+        return str(entry["access_token"])
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            _TOKEN_URL,
+            data={"email": email, "password": password},
+        )
+        resp.raise_for_status()
+    body = resp.json()
+    expires_in = int(body.get("expires_in", 86400))
+    # Clamp safety margin so short-lived tokens don't expire immediately.
+    margin = min(60, int(expires_in * 0.1))
+    _token_cache[email] = {
+        "access_token": body["access_token"],
+        "expires_at": time.monotonic() + expires_in - margin,
+    }
+    logger.info("acled_token_refreshed", expires_in=expires_in, email=email)
+    return str(_token_cache[email]["access_token"])
 
 
 class AcledConnector(BaseConnector):
     async def fetch(self) -> list[RawItem]:
-        params = {
-            "key": self.config.extra.get("api_key", ""),
-            "email": self.config.extra.get("email", ""),
+        email = self.config.extra.get("email", "")
+        password = self.config.extra.get("password", "")
+        token = await _get_access_token(email, password)
+
+        params: dict[str, str] = {
             "limit": str(self.config.extra.get("max_items", 100)),
         }
         country = self.config.extra.get("country")
         if country:
             params["country"] = country
+
+        url = self.config.url or _DEFAULT_API_URL
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(self.config.url, params=params)
+            resp = await client.get(
+                url,
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+            )
             resp.raise_for_status()
         events = resp.json().get("data", [])
         return [self._parse(e) for e in events if e.get("notes")]

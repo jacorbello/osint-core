@@ -20,6 +20,12 @@ keywords:
   - weapon
   - explosive
   - hostage
+  - radicalization
+  - militia
+  - lone wolf
+  - suspicious package
+  - active shooter
+  - manhunt
   - Austin
   - Travis County
 
@@ -39,10 +45,35 @@ source_profiles:
     credibility: 2
     corroboration_required: false
     license: "public"
+  kvue_rss:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "public"
+  austin_statesman:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "public"
   fbi_news_rss:
     reliability: A
     credibility: 1
     corroboration_required: false
+    license: "public"
+  nws_austin:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public-domain"
+  acled_us:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "oauth"
+  reddit_austin:
+    reliability: D
+    credibility: 4
+    corroboration_required: true
     license: "public"
 
 sources:
@@ -51,7 +82,7 @@ sources:
     url: "https://api.gdeltproject.org/api/v2/doc/doc"
     schedule_cron: "*/30 * * * *"
     params:
-      query: "terrorism OR terrorist OR extremist OR bombing OR shooter OR attack OR threat"
+      query: "terrorism OR terrorist OR extremist OR bombing OR shooter OR attack OR threat OR militia OR radicalization"
       geo_terms: "Austin OR \"Travis County\" OR Texas"
       mode: "ArtList"
       maxrecords: "75"
@@ -72,10 +103,57 @@ sources:
     url: "https://www.kxan.com/feed/"
     schedule_cron: "*/30 * * * *"
 
+  - id: kvue_rss
+    type: rss
+    url: "https://www.kvue.com/feeds/syndication/rss/news"
+    schedule_cron: "*/30 * * * *"
+
+  - id: austin_statesman
+    type: rss
+    url: "https://www.statesman.com/rss/"
+    schedule_cron: "*/30 * * * *"
+
   - id: fbi_news_rss
     type: rss
     url: "https://www.fbi.gov/feeds/fbi-in-the-news/rss.xml"
     schedule_cron: "0 */6 * * *"
+
+  - id: nws_austin
+    type: nws_alerts
+    url: "https://api.weather.gov/alerts/active"
+    schedule_cron: "*/15 * * * *"
+    params:
+      zone: TXC453
+
+  - id: acled_us
+    type: acled_api
+    url: "https://acleddata.com/api/acled/read"
+    schedule_cron: "0 */4 * * *"
+    params:
+      email: "${OSINT_ACLED_EMAIL}"
+      password: "${OSINT_ACLED_PASSWORD}"
+      country: "United States"
+      max_items: 50
+
+  - id: reddit_austin
+    type: reddit
+    schedule_cron: "*/30 * * * *"
+    params:
+      subreddits: ["Austin", "texas", "TexasPolitics"]
+      sort: "new"
+      limit: 50
+      keyword_filter:
+        - terrorism
+        - terrorist
+        - shooting
+        - bomber
+        - explosion
+        - threat
+        - active shooter
+        - suspicious package
+        - manhunt
+        - hostage
+        - militia
 
 target_geo:
   country_codes: ["USA"]
@@ -89,7 +167,12 @@ scoring:
     gdelt_austin: 0.53
     reliefweb_crises: 0.67
     kxan_rss: 0.8
+    kvue_rss: 0.8
+    austin_statesman: 0.8
     fbi_news_rss: 1.0
+    nws_austin: 0.67
+    acled_us: 0.67
+    reddit_austin: 0.3
   ioc_match_boost: 2.0
 
 enrichment:

@@ -64,11 +64,11 @@ sources:
 
   - id: acled_conflict
     type: acled_api
-    url: "https://api.acleddata.com/acled/read"
+    url: "https://acleddata.com/api/acled/read"
     schedule_cron: "0 */4 * * *"
     params:
-      api_key: "YOUR_ACLED_API_KEY"
       email: "YOUR_ACLED_EMAIL"
+      password: "YOUR_ACLED_PASSWORD"
       max_items: 100
 
   - id: nws_alerts

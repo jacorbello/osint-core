@@ -91,11 +91,11 @@ sources:
 
   - id: acled_us
     type: acled_api
-    url: "https://api.acleddata.com/acled/read"
+    url: "https://acleddata.com/api/acled/read"
     schedule_cron: "0 */4 * * *"
     params:
-      api_key: "${OSINT_ACLED_API_KEY}"
       email: "${OSINT_ACLED_EMAIL}"
+      password: "${OSINT_ACLED_PASSWORD}"
       country: "United States"
       max_items: 50
 
