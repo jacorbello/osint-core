@@ -17,14 +17,18 @@ logger = structlog.get_logger()
 _TOKEN_URL = "https://acleddata.com/oauth/token"
 _DEFAULT_API_URL = "https://acleddata.com/api/acled/read"
 
-# Module-level token cache shared across connector instances.
-_token_cache: dict[str, Any] = {"access_token": "", "expires_at": 0.0}
+# Module-level token cache keyed by email so different accounts stay isolated.
+_token_cache: dict[str, dict[str, Any]] = {}
 
 
 async def _get_access_token(email: str, password: str) -> str:
     """Return a cached Bearer token, refreshing via OAuth if expired."""
-    if _token_cache["access_token"] and time.monotonic() < _token_cache["expires_at"]:
-        return str(_token_cache["access_token"])
+    if not email or not password:
+        raise ValueError("ACLED email and password must be non-empty")
+
+    entry = _token_cache.get(email)
+    if entry and entry["access_token"] and time.monotonic() < entry["expires_at"]:
+        return str(entry["access_token"])
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
@@ -33,12 +37,15 @@ async def _get_access_token(email: str, password: str) -> str:
         )
         resp.raise_for_status()
     body = resp.json()
-    _token_cache["access_token"] = body["access_token"]
-    # Cache with a 60-second safety margin.
     expires_in = int(body.get("expires_in", 86400))
-    _token_cache["expires_at"] = time.monotonic() + expires_in - 60
-    logger.info("acled_token_refreshed", expires_in=expires_in)
-    return str(_token_cache["access_token"])
+    # Clamp safety margin so short-lived tokens don't expire immediately.
+    margin = min(60, int(expires_in * 0.1))
+    _token_cache[email] = {
+        "access_token": body["access_token"],
+        "expires_at": time.monotonic() + expires_in - margin,
+    }
+    logger.info("acled_token_refreshed", expires_in=expires_in, email=email)
+    return str(_token_cache[email]["access_token"])
 
 
 class AcledConnector(BaseConnector):

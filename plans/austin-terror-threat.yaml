@@ -69,7 +69,7 @@ source_profiles:
     reliability: B
     credibility: 2
     corroboration_required: false
-    license: "api-key"
+    license: "oauth"
   reddit_austin:
     reliability: D
     credibility: 4
