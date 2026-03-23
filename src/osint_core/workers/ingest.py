@@ -6,6 +6,8 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,6 +30,22 @@ from osint_core.workers.nlp_enrich import nlp_enrich_task
 from osint_core.workers.score import score_event_task
 
 logger = logging.getLogger(__name__)
+
+_ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
+
+
+def _resolve_env_vars(params: dict[str, Any]) -> dict[str, Any]:
+    """Replace ``${VAR_NAME}`` placeholders in string values with env vars."""
+    resolved: dict[str, Any] = {}
+    for key, value in params.items():
+        if isinstance(value, str) and _ENV_VAR_RE.search(value):
+            resolved[key] = _ENV_VAR_RE.sub(
+                lambda m: os.environ.get(m.group(1), m.group(0)), value,
+            )
+        else:
+            resolved[key] = value
+    return resolved
+
 
 plan_store = PlanStore()
 
@@ -110,7 +128,7 @@ async def _ingest_source_async(
             type=source_cfg_dict["type"],
             url=source_cfg_dict.get("url", ""),
             weight=source_cfg_dict.get("weight", 1.0),
-            extra=source_cfg_dict.get("params", {}),
+            extra=_resolve_env_vars(source_cfg_dict.get("params", {})),
         )
 
         # Step 2: Fetch items
