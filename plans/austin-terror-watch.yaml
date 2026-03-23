@@ -34,7 +34,7 @@ source_profiles:
     credibility: 2
     corroboration_required: false
     license: "free"
-  austin_news:
+  cbsaustin_rss:
     reliability: B
     credibility: 2
     corroboration_required: false
@@ -67,9 +67,9 @@ sources:
     params:
       appname: "osint-core-cortech"
 
-  - id: austin_statesman
+  - id: cbsaustin_rss
     type: rss
-    url: "https://www.statesman.com/rss/"
+    url: "https://cbsaustin.com/news/local.rss"
     schedule_cron: "*/30 * * * *"
 
   - id: kxan_news
@@ -110,7 +110,7 @@ scoring:
   source_reputation:
     gdelt_austin_terror: 0.53
     reliefweb_us: 0.67
-    austin_statesman: 0.8
+    cbsaustin_rss: 0.8
     kxan_news: 0.8
     fbi_press: 1.0
     nws_austin: 0.67
