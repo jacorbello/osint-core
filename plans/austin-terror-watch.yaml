@@ -29,11 +29,6 @@ source_profiles:
     credibility: 3
     corroboration_required: true
     license: "free"
-  reliefweb_us:
-    reliability: B
-    credibility: 2
-    corroboration_required: false
-    license: "free"
   cbsaustin_rss:
     reliability: B
     credibility: 2
@@ -44,6 +39,21 @@ source_profiles:
     credibility: 1
     corroboration_required: false
     license: "public"
+  kxan_news:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "public"
+  nws_austin:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public-domain"
+  acled_us:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "oauth"
 
 sources:
   - id: gdelt_austin_terror
@@ -59,13 +69,6 @@ sources:
       lookback_hours: 4
       preferred_languages: ["English", "Spanish"]
       max_per_domain: 5
-
-  - id: reliefweb_us
-    type: reliefweb_api
-    url: "https://api.reliefweb.int/v2/reports"
-    schedule_cron: "0 */4 * * *"
-    params:
-      appname: "osint-core-cortech"
 
   - id: cbsaustin_rss
     type: rss
@@ -109,7 +112,6 @@ scoring:
   recency_half_life_hours: 168
   source_reputation:
     gdelt_austin_terror: 0.53
-    reliefweb_us: 0.67
     cbsaustin_rss: 0.8
     kxan_news: 0.8
     fbi_press: 1.0
