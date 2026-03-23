@@ -33,7 +33,12 @@ async def _get_access_token(email: str, password: str) -> str:
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             _TOKEN_URL,
-            data={"email": email, "password": password},
+            data={
+                "grant_type": "password",
+                "client_id": "acled",
+                "username": email,
+                "password": password,
+            },
         )
         resp.raise_for_status()
     body = resp.json()
