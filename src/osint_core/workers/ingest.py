@@ -284,18 +284,23 @@ async def _record_job(
 ) -> None:
     """Update the existing Job row (created by the API) or insert a new one."""
     celery_task_id = getattr(task_self.request, "id", None)
+    now = datetime.now(UTC)
     async with async_session() as db:
         job = None
         if celery_task_id:
             result = await db.execute(
-                select(Job).where(Job.celery_task_id == celery_task_id),
+                select(Job)
+                .where(Job.celery_task_id == celery_task_id)
+                .limit(1),
             )
             job = result.scalar_one_or_none()
         if job:
             job.status = status
             job.plan_version_id = plan_version_id
             job.output = {"ingested": ingested, "skipped": skipped, "errors": errors}
-            job.completed_at = datetime.now(UTC)
+            if not job.started_at:
+                job.started_at = now
+            job.completed_at = now
         else:
             job = Job(
                 job_type="ingest",
@@ -319,17 +324,22 @@ async def _record_failed_job(
 ) -> None:
     """Update the existing Job row as failed, or insert a new one."""
     celery_task_id = getattr(task_self.request, "id", None)
+    now = datetime.now(UTC)
     async with async_session() as db:
         job = None
         if celery_task_id:
             result = await db.execute(
-                select(Job).where(Job.celery_task_id == celery_task_id),
+                select(Job)
+                .where(Job.celery_task_id == celery_task_id)
+                .limit(1),
             )
             job = result.scalar_one_or_none()
         if job:
             job.status = "failed"
             job.error = error_msg
-            job.completed_at = datetime.now(UTC)
+            if not job.started_at:
+                job.started_at = now
+            job.completed_at = now
         else:
             job = Job(
                 job_type="ingest",
