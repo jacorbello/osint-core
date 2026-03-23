@@ -95,6 +95,11 @@ def _patch_all(mock_db, mock_plan, mock_items, extract_return=None):
     mock_job_db = AsyncMock()
     mock_job_db.add = MagicMock()
     mock_job_db.commit = AsyncMock()
+    # _record_job queries for an existing Job row by celery_task_id;
+    # in tests there is no pre-existing row so return None.
+    _job_query_result = MagicMock()
+    _job_query_result.scalar_one_or_none.return_value = None
+    mock_job_db.execute = AsyncMock(return_value=_job_query_result)
     mock_job_ctx = AsyncMock()
     mock_job_ctx.__aenter__ = AsyncMock(return_value=mock_job_db)
     mock_job_ctx.__aexit__ = AsyncMock(return_value=False)
