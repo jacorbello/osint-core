@@ -282,19 +282,37 @@ async def _record_job(
     skipped: int = 0,
     errors: int = 0,
 ) -> None:
-    """Record a Job entry for this ingest run."""
+    """Update the existing Job row (created by the API) or insert a new one."""
+    celery_task_id = getattr(task_self.request, "id", None)
+    now = datetime.now(UTC)
     async with async_session() as db:
-        job = Job(
-            job_type="ingest",
-            status=status,
-            celery_task_id=getattr(task_self.request, "id", None),
-            plan_version_id=plan_version_id,
-            input_params={"source_id": source_id, "plan_id": plan_id},
-            output={"ingested": ingested, "skipped": skipped, "errors": errors},
-            started_at=datetime.now(UTC),
-            completed_at=datetime.now(UTC),
-        )
-        db.add(job)
+        job = None
+        if celery_task_id:
+            result = await db.execute(
+                select(Job)
+                .where(Job.celery_task_id == celery_task_id)
+                .limit(1),
+            )
+            job = result.scalar_one_or_none()
+        if job:
+            job.status = status
+            job.plan_version_id = plan_version_id
+            job.output = {"ingested": ingested, "skipped": skipped, "errors": errors}
+            if not job.started_at:
+                job.started_at = now
+            job.completed_at = now
+        else:
+            job = Job(
+                job_type="ingest",
+                status=status,
+                celery_task_id=celery_task_id,
+                plan_version_id=plan_version_id,
+                input_params={"source_id": source_id, "plan_id": plan_id},
+                output={"ingested": ingested, "skipped": skipped, "errors": errors},
+                started_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
+            )
+            db.add(job)
         await db.commit()
 
 
@@ -304,16 +322,33 @@ async def _record_failed_job(
     source_id: str,
     error_msg: str,
 ) -> None:
-    """Record a failed Job entry (for config errors that don't retry)."""
+    """Update the existing Job row as failed, or insert a new one."""
+    celery_task_id = getattr(task_self.request, "id", None)
+    now = datetime.now(UTC)
     async with async_session() as db:
-        job = Job(
-            job_type="ingest",
-            status="failed",
-            celery_task_id=getattr(task_self.request, "id", None),
-            input_params={"source_id": source_id, "plan_id": plan_id},
-            error=error_msg,
-            started_at=datetime.now(UTC),
-            completed_at=datetime.now(UTC),
-        )
-        db.add(job)
+        job = None
+        if celery_task_id:
+            result = await db.execute(
+                select(Job)
+                .where(Job.celery_task_id == celery_task_id)
+                .limit(1),
+            )
+            job = result.scalar_one_or_none()
+        if job:
+            job.status = "failed"
+            job.error = error_msg
+            if not job.started_at:
+                job.started_at = now
+            job.completed_at = now
+        else:
+            job = Job(
+                job_type="ingest",
+                status="failed",
+                celery_task_id=celery_task_id,
+                input_params={"source_id": source_id, "plan_id": plan_id},
+                error=error_msg,
+                started_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
+            )
+            db.add(job)
         await db.commit()
