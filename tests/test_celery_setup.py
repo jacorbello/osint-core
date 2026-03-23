@@ -13,8 +13,13 @@ def test_celery_app_configured():
 
 def test_celery_queue_routing():
     routes = celery_app.conf.task_routes
-    assert "osint_core.workers.ingest.*" in routes
-    assert routes["osint_core.workers.ingest.*"]["queue"] == "ingest"
+    assert "osint.ingest_source" in routes
+    assert routes["osint.ingest_source"]["queue"] == "ingest"
+    assert routes["osint.score_event"]["queue"] == "score"
+    assert routes["osint.send_notification"]["queue"] == "notify"
+    assert routes["osint.vectorize_event"]["queue"] == "enrich"
+    assert routes["osint.semantic_search"]["queue"] == "enrich"
+    assert routes["osint.compile_digest"]["queue"] == "digest"
 
 
 def test_celery_serializer_settings():

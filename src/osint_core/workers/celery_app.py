@@ -38,13 +38,19 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_default_queue="osint",
     task_routes={
-        "osint_core.workers.ingest.*": {"queue": "ingest"},
-        "osint_core.workers.enrich.*": {"queue": "enrich"},
-        "osint_core.workers.score.*": {"queue": "score"},
-        "osint_core.workers.notify.*": {"queue": "notify"},
-        "osint_core.workers.digest.*": {"queue": "digest"},
-        "osint_core.workers.nlp_enrich.*": {"queue": "enrich"},
-        "osint_core.workers.retention.*": {"queue": "osint"},
+        # Route by registered task name (not module path) since tasks
+        # use custom name= overrides like "osint.ingest_source".
+        "osint.ingest_source": {"queue": "ingest"},
+        "osint.vectorize_event": {"queue": "enrich"},
+        "osint.semantic_search": {"queue": "enrich"},
+        "osint.correlate_event": {"queue": "enrich"},
+        "osint.enrich_entities": {"queue": "enrich"},
+        "osint.nlp_enrich_event": {"queue": "enrich"},
+        "osint.score_event": {"queue": "score"},
+        "osint.rescore_all_events": {"queue": "score"},
+        "osint.send_notification": {"queue": "notify"},
+        "osint.compile_digest": {"queue": "digest"},
+        "osint.purge_expired_events": {"queue": "osint"},
     },
 )
 
