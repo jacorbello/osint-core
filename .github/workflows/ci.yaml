@@ -26,7 +26,7 @@ jobs:
   # ── Stage 1: Lint (parallel with test) ──────────────────────────
   lint:
     if: ${{ !inputs.run_migrations }}
-    runs-on: [self-hosted, linux, osint-deploy]
+    runs-on: osint-core-runner
     steps:
       - uses: actions/checkout@v4
 
@@ -52,7 +52,7 @@ jobs:
   # ── Stage 1: Test (parallel with lint) ──────────────────────────
   test:
     if: ${{ !inputs.run_migrations }}
-    runs-on: [self-hosted, linux, osint-deploy]
+    runs-on: osint-core-runner
     steps:
       - uses: actions/checkout@v4
 
@@ -74,7 +74,7 @@ jobs:
 
   # ── Stage 2: Build + push Docker image (main only) ─────────────
   build:
-    runs-on: [self-hosted, linux, osint-deploy]
+    runs-on: osint-core-runner
     needs: [lint, test]
     if: github.ref == 'refs/heads/main' && !inputs.run_migrations
     outputs:
@@ -152,7 +152,7 @@ jobs:
 
   # ── Stage 3: Security scan (main only) ─────────────────────────
   scan:
-    runs-on: [self-hosted, linux, osint-deploy]
+    runs-on: osint-core-runner
     needs: build
     strategy:
       fail-fast: false
@@ -210,7 +210,7 @@ jobs:
 
   # ── Stage 3.5: Run database migrations (main only) ──────────────
   migrate:
-    runs-on: [self-hosted, linux, osint-deploy]
+    runs-on: osint-core-runner
     needs: [build, scan]
     if: >-
       always()
@@ -250,7 +250,7 @@ jobs:
 
   # ── Stage 4: Deploy to K8s via GitOps (main only) ──────────────
   deploy:
-    runs-on: [self-hosted, linux, osint-deploy]
+    runs-on: osint-core-runner
     needs: [build, scan, migrate]
     if: >-
       github.ref == 'refs/heads/main'
