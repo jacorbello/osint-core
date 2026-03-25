@@ -5,8 +5,9 @@ import time
 
 import structlog
 from celery import Celery
+from celery.beat import PersistentScheduler
 from celery.schedules import crontab
-from celery.signals import beat_init, worker_process_init
+from celery.signals import worker_process_init
 
 from osint_core.config import settings
 
@@ -37,6 +38,7 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     task_default_queue="osint",
+    beat_scheduler="osint_core.workers.celery_app:PlanScheduler",
     task_routes={
         # Route by registered task name (not module path) since tasks
         # use custom name= overrides like "osint.ingest_source".
@@ -137,15 +139,28 @@ def load_beat_schedule() -> None:
     raise last_exc
 
 
+class PlanScheduler(PersistentScheduler):
+    """Custom beat scheduler that loads plan-driven tasks before the shelve merge.
+
+    Celery's ``Service.start()`` accesses ``self.scheduler`` (triggering
+    ``PersistentScheduler.__init__`` → ``setup_schedule`` → ``merge_inplace``)
+    *before* the ``beat_init`` signal fires.  The old ``beat_init`` handler
+    therefore added plan entries to ``conf.beat_schedule`` too late — the shelve
+    had already been populated with only the static purge task.
+
+    By overriding ``setup_schedule`` we call ``load_beat_schedule`` at exactly
+    the right moment: after the shelve is opened but before ``merge_inplace``
+    reads ``conf.beat_schedule``.
+    """
+
+    def setup_schedule(self) -> None:
+        load_beat_schedule()
+        super().setup_schedule()
+
+
 @worker_process_init.connect  # type: ignore[untyped-decorator]
 def on_worker_process_init(sender: object, **kwargs: object) -> None:
     """Signal handler: initialise OpenTelemetry tracing in each worker process."""
     from osint_core.tracing import init_celery_tracing
 
     init_celery_tracing()
-
-
-@beat_init.connect  # type: ignore[untyped-decorator]
-def on_beat_init(sender: object, **kwargs: object) -> None:
-    """Signal handler: load active plan schedule when Beat starts."""
-    load_beat_schedule()

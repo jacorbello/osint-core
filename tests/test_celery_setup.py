@@ -3,7 +3,14 @@
 import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from osint_core.workers.celery_app import celery_app, load_beat_schedule
+from celery.beat import PersistentScheduler
+from celery.schedules import crontab
+
+from osint_core.workers.celery_app import (
+    PlanScheduler,
+    celery_app,
+    load_beat_schedule,
+)
 
 
 def test_celery_app_configured():
@@ -87,6 +94,73 @@ def test_load_beat_schedule_with_active_plan():
         k: v for k, v in celery_app.conf.beat_schedule.items()
         if k == "purge-expired-events-daily"
     }
+
+
+def test_plan_scheduler_is_persistent_scheduler_subclass():
+    """PlanScheduler must extend PersistentScheduler to keep shelve persistence."""
+    assert issubclass(PlanScheduler, PersistentScheduler)
+
+
+def test_plan_scheduler_loads_plans_into_beat_schedule_during_setup(tmp_path):
+    """PlanScheduler.setup_schedule loads plan tasks so merge_inplace sees them.
+
+    This is the core fix: the default beat_init signal fires AFTER the scheduler
+    is created, so dynamically-added entries never reach merge_inplace.
+    PlanScheduler calls load_beat_schedule inside setup_schedule — before
+    the parent's merge_inplace — so plan entries are present when the shelve
+    is populated.
+    """
+    mock_plan = MagicMock()
+    mock_plan.plan_id = "sched-test"
+    mock_plan.version = 1
+    mock_plan.content = {
+        "plan_id": "sched-test",
+        "sources": [
+            {"id": "src1", "type": "rss", "schedule_cron": "*/30 * * * *"},
+        ],
+    }
+
+    mock_session = AsyncMock()
+    mock_session_factory = MagicMock()
+    mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    # Snapshot and reset beat_schedule to static-only before creating the scheduler
+    original_schedule = celery_app.conf.beat_schedule.copy()
+    celery_app.conf.beat_schedule = {
+        "purge-expired-events-daily": {
+            "task": "osint.purge_expired_events",
+            "schedule": crontab(hour=3, minute=0),
+        },
+    }
+
+    with (
+        patch("osint_core.db.async_session", mock_session_factory),
+        patch(
+            "osint_core.services.plan_store.PlanStore.get_all_active",
+            new_callable=AsyncMock,
+            return_value=[mock_plan],
+        ),
+    ):
+        scheduler = PlanScheduler(
+            app=celery_app,
+            schedule_filename=str(tmp_path / "celerybeat-schedule"),
+        )
+
+    # The scheduler's internal entries must contain the plan task
+    assert "ingest-sched-test-src1" in scheduler.schedule
+    # And the static purge task must still be present
+    assert "purge-expired-events-daily" in scheduler.schedule
+
+    # Restore original schedule
+    celery_app.conf.beat_schedule = original_schedule
+
+
+def test_celery_app_uses_plan_scheduler():
+    """The celery app must be configured to use PlanScheduler as its beat scheduler."""
+    assert celery_app.conf.beat_scheduler == (
+        "osint_core.workers.celery_app:PlanScheduler"
+    )
 
 
 def test_load_beat_schedule_no_active_plans():
