@@ -122,7 +122,8 @@ async def test_generates_summary_even_when_source_summary_exists():
 
 @pytest.mark.asyncio
 async def test_nlp_disabled_when_plan_version_missing():
-    """When event has no plan_version, nlp_enabled defaults to False and task returns nlp_disabled."""
+    """When event has no plan_version, nlp_enabled defaults to False
+    and task returns nlp_disabled."""
     event = MagicMock()
     event.id = "event-no-plan"
     event.nlp_summary = None
