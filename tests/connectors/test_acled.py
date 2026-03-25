@@ -198,7 +198,7 @@ async def test_retry_on_429(monkeypatch):
 @respx.mock
 @pytest.mark.asyncio
 async def test_retry_exhausted_returns_empty(monkeypatch):
-    """After 3 retries on 429/503, connector returns empty list."""
+    """After exhausting retries on 429/503, connector returns empty list."""
     monkeypatch.setattr(acled.asyncio, "sleep", _fake_sleep)
     cfg = _make_cfg()
     _mock_token()
@@ -223,6 +223,38 @@ async def test_api_error_response_returns_empty():
     conn = AcledConnector(cfg)
     items = await conn.fetch()
     assert items == []
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_non_json_response_returns_empty():
+    """Non-JSON response body should return empty list, not crash."""
+    cfg = _make_cfg()
+    _mock_token()
+    respx.get(cfg.url).mock(
+        return_value=httpx.Response(200, text="<html>not json</html>"),
+    )
+    conn = AcledConnector(cfg)
+    items = await conn.fetch()
+    assert items == []
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_null_notes_coerced_to_empty_string():
+    """Event with notes=None should coerce to empty string, not blow up."""
+    cfg = _make_cfg()
+    _mock_token()
+    event_with_null_notes = {**_ACLED_EVENT, "notes": None, "event_type": None}
+    respx.get(cfg.url).mock(return_value=httpx.Response(200, json={
+        "status": 200,
+        "data": [event_with_null_notes],
+    }))
+    conn = AcledConnector(cfg)
+    items = await conn.fetch()
+    assert len(items) == 1
+    assert items[0].title == ""
+    assert items[0].summary == ""
 
 
 async def _fake_sleep(_seconds: float) -> None:

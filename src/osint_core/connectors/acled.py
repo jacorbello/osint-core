@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -45,8 +46,7 @@ async def _get_access_token(email: str, password: str) -> str:
             logger.error(
                 "acled_auth_failed",
                 status=resp.status_code,
-                email=email,
-                body_preview=resp.text[:200],
+                email_hash=hashlib.sha256(email.encode()).hexdigest()[:8],
             )
             raise RuntimeError(
                 f"ACLED authentication failed (HTTP {resp.status_code}): "
@@ -108,7 +108,15 @@ class AcledConnector(BaseConnector):
                 logger.error("acled_max_retries_exceeded", attempts=3)
                 return []
 
-        payload = resp.json()
+        try:
+            payload = resp.json()
+        except (json.JSONDecodeError, ValueError):
+            logger.warning(
+                "acled_non_json_response",
+                status=resp.status_code,
+                body_preview=resp.text[:200],
+            )
+            return []
         if not payload.get("success", True):
             logger.error(
                 "acled_api_error",
@@ -136,8 +144,8 @@ class AcledConnector(BaseConnector):
         lat = event.get("latitude")
         lon = event.get("longitude")
         fatalities_raw = event.get("fatalities", "0")
-        notes = event.get("notes", "")
-        event_type = event.get("event_type", "")
+        notes = event.get("notes") or ""
+        event_type = event.get("event_type") or ""
         title = f"{event_type}: {notes[:100]}" if notes else event_type
         return RawItem(
             title=title,
