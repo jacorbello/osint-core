@@ -55,20 +55,24 @@ class RssConnector(BaseConnector):
                 continue
 
             if resp.status_code in _RETRYABLE_STATUS_CODES:
-                try:
-                    retry_after = min(int(resp.headers.get("Retry-After", "10")), 60)
-                except (ValueError, TypeError):
-                    retry_after = 10
+                raw_retry = resp.headers.get("Retry-After")
+                if raw_retry is not None:
+                    try:
+                        delay = min(int(raw_retry), 60)
+                    except (ValueError, TypeError):
+                        delay = 2 ** attempt
+                else:
+                    delay = 2 ** attempt  # exponential backoff when no header
                 logger.warning(
                     "rss_retryable_http_error",
                     source_id=self.config.id,
                     url=self.config.url,
                     status=resp.status_code,
-                    retry_after=retry_after,
+                    retry_after=delay,
                     attempt=attempt + 1,
                 )
                 if attempt < _MAX_RETRIES - 1:
-                    await asyncio.sleep(retry_after)
+                    await asyncio.sleep(delay)
                 continue
 
             if resp.is_error:
