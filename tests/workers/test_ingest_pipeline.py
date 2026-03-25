@@ -190,6 +190,8 @@ async def test_ingest_creates_events():
     assert result["skipped"] == 0
     assert result["errors"] == 0
     assert result["status"] == "succeeded"
+    assert result["dispatched"] == 2
+    assert result["dispatch_failures"] == 0
 
     # Downstream tasks should be chained for each event
     assert mock_chain.call_count == 2
@@ -353,8 +355,10 @@ async def test_ingest_logs_dispatch_failure(caplog):
     ):
         result = await _ingest_source_async(task_self, "src-1", "plan-1")
 
-    # Ingest itself should still succeed even if dispatch fails
+    # Ingest records partial_success when dispatch fails
     assert result["ingested"] == 1
-    assert result["status"] == "succeeded"
+    assert result["status"] == "partial_success"
+    assert result["dispatched"] == 0
+    assert result["dispatch_failures"] == 1
     # The dispatch failure should be logged
     assert any("Failed to dispatch enrichment chain" in r.message for r in caplog.records)
