@@ -25,7 +25,57 @@ async def test_geo_terms_appended_to_query():
     conn = GdeltConnector(cfg)
     await conn.fetch()
     called_params = dict(route.calls[0].request.url.params)
-    assert "(terrorism OR attack) AND (Austin OR Texas)" in called_params.get("query", "")
+    assert called_params.get("query", "") == "(terrorism OR attack) (Austin OR Texas)"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_geo_terms_with_quoted_phrases():
+    """Quoted phrases in geo_terms must not produce nested parens (GDELT rejects them)."""
+    cfg = SourceConfig(
+        id="test", type="gdelt_api",
+        url="https://api.gdeltproject.org/api/v2/doc/doc",
+        weight=1.0,
+        extra={
+            "query": "terrorism OR terrorist OR extremist OR bombing",
+            "geo_terms": 'Austin OR "Travis County" OR Texas',
+            "preferred_languages": ["English", "Spanish"],
+            "mode": "ArtList",
+            "maxrecords": "75",
+        },
+    )
+    route = respx.get(cfg.url).mock(return_value=httpx.Response(200, json={"articles": []}))
+    conn = GdeltConnector(cfg)
+    await conn.fetch()
+    q = dict(route.calls[0].request.url.params).get("query", "")
+    # Must be flat: (OR-block) (OR-block) (OR-block) — no nested parens
+    assert "((" not in q
+    assert ") AND (" not in q
+    assert '(Austin OR "Travis County" OR Texas)' in q
+    assert "(sourcelang:English OR sourcelang:Spanish)" in q
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_geo_and_langs_no_nesting():
+    """Combined geo_terms + preferred_languages produces flat space-separated blocks."""
+    cfg = SourceConfig(
+        id="test", type="gdelt_api",
+        url="https://api.gdeltproject.org/api/v2/doc/doc",
+        weight=1.0,
+        extra={
+            "query": "conflict",
+            "geo_terms": "Austin OR Texas",
+            "preferred_languages": ["English"],
+            "mode": "ArtList",
+            "maxrecords": "100",
+        },
+    )
+    route = respx.get(cfg.url).mock(return_value=httpx.Response(200, json={"articles": []}))
+    conn = GdeltConnector(cfg)
+    await conn.fetch()
+    q = dict(route.calls[0].request.url.params).get("query", "")
+    assert q == "(conflict) (Austin OR Texas) (sourcelang:English)"
 
 
 @respx.mock
