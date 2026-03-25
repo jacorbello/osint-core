@@ -13,7 +13,7 @@ on:
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: osint-core-runner
     steps:
       - uses: actions/checkout@v4
 
