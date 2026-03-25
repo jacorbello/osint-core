@@ -139,7 +139,7 @@ def load_beat_schedule() -> None:
     raise last_exc
 
 
-class PlanScheduler(PersistentScheduler):
+class PlanScheduler(PersistentScheduler):  # type: ignore[misc]
     """Custom beat scheduler that loads plan-driven tasks before the shelve merge.
 
     Celery's ``Service.start()`` accesses ``self.scheduler`` (triggering
