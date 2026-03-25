@@ -207,16 +207,28 @@ async def _ingest_source_async(
     # Step 6: Chain downstream tasks
     # NLP enrich first, then score + vectorize + entity extraction in parallel,
     # then correlate
+    dispatched = 0
     for event_id in new_event_ids:
-        chain(
-            nlp_enrich_task.si(event_id),
-            group(
-                score_event_task.si(event_id),
-                vectorize_event_task.si(event_id),
-                enrich_entities_task.si(event_id),
-            ),
-            correlate_event_task.si(event_id),
-        ).apply_async()
+        try:
+            chain(
+                nlp_enrich_task.si(event_id),
+                group(
+                    score_event_task.si(event_id),
+                    vectorize_event_task.si(event_id),
+                    enrich_entities_task.si(event_id),
+                ),
+                correlate_event_task.si(event_id),
+            ).apply_async()
+            dispatched += 1
+        except Exception:
+            logger.exception(
+                "Failed to dispatch enrichment chain for event %s (source=%s, plan=%s)",
+                event_id, source_id, plan_id,
+            )
+    logger.info(
+        "Dispatched %d/%d enrichment chains for %s (plan=%s)",
+        dispatched, len(new_event_ids), source_id, plan_id,
+    )
 
     # Step 7: Record Job
     if errors > 0 and ingested > 0:

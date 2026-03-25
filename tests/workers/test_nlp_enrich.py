@@ -80,6 +80,67 @@ async def test_generates_summary_for_empty():
 
 
 @pytest.mark.asyncio
+async def test_generates_summary_even_when_source_summary_exists():
+    """NLP summary must be set even when the event already has a source summary (e.g. RSS).
+
+    Regression test for issue #107: the old code had
+    ``if not event.summary and result.get("summary")`` which skipped NLP
+    summary assignment when a source summary already existed.
+    """
+    event = MagicMock()
+    event.id = "event-rss"
+    event.title = "Austin bombing suspect identified"
+    event.summary = "Police have identified the suspect in the Austin bombing."
+    event.nlp_summary = None
+    event.nlp_relevance = None
+    event.plan_version = MagicMock()
+    event.plan_version.content = {
+        "enrichment": {"nlp_enabled": True, "mission": "Monitor terror threats"},
+        "keywords": ["bombing"],
+    }
+    event.metadata_ = {}
+    event.plan_version_id = "plan-uuid"
+
+    vllm_response = {
+        "summary": "Austin bombing suspect has been identified by police.",
+        "relevance": "relevant",
+        "entities": [{"name": "Austin", "type": "location"}],
+    }
+
+    engine = _mock_engine()
+    session = _mock_session(event)
+
+    with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
+         patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf, \
+         patch("osint_core.workers.nlp_enrich._call_vllm", return_value=vllm_response):
+        mock_sf.return_value = MagicMock(return_value=session)
+        result = await _enrich_event_async("event-rss")
+    assert result["status"] == "enriched"
+    assert event.nlp_summary == "Austin bombing suspect has been identified by police."
+    assert event.nlp_relevance == "relevant"
+
+
+@pytest.mark.asyncio
+async def test_nlp_disabled_when_plan_version_missing():
+    """When event has no plan_version, nlp_enabled defaults to False and task returns nlp_disabled."""
+    event = MagicMock()
+    event.id = "event-no-plan"
+    event.nlp_summary = None
+    event.nlp_relevance = None
+    event.plan_version = None
+    event.plan_version_id = "some-uuid"
+
+    engine = _mock_engine()
+    session = _mock_session(event)
+
+    with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
+         patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf:
+        mock_sf.return_value = MagicMock(return_value=session)
+        result = await _enrich_event_async("event-no-plan")
+        assert result["status"] == "nlp_disabled"
+
+
+@pytest.mark.asyncio
 async def test_stores_attack_techniques_in_metadata():
     """ATT&CK technique IDs from vLLM response are stored in event.metadata_."""
     event = MagicMock()
