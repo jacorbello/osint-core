@@ -194,10 +194,10 @@ def test_event_response_includes_nlp_fields_with_values():
         source_id="cbsaustin_rss",
         ingested_at=datetime.now(UTC),
         dedupe_fingerprint="nlp-test-1",
-        nlp_relevance="high",
+        nlp_relevance="relevant",
         nlp_summary="Bombing in downtown Austin injures three.",
     )
-    assert event.nlp_relevance == "high"
+    assert event.nlp_relevance == "relevant"
     assert event.nlp_summary == "Bombing in downtown Austin injures three."
     dumped = event.model_dump()
     assert "nlp_relevance" in dumped
@@ -214,6 +214,11 @@ def test_event_response_nlp_fields_default_to_none():
     )
     assert event.nlp_relevance is None
     assert event.nlp_summary is None
+    dumped = event.model_dump()
+    assert "nlp_relevance" in dumped
+    assert "nlp_summary" in dumped
+    assert dumped["nlp_relevance"] is None
+    assert dumped["nlp_summary"] is None
 
 
 def test_event_response_nlp_fields_from_attributes():
@@ -238,9 +243,9 @@ def test_event_response_nlp_fields_from_attributes():
         region = None
         source_category = None
         metadata_ = {}
-        nlp_relevance = "medium"
+        nlp_relevance = "tangential"
         nlp_summary = "Skirmish reported near border checkpoint."
 
     event = EventResponse.model_validate(FakeEvent(), from_attributes=True)
-    assert event.nlp_relevance == "medium"
+    assert event.nlp_relevance == "tangential"
     assert event.nlp_summary == "Skirmish reported near border checkpoint."
