@@ -50,7 +50,7 @@ source_profiles:
     credibility: 2
     corroboration_required: false
     license: "public"
-  austin_monitor_rss:
+  fox7austin_rss:
     reliability: B
     credibility: 2
     corroboration_required: false
@@ -106,10 +106,10 @@ sources:
     url: "https://cbsaustin.com/news/local.rss"
     schedule_cron: "*/30 * * * *"
 
-  - id: austin_monitor_rss
+  - id: fox7austin_rss
     type: rss
-    url: "https://www.austinmonitor.com/feed/"
-    schedule_cron: "0 */2 * * *"
+    url: "https://www.fox7austin.com/rss/category/local-news"
+    schedule_cron: "*/30 * * * *"
 
   - id: fbi_news_rss
     type: rss
@@ -166,7 +166,7 @@ scoring:
     kxan_rss: 0.8
     kvue_rss: 0.8
     cbsaustin_rss: 0.8
-    austin_monitor_rss: 0.75
+    fox7austin_rss: 0.8
     fbi_news_rss: 1.0
     nws_austin: 0.67
     acled_us: 0.67
