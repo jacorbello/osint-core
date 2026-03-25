@@ -99,15 +99,18 @@ class GdeltConnector(BaseConnector):
         geo_terms = self.config.extra.get("geo_terms")
         langs = self.config.extra.get("preferred_languages", [])
 
-        query = base
+        # GDELT only supports parentheses around flat OR blocks — no nesting.
+        # Space-separated blocks are auto-ANDed by the API, so we keep each
+        # OR-group in its own parens and join them with spaces (implicit AND).
+        has_extra = bool(geo_terms) or bool(langs)
+        parts: list[str] = [f"({base})" if has_extra else base] if base else []
         if geo_terms:
-            query = f"({base}) AND ({geo_terms})"
-
+            parts.append(f"({geo_terms})")
         if langs:
             lang_parts = " OR ".join(f"sourcelang:{lang}" for lang in langs)
-            query = f"({query}) AND ({lang_parts})"
+            parts.append(f"({lang_parts})")
 
-        return str(query)
+        return " ".join(parts)
 
     def _cap_per_domain(self, articles: list[dict[str, Any]], cap: int) -> list[dict[str, Any]]:
         counts: Counter[str] = Counter()
