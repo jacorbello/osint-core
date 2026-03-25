@@ -127,33 +127,33 @@ def test_plan_scheduler_loads_plans_into_beat_schedule_during_setup(tmp_path):
 
     # Snapshot and reset beat_schedule to static-only before creating the scheduler
     original_schedule = celery_app.conf.beat_schedule.copy()
-    celery_app.conf.beat_schedule = {
-        "purge-expired-events-daily": {
-            "task": "osint.purge_expired_events",
-            "schedule": crontab(hour=3, minute=0),
-        },
-    }
+    try:
+        celery_app.conf.beat_schedule = {
+            "purge-expired-events-daily": {
+                "task": "osint.purge_expired_events",
+                "schedule": crontab(hour=3, minute=0),
+            },
+        }
 
-    with (
-        patch("osint_core.db.async_session", mock_session_factory),
-        patch(
-            "osint_core.services.plan_store.PlanStore.get_all_active",
-            new_callable=AsyncMock,
-            return_value=[mock_plan],
-        ),
-    ):
-        scheduler = PlanScheduler(
-            app=celery_app,
-            schedule_filename=str(tmp_path / "celerybeat-schedule"),
-        )
+        with (
+            patch("osint_core.db.async_session", mock_session_factory),
+            patch(
+                "osint_core.services.plan_store.PlanStore.get_all_active",
+                new_callable=AsyncMock,
+                return_value=[mock_plan],
+            ),
+        ):
+            scheduler = PlanScheduler(
+                app=celery_app,
+                schedule_filename=str(tmp_path / "celerybeat-schedule"),
+            )
 
-    # The scheduler's internal entries must contain the plan task
-    assert "ingest-sched-test-src1" in scheduler.schedule
-    # And the static purge task must still be present
-    assert "purge-expired-events-daily" in scheduler.schedule
-
-    # Restore original schedule
-    celery_app.conf.beat_schedule = original_schedule
+        # The scheduler's internal entries must contain the plan task
+        assert "ingest-sched-test-src1" in scheduler.schedule
+        # And the static purge task must still be present
+        assert "purge-expired-events-daily" in scheduler.schedule
+    finally:
+        celery_app.conf.beat_schedule = original_schedule
 
 
 def test_celery_app_uses_plan_scheduler():
