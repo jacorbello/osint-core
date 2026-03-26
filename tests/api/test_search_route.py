@@ -31,6 +31,8 @@ def _make_event(event_id: uuid.UUID | None = None) -> MagicMock:
     e.country_code = None
     e.region = None
     e.source_category = None
+    e.nlp_relevance = None
+    e.nlp_summary = None
     e.metadata_ = {}
     return e
 

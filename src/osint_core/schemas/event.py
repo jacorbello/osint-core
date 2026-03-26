@@ -38,6 +38,10 @@ class EventResponse(BaseModel):
     region: str | None = None
     source_category: str | None = None
 
+    # NLP enrichment fields
+    nlp_relevance: str | None = None
+    nlp_summary: str | None = None
+
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
 
 

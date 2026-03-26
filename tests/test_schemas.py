@@ -185,3 +185,67 @@ def test_event_response_includes_geo_fields():
         source_category="military",
     )
     assert event.region == "Eastern Europe"
+
+
+def test_event_response_includes_nlp_fields_with_values():
+    event = EventResponse(
+        id=uuid.uuid4(),
+        event_type="terror_attack",
+        source_id="cbsaustin_rss",
+        ingested_at=datetime.now(UTC),
+        dedupe_fingerprint="nlp-test-1",
+        nlp_relevance="relevant",
+        nlp_summary="Bombing in downtown Austin injures three.",
+    )
+    assert event.nlp_relevance == "relevant"
+    assert event.nlp_summary == "Bombing in downtown Austin injures three."
+    dumped = event.model_dump()
+    assert "nlp_relevance" in dumped
+    assert "nlp_summary" in dumped
+
+
+def test_event_response_nlp_fields_default_to_none():
+    event = EventResponse(
+        id=uuid.uuid4(),
+        event_type="cve_published",
+        source_id="nvd_feeds_recent",
+        ingested_at=datetime.now(UTC),
+        dedupe_fingerprint="nlp-test-2",
+    )
+    assert event.nlp_relevance is None
+    assert event.nlp_summary is None
+    dumped = event.model_dump()
+    assert "nlp_relevance" in dumped
+    assert "nlp_summary" in dumped
+    assert dumped["nlp_relevance"] is None
+    assert dumped["nlp_summary"] is None
+
+
+def test_event_response_nlp_fields_from_attributes():
+    """Simulate from_attributes mapping like SQLAlchemy -> Pydantic."""
+
+    class FakeEvent:
+        id = uuid.uuid4()
+        event_type = "conflict"
+        source_id = "gdelt_global"
+        ingested_at = datetime.now(UTC)
+        dedupe_fingerprint = "nlp-test-3"
+        title = None
+        summary = None
+        raw_excerpt = None
+        occurred_at = None
+        score = None
+        severity = None
+        plan_version_id = None
+        latitude = None
+        longitude = None
+        country_code = None
+        region = None
+        source_category = None
+        metadata_ = {}
+        nlp_relevance = "tangential"
+        nlp_summary = "Skirmish reported near border checkpoint."
+
+    event = EventResponse.model_validate(FakeEvent(), from_attributes=True)
+    assert event.nlp_relevance == "tangential"
+    assert event.nlp_summary == "Skirmish reported near border checkpoint."
