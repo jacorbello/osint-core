@@ -113,6 +113,7 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
     async with session_factory() as db:
         event = await db.get(Event, event_id)
         if event is None:
+            logger.warning("NLP enrich: event %s not found in DB", event_id)
             await engine.dispose()
             return {"event_id": event_id, "status": "not_found"}
 
@@ -123,9 +124,19 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
         plan_content: dict[str, Any] = {}
         if event.plan_version:
             plan_content = event.plan_version.content or {}
+        else:
+            logger.warning(
+                "NLP enrich: event %s has no plan_version (plan_version_id=%s)",
+                event_id, event.plan_version_id,
+            )
 
         enrichment = plan_content.get("enrichment", {})
         if not enrichment.get("nlp_enabled", False):
+            logger.info(
+                "NLP enrich: skipping event %s — nlp_enabled is false "
+                "(plan_version_id=%s, has_plan_version=%s)",
+                event_id, event.plan_version_id, event.plan_version is not None,
+            )
             await engine.dispose()
             return {"event_id": event_id, "status": "nlp_disabled"}
 
@@ -152,7 +163,7 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
             await engine.dispose()
             return {"event_id": event_id, "status": "fallback"}
 
-        if not event.summary and result.get("summary"):
+        if result.get("summary"):
             event.nlp_summary = result["summary"]
 
         relevance = result.get("relevance", "")

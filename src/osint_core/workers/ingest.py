@@ -207,22 +207,37 @@ async def _ingest_source_async(
     # Step 6: Chain downstream tasks
     # NLP enrich first, then score + vectorize + entity extraction in parallel,
     # then correlate
+    dispatched = 0
     for event_id in new_event_ids:
-        chain(
-            nlp_enrich_task.si(event_id),
-            group(
-                score_event_task.si(event_id),
-                vectorize_event_task.si(event_id),
-                enrich_entities_task.si(event_id),
-            ),
-            correlate_event_task.si(event_id),
-        ).apply_async()
+        try:
+            chain(
+                nlp_enrich_task.si(event_id),
+                group(
+                    score_event_task.si(event_id),
+                    vectorize_event_task.si(event_id),
+                    enrich_entities_task.si(event_id),
+                ),
+                correlate_event_task.si(event_id),
+            ).apply_async()
+            dispatched += 1
+        except Exception:
+            logger.exception(
+                "Failed to dispatch enrichment chain for event %s (source=%s, plan=%s)",
+                event_id, source_id, plan_id,
+            )
+    logger.info(
+        "Dispatched %d/%d enrichment chains for %s (plan=%s)",
+        dispatched, len(new_event_ids), source_id, plan_id,
+    )
 
     # Step 7: Record Job
+    dispatch_failures = len(new_event_ids) - dispatched
     if errors > 0 and ingested > 0:
         job_status = "partial_success"
     elif errors > 0:
         job_status = "failed"
+    elif dispatch_failures > 0:
+        job_status = "partial_success"
     else:
         job_status = "succeeded"
 
@@ -230,6 +245,7 @@ async def _ingest_source_async(
         await _record_job(
             task_self, plan_version_id, source_id, plan_id,
             job_status, ingested, skipped, errors,
+            dispatched=dispatched, dispatch_failures=dispatch_failures,
         )
     except Exception:
         logger.exception("Failed to record job for %s", source_id)
@@ -241,6 +257,8 @@ async def _ingest_source_async(
         "ingested": ingested,
         "skipped": skipped,
         "errors": errors,
+        "dispatched": dispatched,
+        "dispatch_failures": dispatch_failures,
     }
 
 
@@ -299,10 +317,22 @@ async def _record_job(
     ingested: int = 0,
     skipped: int = 0,
     errors: int = 0,
+    *,
+    dispatched: int | None = None,
+    dispatch_failures: int | None = None,
 ) -> None:
     """Update the existing Job row (created by the API) or insert a new one."""
     celery_task_id = getattr(task_self.request, "id", None)
     now = datetime.now(UTC)
+    output: dict[str, Any] = {
+        "ingested": ingested,
+        "skipped": skipped,
+        "errors": errors,
+    }
+    if dispatched is not None:
+        output["dispatched"] = dispatched
+    if dispatch_failures is not None:
+        output["dispatch_failures"] = dispatch_failures
     async with async_session() as db:
         job = None
         if celery_task_id:
@@ -315,7 +345,7 @@ async def _record_job(
         if job:
             job.status = status
             job.plan_version_id = plan_version_id
-            job.output = {"ingested": ingested, "skipped": skipped, "errors": errors}
+            job.output = output
             if not job.started_at:
                 job.started_at = now
             job.completed_at = now
@@ -326,7 +356,7 @@ async def _record_job(
                 celery_task_id=celery_task_id,
                 plan_version_id=plan_version_id,
                 input_params={"source_id": source_id, "plan_id": plan_id},
-                output={"ingested": ingested, "skipped": skipped, "errors": errors},
+                output=output,
                 started_at=datetime.now(UTC),
                 completed_at=datetime.now(UTC),
             )

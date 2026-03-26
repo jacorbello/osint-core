@@ -190,6 +190,8 @@ async def test_ingest_creates_events():
     assert result["skipped"] == 0
     assert result["errors"] == 0
     assert result["status"] == "succeeded"
+    assert result["dispatched"] == 2
+    assert result["dispatch_failures"] == 0
 
     # Downstream tasks should be chained for each event
     assert mock_chain.call_count == 2
@@ -311,3 +313,52 @@ async def test_ingest_error_rate_threshold():
         pytest.raises(RuntimeError, match="High error rate"),
     ):
         await _ingest_source_async(task_self, "src-1", "plan-1")
+
+
+@pytest.mark.asyncio
+async def test_ingest_logs_dispatch_failure(caplog):
+    """When apply_async() raises, the error is logged and ingest still succeeds."""
+    plan = _make_plan()
+    items = [_make_raw_item("Item 1", "https://a.com/1")]
+    mock_db = _make_mock_db()
+    patches = _patch_all(mock_db, plan, items)
+    task_self = _mock_task_self()
+
+    event_ids = [uuid.uuid4()]
+    event_id_iter = iter(event_ids)
+
+    original_add = mock_db.add
+
+    def side_effect_add(obj):
+        if hasattr(obj, "event_type"):
+            obj.id = next(event_id_iter)
+        return original_add(obj)
+
+    mock_db.add = MagicMock(side_effect=side_effect_add)
+
+    mock_chain = MagicMock()
+    mock_chain.return_value.apply_async = MagicMock(
+        side_effect=ConnectionError("broker unreachable")
+    )
+
+    with (
+        patch("osint_core.workers.ingest.async_session", patches["async_session"]),
+        patch("osint_core.workers.ingest.plan_store", patches["plan_store"]),
+        patch("osint_core.workers.ingest.registry", patches["registry"]),
+        patch("osint_core.workers.ingest.score_event_task", patches["score_event_task"]),
+        patch("osint_core.workers.ingest.vectorize_event_task", patches["vectorize_event_task"]),
+        patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
+        patch("osint_core.workers.ingest.nlp_enrich_task", MagicMock()),
+        patch("osint_core.workers.ingest.chain", mock_chain),
+        patch("osint_core.workers.ingest.group", MagicMock()),
+        patch("osint_core.workers.ingest.extract_indicators", return_value=[]),
+    ):
+        result = await _ingest_source_async(task_self, "src-1", "plan-1")
+
+    # Ingest records partial_success when dispatch fails
+    assert result["ingested"] == 1
+    assert result["status"] == "partial_success"
+    assert result["dispatched"] == 0
+    assert result["dispatch_failures"] == 1
+    # The dispatch failure should be logged
+    assert any("Failed to dispatch enrichment chain" in r.message for r in caplog.records)
