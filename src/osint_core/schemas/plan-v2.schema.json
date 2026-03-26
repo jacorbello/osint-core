@@ -149,7 +149,8 @@
             "abusech_feodotracker",
             "acled_api",
             "nws_alerts",
-            "reddit"
+            "reddit",
+            "xai_x_search"
           ],
           "description": "Source collector type."
         },

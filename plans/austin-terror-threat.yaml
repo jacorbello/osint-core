@@ -75,6 +75,11 @@ source_profiles:
     credibility: 4
     corroboration_required: true
     license: "public"
+  x_austin_threats:
+    reliability: D
+    credibility: 4
+    corroboration_required: true
+    license: "api"
 
 sources:
   - id: gdelt_austin
@@ -153,6 +158,25 @@ sources:
         - hostage
         - militia
 
+  - id: x_austin_threats
+    type: xai_x_search
+    schedule_cron: "0 */2 * * *"
+    params:
+      api_key: "${OSINT_XAI_API_KEY}"
+      model: "grok-4.20-reasoning"
+      lookback_hours: 24
+      max_results: 50
+      enable_image_understanding: true
+      searches:
+        - "(shooting OR shooter OR gunfire) (Austin OR \"Travis County\") lang:en"
+        - "(bomb OR explosion OR suspicious package) Austin lang:en"
+        - "(terrorism OR terrorist OR extremist) Texas lang:en"
+        - "reports of active shooter or gunfire in Austin Texas area"
+        - "suspicious activity or bomb threat near Austin Texas"
+        - "mass casualty event or hostage situation in Central Texas"
+      geo_terms: "Austin OR Travis County OR Central Texas"
+      mission: "Monitor terrorism, extremism, and mass violence threats in Austin, TX"
+
 target_geo:
   country_codes: ["USA"]
   lat: 30.2672
@@ -171,6 +195,7 @@ scoring:
     nws_austin: 0.67
     acled_us: 0.67
     reddit_austin: 0.3
+    x_austin_threats: 0.4
   ioc_match_boost: 2.0
 
 enrichment:
