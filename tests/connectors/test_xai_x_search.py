@@ -25,24 +25,22 @@ SAMPLE_JSON_RESPONSE = {
             "content": [
                 {
                     "type": "output_text",
-                    "text": json.dumps({
-                        "tweets": [
-                            {
-                                "tweet_url": "https://x.com/AustinPD/status/111111",
-                                "author": "@AustinPD",
-                                "text": "APD responding to reports of shots fired near downtown.",
-                                "timestamp": "2026-03-26T10:30:00Z",
-                                "category": "Active Shooter",
-                            },
-                            {
-                                "tweet_url": "https://x.com/KVUE/status/222222",
-                                "author": "@KVUE",
-                                "text": "Breaking: police activity reported near Congress Ave.",
-                                "timestamp": "2026-03-26T10:45:00Z",
-                                "category": "Law Enforcement",
-                            },
-                        ],
-                    }),
+                    "text": json.dumps([
+                        {
+                            "tweet_url": "https://x.com/AustinPD/status/111111",
+                            "author": "@AustinPD",
+                            "text": "APD responding to reports of shots fired near downtown.",
+                            "timestamp": "2026-03-26T10:30:00Z",
+                            "category": "Active Shooter",
+                        },
+                        {
+                            "tweet_url": "https://x.com/KVUE/status/222222",
+                            "author": "@KVUE",
+                            "text": "Breaking: police activity reported near Congress Ave.",
+                            "timestamp": "2026-03-26T10:45:00Z",
+                            "category": "Law Enforcement",
+                        },
+                    ]),
                     "annotations": [
                         {
                             "type": "url_citation",
@@ -176,6 +174,7 @@ async def test_fetch_fallback_to_annotations(
     assert items[0].url == "https://x.com/AlertAustin/status/333333"
     assert items[0].raw_data["author"] == "@AlertAustin"
     assert items[1].raw_data["author"] == "@TravisCoSO"
+    assert items[0].raw_data["category"] == "x_search"
 
 
 @pytest.mark.asyncio
@@ -342,7 +341,7 @@ async def test_max_results_caps_output(respx_mock):
             "role": "assistant",
             "content": [{
                 "type": "output_text",
-                "text": json.dumps({"tweets": tweets}),
+                "text": json.dumps(tweets),
                 "annotations": [],
             }],
         }],
