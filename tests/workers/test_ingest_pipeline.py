@@ -183,6 +183,11 @@ async def test_ingest_creates_events():
             "osint_core.workers.ingest.extract_indicators",
             return_value=[{"type": "cve", "value": "CVE-2025-0001"}],
         ),
+        patch(
+            "osint_core.workers.ingest._upsert_indicator",
+            new_callable=AsyncMock,
+            return_value=MagicMock(id=uuid.uuid4()),
+        ),
     ):
         result = await _ingest_source_async(task_self, "src-1", "plan-1")
 
@@ -362,3 +367,81 @@ async def test_ingest_logs_dispatch_failure(caplog):
     assert result["dispatch_failures"] == 1
     # The dispatch failure should be logged
     assert any("Failed to dispatch enrichment chain" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests – MissingGreenlet fix
+# ---------------------------------------------------------------------------
+
+
+def test_event_indicators_append_after_hydration():
+    """Setting event.indicators = [] allows append without lazy-load trigger."""
+    from osint_core.models.event import Event as RealEvent
+
+    event = RealEvent(
+        event_type="rss",
+        source_id="test",
+        title="Test",
+        dedupe_fingerprint="abc123",
+    )
+    event.indicators = []
+    mock_indicator = MagicMock()
+    mock_indicator.id = uuid.uuid4()
+    event.indicators.append(mock_indicator)
+    assert len(event.indicators) == 1
+    assert event.indicators[0] is mock_indicator
+
+
+@pytest.mark.asyncio
+async def test_ingest_with_indicators_no_greenlet_error():
+    """Pipeline with indicators returned does not raise MissingGreenlet."""
+    plan = _make_plan()
+    items = [_make_raw_item("Evil Item", "https://evil.example.com/1")]
+    mock_db = _make_mock_db()
+    task_self = _mock_task_self()
+
+    event_ids = [uuid.uuid4()]
+    event_id_iter = iter(event_ids)
+    original_add = mock_db.add
+
+    def side_effect_add(obj):
+        if hasattr(obj, "event_type"):
+            obj.id = next(event_id_iter)
+        return original_add(obj)
+
+    mock_db.add = MagicMock(side_effect=side_effect_add)
+
+    mock_indicator = MagicMock()
+    mock_indicator.id = uuid.uuid4()
+
+    indicator_dicts = [{"type": "domain", "value": "evil.example.com"}]
+    patches = _patch_all(mock_db, plan, items, extract_return=indicator_dicts)
+
+    mock_chain = MagicMock()
+    mock_chain.return_value.apply_async = MagicMock()
+
+    with (
+        patch("osint_core.workers.ingest.async_session", patches["async_session"]),
+        patch("osint_core.workers.ingest.plan_store", patches["plan_store"]),
+        patch("osint_core.workers.ingest.registry", patches["registry"]),
+        patch("osint_core.workers.ingest.score_event_task", patches["score_event_task"]),
+        patch("osint_core.workers.ingest.vectorize_event_task", patches["vectorize_event_task"]),
+        patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
+        patch("osint_core.workers.ingest.nlp_enrich_task", MagicMock()),
+        patch("osint_core.workers.ingest.chain", mock_chain),
+        patch("osint_core.workers.ingest.group", MagicMock()),
+        patch(
+            "osint_core.workers.ingest.extract_indicators",
+            return_value=indicator_dicts,
+        ),
+        patch(
+            "osint_core.workers.ingest._upsert_indicator",
+            new_callable=AsyncMock,
+            return_value=mock_indicator,
+        ),
+    ):
+        result = await _ingest_source_async(task_self, "src-1", "plan-1")
+
+    assert result["ingested"] == 1
+    assert result["errors"] == 0
+    assert result["status"] == "succeeded"

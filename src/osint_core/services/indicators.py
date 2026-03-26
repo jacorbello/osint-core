@@ -8,6 +8,8 @@ import re
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+import tldextract
+
 # ---------------------------------------------------------------------------
 # Regex patterns for indicator types
 # ---------------------------------------------------------------------------
@@ -72,11 +74,14 @@ def extract_indicators(text: str) -> list[dict[str, Any]]:
     for m in _IPV4_RE.finditer(text):
         _add("ip", m.group())
 
-    # Domains — skip any that fall inside a URL span
+    # Domains — skip any that fall inside a URL span, then validate TLD
     for m in _DOMAIN_RE.finditer(text):
         start, end = m.start(), m.end()
         in_url = any(us <= start and end <= ue for us, ue in url_spans)
-        if not in_url:
+        if in_url:
+            continue
+        extracted = tldextract.extract(m.group())
+        if extracted.suffix:  # has a real TLD per Public Suffix List
             _add("domain", m.group())
 
     return results

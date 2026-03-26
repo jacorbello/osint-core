@@ -17,6 +17,9 @@ sources:
     type: nvd_json_feed
     url: "https://services.nvd.nist.gov/rest/json/cves/2.0"
     schedule_cron: "15 */2 * * *"
+    params:
+      lookback_hours: 48
+      max_pages: 5
 
   - id: osv_pypi
     type: osv_api

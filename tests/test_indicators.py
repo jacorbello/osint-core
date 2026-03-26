@@ -97,3 +97,38 @@ def test_extract_deduplicates():
     indicators = extract_indicators(text)
     cves = [i for i in indicators if i["type"] == "cve"]
     assert len(cves) == 1
+
+
+class TestDomainFalsePositives:
+    """Regression tests: sentence fragments must not be extracted as domains."""
+
+    def test_word_dot_word_not_domain(self):
+        text = "The robbery occurred last month.The suspect fled on foot."
+        indicators = extract_indicators(text)
+        domains = [i for i in indicators if i["type"] == "domain"]
+        assert domains == []
+
+    def test_multiple_false_positives_rejected(self):
+        for fragment in [
+            "night.Deputies responded to the scene",
+            "damages.The fire was caused by",
+            "Safety.Troopers arrived at the scene",
+            "families.Principal Smith addressed",
+        ]:
+            indicators = extract_indicators(fragment)
+            domains = [i for i in indicators if i["type"] == "domain"]
+            assert domains == [], f"False positive domain in: {fragment!r}"
+
+    def test_valid_domain_still_extracted(self):
+        text = "Malware phones home to evil.example.com for C2"
+        indicators = extract_indicators(text)
+        domains = [i for i in indicators if i["type"] == "domain"]
+        assert any(i["value"] == "evil.example.com" for i in domains)
+
+    def test_multi_level_tld_extracted(self):
+        text = "C2 at sub.domain.co.uk and also malware.gov.ru"
+        indicators = extract_indicators(text)
+        domains = [i for i in indicators if i["type"] == "domain"]
+        values = {d["value"] for d in domains}
+        assert "sub.domain.co.uk" in values
+        assert "malware.gov.ru" in values
