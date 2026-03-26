@@ -141,22 +141,54 @@ def connector(config: SourceConfig) -> XaiXSearchConnector:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_fetch_parses_json_response(
+async def test_fetch_extracts_from_annotations_with_context(
     connector: XaiXSearchConnector, respx_mock,
 ):
-    """JSON array in Grok's text output is parsed into RawItems."""
+    """When response has annotations, tweets are extracted from citations (primary path)."""
     respx_mock.post("https://api.x.ai/v1/responses").mock(
         return_value=httpx.Response(200, json=SAMPLE_JSON_RESPONSE),
     )
     items = await connector.fetch()
 
     assert len(items) == 2
-    assert items[0].title == "@AustinPD: APD responding to reports of shots fired near downtown."
     assert items[0].url == "https://x.com/AustinPD/status/111111"
     assert items[0].source_category == "social_media"
     assert items[0].raw_data["author"] == "@AustinPD"
-    assert items[0].occurred_at == datetime(2026, 3, 26, 10, 30, tzinfo=UTC)
-    assert items[1].raw_data["category"] == "Law Enforcement"
+    assert items[1].url == "https://x.com/KVUE/status/222222"
+
+
+@pytest.mark.asyncio
+async def test_fetch_falls_back_to_json_when_no_annotations(
+    connector: XaiXSearchConnector, respx_mock,
+):
+    """When no annotations, JSON parsing is used as fallback."""
+    response_no_annotations = {
+        "id": "resp_json_only",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": json.dumps([{
+                    "tweet_url": "https://x.com/TestUser/status/999999",
+                    "author": "@TestUser",
+                    "text": "Test tweet content",
+                    "timestamp": "2026-03-26T10:00:00Z",
+                    "category": "Test",
+                }]),
+                "annotations": [],
+            }],
+        }],
+    }
+    respx_mock.post("https://api.x.ai/v1/responses").mock(
+        return_value=httpx.Response(200, json=response_no_annotations),
+    )
+    items = await connector.fetch()
+
+    assert len(items) == 1
+    assert items[0].url == "https://x.com/TestUser/status/999999"
+    assert items[0].raw_data["author"] == "@TestUser"
+    assert items[0].occurred_at == datetime(2026, 3, 26, 10, 0, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

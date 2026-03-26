@@ -66,9 +66,12 @@ class XaiXSearchConnector(BaseConnector):
             return []
 
         data = resp.json()
-        items = self._parse_json_response(data)
+        # Primary: extract tweets from annotations (Grok's native
+        # citation behavior with x_search). Fallback: try JSON parsing
+        # in case the model returned structured data.
+        items = self._parse_annotation_fallback(data)
         if not items:
-            items = self._parse_annotation_fallback(data)
+            items = self._parse_json_response(data)
 
         return items[:max_results]
 
@@ -99,17 +102,14 @@ class XaiXSearchConnector(BaseConnector):
             search_lines,
             "",
             "## OUTPUT FORMAT",
-            "Return a JSON array. Each item must have:",
-            "- tweet_url: full URL (https://x.com/username/status/id)",
-            "- author: @username of the tweet author",
-            "- text: tweet text (first 500 chars)",
-            "- timestamp: ISO 8601 when posted (YYYY-MM-DDTHH:MM:SSZ)",
-            "- category: short label for the type of signal",
+            f"Report the top {max_results} most relevant tweets you find. "
+            "For EACH tweet, write a short paragraph that includes:",
+            "- The @username of the author",
+            "- What the tweet says (quote or paraphrase the key content)",
+            "- Why it is relevant to the mission",
             "",
-            f"Return at most {max_results} tweets. "
-            "Return ONLY the JSON array, no other text. "
-            "Deduplicate — if the same tweet matches multiple searches, "
-            "include it only once.",
+            "Write in plain text. Include the tweet URL inline so it "
+            "appears as a citation. Do NOT return JSON.",
         ]
 
         return "\n".join(parts)
