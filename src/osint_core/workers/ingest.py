@@ -182,9 +182,10 @@ async def _ingest_source_async(
                         f"{item.title} {item.summary}"
                     )
                     # Hydrate collection to avoid MissingGreenlet from
-                    # selectin lazy loader on a new (unflushed) Event.
-                    # Safe here because event is newly created — no
-                    # pre-existing indicators to preserve.
+                    # selectin lazy loader on a newly created Event whose
+                    # relationship collections have not been loaded.
+                    # Safe here because event is new — no pre-existing
+                    # indicators to preserve.
                     if indicator_dicts:
                         event.indicators = []
                     for ind_dict in indicator_dicts:

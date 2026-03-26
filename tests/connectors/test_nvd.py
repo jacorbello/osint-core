@@ -1,7 +1,6 @@
 """Tests for the NVD API 2.0 feed connector."""
 
-from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -264,7 +263,13 @@ async def test_fetch_empty_results(connector: NvdConnector, respx_mock):
 
 @pytest.fixture()
 def config_with_lookback() -> SourceConfig:
-    return SourceConfig(id="nvd", type="nvd", url="https://services.nvd.nist.gov/rest/json/cves/2.0", weight=0.8, extra={"lookback_hours": 24})
+    return SourceConfig(
+        id="nvd",
+        type="nvd",
+        url="https://services.nvd.nist.gov/rest/json/cves/2.0",
+        weight=0.8,
+        extra={"lookback_hours": 24},
+    )
 
 
 @pytest.fixture()
@@ -274,7 +279,15 @@ def connector_with_lookback(config_with_lookback: SourceConfig) -> NvdConnector:
 
 @pytest.mark.asyncio
 async def test_lookback_hours_sends_date_params(connector_with_lookback: NvdConnector, respx_mock):
-    route = respx_mock.get(connector_with_lookback.config.url).mock(return_value=httpx.Response(200, json={"resultsPerPage": 0, "startIndex": 0, "totalResults": 0, "vulnerabilities": []}))
+    empty_resp = {
+        "resultsPerPage": 0,
+        "startIndex": 0,
+        "totalResults": 0,
+        "vulnerabilities": [],
+    }
+    route = respx_mock.get(connector_with_lookback.config.url).mock(
+        return_value=httpx.Response(200, json=empty_resp),
+    )
     await connector_with_lookback.fetch()
     request = route.calls[0].request
     assert "lastModStartDate" in str(request.url)
@@ -284,18 +297,28 @@ async def test_lookback_hours_sends_date_params(connector_with_lookback: NvdConn
 
 @pytest.mark.asyncio
 async def test_no_lookback_sends_no_date_filter(connector: NvdConnector, respx_mock):
-    route = respx_mock.get(connector.config.url).mock(return_value=httpx.Response(200, json=SAMPLE_NVD_RESPONSE))
+    route = respx_mock.get(connector.config.url).mock(
+        return_value=httpx.Response(200, json=SAMPLE_NVD_RESPONSE),
+    )
     await connector.fetch()
     assert "lastModStartDate" not in str(route.calls[0].request.url)
 
 
 @pytest.mark.asyncio
 async def test_max_pages_caps_pagination(respx_mock):
-    cfg = SourceConfig(id="nvd", type="nvd", url="https://services.nvd.nist.gov/rest/json/cves/2.0", weight=0.8, extra={"max_pages": 1})
+    cfg = SourceConfig(
+        id="nvd",
+        type="nvd",
+        url="https://services.nvd.nist.gov/rest/json/cves/2.0",
+        weight=0.8,
+        extra={"max_pages": 1},
+    )
     connector = NvdConnector(cfg)
     page1 = SAMPLE_NVD_RESPONSE.copy()
     page1["totalResults"] = 10000
-    route = respx_mock.get(cfg.url).mock(return_value=httpx.Response(200, json=page1))
+    route = respx_mock.get(cfg.url).mock(
+        return_value=httpx.Response(200, json=page1),
+    )
     items = await connector.fetch()
     assert len(items) == 2
     assert route.call_count == 1
@@ -303,9 +326,28 @@ async def test_max_pages_caps_pagination(respx_mock):
 
 @pytest.mark.asyncio
 async def test_connector_keys_not_sent_to_api(respx_mock):
-    cfg = SourceConfig(id="nvd", type="nvd", url="https://services.nvd.nist.gov/rest/json/cves/2.0", weight=0.8, extra={"lookback_hours": 24, "max_pages": 2, "max_items": 50, "keywordSearch": "apache"})
+    cfg = SourceConfig(
+        id="nvd",
+        type="nvd",
+        url="https://services.nvd.nist.gov/rest/json/cves/2.0",
+        weight=0.8,
+        extra={
+            "lookback_hours": 24,
+            "max_pages": 2,
+            "max_items": 50,
+            "keywordSearch": "apache",
+        },
+    )
     connector = NvdConnector(cfg)
-    route = respx_mock.get(cfg.url).mock(return_value=httpx.Response(200, json={"resultsPerPage": 0, "startIndex": 0, "totalResults": 0, "vulnerabilities": []}))
+    empty_resp = {
+        "resultsPerPage": 0,
+        "startIndex": 0,
+        "totalResults": 0,
+        "vulnerabilities": [],
+    }
+    route = respx_mock.get(cfg.url).mock(
+        return_value=httpx.Response(200, json=empty_resp),
+    )
     await connector.fetch()
     url_str = str(route.calls[0].request.url)
     assert "lookback_hours" not in url_str

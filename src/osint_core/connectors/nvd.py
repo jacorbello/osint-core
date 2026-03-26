@@ -56,12 +56,13 @@ class NvdConnector(BaseConnector):
                 pages_fetched += 1
 
                 if pages_fetched >= max_pages:
-                    logger.warning(
-                        "nvd_max_pages_reached",
-                        max_pages=max_pages,
-                        total_results=total,
-                        fetched=len(items),
-                    )
+                    if start_index + len(vulnerabilities) < total:
+                        logger.warning(
+                            "nvd_max_pages_reached",
+                            max_pages=max_pages,
+                            total_results=total,
+                            fetched=len(items),
+                        )
                     break
 
                 start_index += len(vulnerabilities)
