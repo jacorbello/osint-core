@@ -275,7 +275,7 @@ class XaiXSearchConnector(BaseConnector):
             if item.get("type") == "message":
                 for block in item.get("content", []):
                     if block.get("type") in ("output_text", "text"):
-                        return block.get("text", "")
+                        return str(block.get("text", ""))
         return ""
 
     @staticmethod
@@ -304,7 +304,8 @@ class XaiXSearchConnector(BaseConnector):
             return []
 
         try:
-            return json.loads(candidate[start:])
+            result: list[dict[str, Any]] = json.loads(candidate[start:])
+            return result
         except json.JSONDecodeError:
             return []
 
