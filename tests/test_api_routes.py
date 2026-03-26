@@ -72,6 +72,8 @@ def _make_event(**overrides):
         "country_code": None,
         "region": None,
         "source_category": None,
+        "nlp_relevance": None,
+        "nlp_summary": None,
     }
     defaults.update(overrides)
     mock = MagicMock(spec=Event)
