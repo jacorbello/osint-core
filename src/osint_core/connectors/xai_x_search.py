@@ -268,11 +268,11 @@ class XaiXSearchConnector(BaseConnector):
                     if snippet
                     else f"{display_author}: (tweet via x_search)",
                     url=url,
-                    summary=snippet[:500] if snippet else "",
+                    summary=snippet[:500] if snippet else text_context[:500],
                     raw_data={
                         "tweet_url": url,
                         "author": display_author,
-                        "text": snippet,
+                        "text": snippet if snippet else text_context[:500],
                         "timestamp": "",
                         "category": "x_search",
                     },
