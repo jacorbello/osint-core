@@ -57,38 +57,6 @@ class XaiXSearchConnector(BaseConnector):
             "model": model,
             "input": [{"role": "user", "content": prompt}],
             "tools": [tool],
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "x_search_results",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "tweets": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "tweet_url": {"type": "string"},
-                                        "author": {"type": "string"},
-                                        "text": {"type": "string"},
-                                        "timestamp": {"type": "string"},
-                                        "category": {"type": "string"},
-                                    },
-                                    "required": [
-                                        "tweet_url", "author", "text",
-                                        "timestamp", "category",
-                                    ],
-                                    "additionalProperties": False,
-                                },
-                            },
-                        },
-                        "required": ["tweets"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
         }
 
         async with httpx.AsyncClient(timeout=180) as client:
@@ -130,11 +98,16 @@ class XaiXSearchConnector(BaseConnector):
             "Execute ALL of the following searches:",
             search_lines,
             "",
-            "## INSTRUCTIONS",
-            "For each tweet found, include the full x.com URL, @username, "
-            "tweet text (first 500 chars), ISO 8601 timestamp, and a short "
-            "category label.",
+            "## OUTPUT FORMAT",
+            "Return a JSON array. Each item must have:",
+            "- tweet_url: full URL (https://x.com/username/status/id)",
+            "- author: @username of the tweet author",
+            "- text: tweet text (first 500 chars)",
+            "- timestamp: ISO 8601 when posted (YYYY-MM-DDTHH:MM:SSZ)",
+            "- category: short label for the type of signal",
+            "",
             f"Return at most {max_results} tweets. "
+            "Return ONLY the JSON array, no other text. "
             "Deduplicate — if the same tweet matches multiple searches, "
             "include it only once.",
         ]
@@ -281,23 +254,50 @@ class XaiXSearchConnector(BaseConnector):
                 continue
             seen_ids.add(status_id)
 
+            # x.com/i/status/... is a redirect URL — author unknown
+            display_author = f"@{author}" if author != "i" else "(unknown)"
+
+            # Extract context around this citation from the response text
+            snippet = self._extract_citation_context(
+                text_context, url, status_id,
+            )
+
             items.append(
                 RawItem(
-                    title=f"@{author}: (extracted from citation)",
+                    title=f"{display_author}: {snippet[:100]}"
+                    if snippet
+                    else f"{display_author}: (tweet via x_search)",
                     url=url,
-                    summary=text_context[:500],
+                    summary=snippet[:500] if snippet else text_context[:500],
                     raw_data={
                         "tweet_url": url,
-                        "author": f"@{author}",
-                        "text": "",
+                        "author": display_author,
+                        "text": snippet if snippet else text_context[:500],
                         "timestamp": "",
-                        "category": "unknown",
+                        "category": "x_search",
                     },
                     source_category="social_media",
                 )
             )
 
         return items
+
+    @staticmethod
+    def _extract_citation_context(
+        text: str, url: str, status_id: str,
+    ) -> str:
+        """Extract text around a citation URL or status ID in the response."""
+        # Try to find the URL or status ID in the text and grab surrounding context
+        for needle in (url, status_id):
+            idx = text.find(needle)
+            if idx != -1:
+                start = max(0, text.rfind("\n", 0, idx) + 1)
+                end = text.find("\n", idx)
+                if end == -1:
+                    end = min(len(text), idx + 300)
+                return text[start:end].strip()
+        # Fallback: no context found
+        return ""
 
     @staticmethod
     def _extract_text(data: dict[str, Any]) -> str:

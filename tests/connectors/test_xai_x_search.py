@@ -25,24 +25,22 @@ SAMPLE_JSON_RESPONSE = {
             "content": [
                 {
                     "type": "output_text",
-                    "text": json.dumps({
-                        "tweets": [
-                            {
-                                "tweet_url": "https://x.com/AustinPD/status/111111",
-                                "author": "@AustinPD",
-                                "text": "APD responding to reports of shots fired near downtown.",
-                                "timestamp": "2026-03-26T10:30:00Z",
-                                "category": "Active Shooter",
-                            },
-                            {
-                                "tweet_url": "https://x.com/KVUE/status/222222",
-                                "author": "@KVUE",
-                                "text": "Breaking: police activity reported near Congress Ave.",
-                                "timestamp": "2026-03-26T10:45:00Z",
-                                "category": "Law Enforcement",
-                            },
-                        ],
-                    }),
+                    "text": json.dumps([
+                        {
+                            "tweet_url": "https://x.com/AustinPD/status/111111",
+                            "author": "@AustinPD",
+                            "text": "APD responding to reports of shots fired near downtown.",
+                            "timestamp": "2026-03-26T10:30:00Z",
+                            "category": "Active Shooter",
+                        },
+                        {
+                            "tweet_url": "https://x.com/KVUE/status/222222",
+                            "author": "@KVUE",
+                            "text": "Breaking: police activity reported near Congress Ave.",
+                            "timestamp": "2026-03-26T10:45:00Z",
+                            "category": "Law Enforcement",
+                        },
+                    ]),
                     "annotations": [
                         {
                             "type": "url_citation",
@@ -176,6 +174,7 @@ async def test_fetch_fallback_to_annotations(
     assert items[0].url == "https://x.com/AlertAustin/status/333333"
     assert items[0].raw_data["author"] == "@AlertAustin"
     assert items[1].raw_data["author"] == "@TravisCoSO"
+    assert items[0].raw_data["category"] == "x_search"
 
 
 @pytest.mark.asyncio
@@ -342,7 +341,7 @@ async def test_max_results_caps_output(respx_mock):
             "role": "assistant",
             "content": [{
                 "type": "output_text",
-                "text": json.dumps({"tweets": tweets}),
+                "text": json.dumps(tweets),
                 "annotations": [],
             }],
         }],
@@ -392,3 +391,92 @@ async def test_fetch_429_exhaustion_returns_empty(
         items = await connector.fetch()
     assert items == []
     assert route.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_annotation_fallback_handles_redirect_urls(
+    connector: XaiXSearchConnector, respx_mock,
+):
+    """x.com/i/status/ redirect URLs show (unknown) author, not @i."""
+    response = {
+        "id": "resp_redirect",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": "Found some relevant posts about threats.",
+                "annotations": [
+                    {"type": "url_citation", "url": "https://x.com/i/status/555555"},
+                ],
+            }],
+        }],
+    }
+    respx_mock.post("https://api.x.ai/v1/responses").mock(
+        return_value=httpx.Response(200, json=response),
+    )
+    items = await connector.fetch()
+    assert len(items) == 1
+    assert items[0].raw_data["author"] == "(unknown)"
+    assert "@i" not in items[0].title
+
+
+@pytest.mark.asyncio
+async def test_annotation_fallback_extracts_context(
+    connector: XaiXSearchConnector, respx_mock,
+):
+    """Citation context is extracted from surrounding text when URL appears in response."""
+    response = {
+        "id": "resp_context",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": (
+                    "Reports of gunfire near downtown Austin"
+                    " https://x.com/AustinPD/status/666666"
+                    " officers responding"
+                ),
+                "annotations": [
+                    {"type": "url_citation", "url": "https://x.com/AustinPD/status/666666"},
+                ],
+            }],
+        }],
+    }
+    respx_mock.post("https://api.x.ai/v1/responses").mock(
+        return_value=httpx.Response(200, json=response),
+    )
+    items = await connector.fetch()
+    assert len(items) == 1
+    assert "gunfire" in items[0].summary.lower()
+    assert items[0].raw_data["author"] == "@AustinPD"
+
+
+@pytest.mark.asyncio
+async def test_annotation_fallback_uses_response_text_when_no_context(
+    connector: XaiXSearchConnector, respx_mock,
+):
+    """When citation URL not found in text, summary falls back to response text."""
+    response = {
+        "id": "resp_no_context",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": "Multiple threats detected in the Austin area today.",
+                "annotations": [
+                    {"type": "url_citation", "url": "https://x.com/someone/status/777777"},
+                ],
+            }],
+        }],
+    }
+    respx_mock.post("https://api.x.ai/v1/responses").mock(
+        return_value=httpx.Response(200, json=response),
+    )
+    items = await connector.fetch()
+    assert len(items) == 1
+    # Should have the response text as summary, not empty string
+    assert "threats detected" in items[0].summary.lower()
+    assert items[0].raw_data["text"] != ""
