@@ -53,10 +53,42 @@ class XaiXSearchConnector(BaseConnector):
 
         prompt = self._build_prompt(searches, max_results)
         tool = self._build_tool(lookback_hours)
-        body = {
+        body: dict[str, Any] = {
             "model": model,
             "input": [{"role": "user", "content": prompt}],
             "tools": [tool],
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "x_search_results",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "tweets": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "tweet_url": {"type": "string"},
+                                        "author": {"type": "string"},
+                                        "text": {"type": "string"},
+                                        "timestamp": {"type": "string"},
+                                        "category": {"type": "string"},
+                                    },
+                                    "required": [
+                                        "tweet_url", "author", "text",
+                                        "timestamp", "category",
+                                    ],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": ["tweets"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
         }
 
         async with httpx.AsyncClient(timeout=180) as client:
@@ -98,16 +130,11 @@ class XaiXSearchConnector(BaseConnector):
             "Execute ALL of the following searches:",
             search_lines,
             "",
-            "## OUTPUT FORMAT",
-            "Return a JSON array. Each item must have:",
-            "- tweet_url: full URL (https://x.com/user/status/id)",
-            "- author: @username",
-            "- text: tweet text (first 500 chars)",
-            "- timestamp: ISO 8601 when posted (YYYY-MM-DDTHH:MM:SSZ)",
-            "- category: short label for the type of signal",
-            "",
+            "## INSTRUCTIONS",
+            "For each tweet found, include the full x.com URL, @username, "
+            "tweet text (first 500 chars), ISO 8601 timestamp, and a short "
+            "category label.",
             f"Return at most {max_results} tweets. "
-            "Return ONLY the JSON array, no other text. "
             "Deduplicate — if the same tweet matches multiple searches, "
             "include it only once.",
         ]
@@ -199,22 +226,25 @@ class XaiXSearchConnector(BaseConnector):
 
         tweets: list[dict[str, Any]] = []
 
-        # Try bare JSON array
         try:
-            json_match = re.search(r"\[\s*\{[\s\S]*?\}\s*\]", text)
-            if json_match:
-                tweets = json.loads(json_match.group())
-            else:
-                # Try code block
-                code_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
-                tweets = json.loads(code_match.group(1).strip()) if code_match else json.loads(text)
+            parsed = json.loads(text)
+            # Structured output returns {"tweets": [...]}
+            if isinstance(parsed, dict) and "tweets" in parsed:
+                tweets = parsed["tweets"]
+            elif isinstance(parsed, list):
+                tweets = parsed
         except json.JSONDecodeError:
-            # Try truncated array recovery
-            tweets = self._recover_truncated_json(text)
-            if tweets:
-                logger.warning(
-                    "xai_truncated_json_recovered", count=len(tweets),
-                )
+            # Fallback: regex extraction for unstructured responses
+            try:
+                json_match = re.search(r"\[\s*\{[\s\S]*?\}\s*\]", text)
+                if json_match:
+                    tweets = json.loads(json_match.group())
+            except json.JSONDecodeError:
+                tweets = self._recover_truncated_json(text)
+                if tweets:
+                    logger.warning(
+                        "xai_truncated_json_recovered", count=len(tweets),
+                    )
 
         if not tweets:
             return []
