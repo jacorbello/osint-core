@@ -18,6 +18,7 @@ from osint_core.connectors.shodan import ShodanConnector
 from osint_core.connectors.telegram import TelegramConnector
 from osint_core.connectors.threatfox import ThreatFoxConnector
 from osint_core.connectors.urlhaus import UrlhausConnector
+from osint_core.connectors.xai_x_search import XaiXSearchConnector
 
 __all__ = [
     "BaseConnector",
@@ -41,6 +42,7 @@ __all__ = [
     "TelegramConnector",
     "ThreatFoxConnector",
     "UrlhausConnector",
+    "XaiXSearchConnector",
     "registry",
 ]
 
@@ -62,3 +64,4 @@ registry.register("acled_api", AcledConnector)
 registry.register("telegram", TelegramConnector)
 registry.register("reddit", RedditConnector)
 registry.register("pastebin", PasteSiteConnector)
+registry.register("xai_x_search", XaiXSearchConnector)
