@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -371,7 +372,8 @@ async def test_fetch_retries_on_429(
             httpx.Response(200, json=SAMPLE_JSON_RESPONSE),
         ],
     )
-    items = await connector.fetch()
+    with patch("osint_core.connectors.xai_x_search.asyncio.sleep", new_callable=AsyncMock):
+        items = await connector.fetch()
     assert len(items) == 2
     assert route.call_count == 2  # confirm retry occurred
 
@@ -384,6 +386,7 @@ async def test_fetch_429_exhaustion_returns_empty(
     route = respx_mock.post("https://api.x.ai/v1/responses").mock(
         return_value=httpx.Response(429, headers={"Retry-After": "1"}),
     )
-    items = await connector.fetch()
+    with patch("osint_core.connectors.xai_x_search.asyncio.sleep", new_callable=AsyncMock):
+        items = await connector.fetch()
     assert items == []
     assert route.call_count == 3

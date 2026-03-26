@@ -30,7 +30,7 @@ No new dependencies — uses `httpx` (already in use) and `structlog` (already i
 
 ### New file: `src/osint_core/connectors/xai_x_search.py`
 
-**Registration:** Register as `xai_x_search` in `src/osint_core/connectors/registry.py`.
+**Registration:** Register as `xai_x_search` in `src/osint_core/connectors/__init__.py`.
 
 ### Plan Config Shape
 
@@ -258,7 +258,7 @@ Low initial reputation and D reliability (social media is noisy, corroboration r
 - **test_fetch_fallback_to_annotations** — Mock response with unparseable text but valid `url_citation` annotations. Verify fallback extracts tweets from annotations.
 - **test_fetch_sends_date_params** — Verify `from_date`/`to_date` computed from `lookback_hours` and sent in tool config.
 - **test_fetch_sends_tool_params** — Verify `excluded_x_handles`, `enable_image_understanding` passed to tool object from plan config.
-- **test_connector_keys_not_in_headers** — Verify `searches`, `mission`, `geo_terms`, etc. are not leaked to the API.
+- **test_connector_keys_not_in_body** — Verify `searches`, `mission`, `geo_terms`, etc. are not leaked to the API.
 - **test_dedupe_key_uses_status_id** — Verify dedupe extracts tweet status ID from URL.
 - **test_fetch_retries_on_429** — Mock 429 then 200. Verify retry with backoff.
 - **test_fetch_raises_on_missing_api_key** — Verify ValueError for empty api_key.
@@ -273,7 +273,7 @@ Low initial reputation and D reliability (social media is noisy, corroboration r
 | File | Change |
 |------|--------|
 | `src/osint_core/connectors/xai_x_search.py` | Create — new connector |
-| `src/osint_core/connectors/registry.py` | Modify — register `xai_x_search` type |
+| `src/osint_core/connectors/__init__.py` | Modify — register `xai_x_search` type |
 | `plans/austin-terror-threat.yaml` | Modify — add `x_austin_threats` source |
 | `tests/connectors/test_xai_x_search.py` | Create — connector tests |
 

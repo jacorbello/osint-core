@@ -20,14 +20,6 @@ _API_URL = "https://api.x.ai/v1/responses"
 _DEFAULT_MODEL = "grok-4.20-reasoning"
 _TWEET_URL_RE = re.compile(r"x\.com/(\w+)/status/(\d+)")
 
-# Keys consumed by the connector, NOT passed to the xAI API.
-_CONNECTOR_KEYS = frozenset({
-    "api_key", "model", "lookback_hours", "max_results",
-    "searches", "geo_terms", "mission",
-    "allowed_x_handles", "excluded_x_handles",
-    "enable_image_understanding", "enable_video_understanding",
-})
-
 
 class XaiXSearchConnector(BaseConnector):
     """Search X/Twitter via xAI's Grok API with the x_search tool.
@@ -333,9 +325,8 @@ class XaiXSearchConnector(BaseConnector):
         if timestamp_str:
             for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z"):
                 try:
-                    occurred_at = datetime.strptime(
-                        timestamp_str, fmt,
-                    ).replace(tzinfo=UTC)
+                    parsed = datetime.strptime(timestamp_str, fmt)
+                    occurred_at = parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
                     break
                 except (ValueError, TypeError):
                     continue
