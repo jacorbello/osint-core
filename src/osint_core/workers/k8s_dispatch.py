@@ -159,13 +159,17 @@ async def _enrich_entities_async(event_id: str) -> dict[str, Any]:
                 seen.add(key)
                 unique_entities.append(ent)
 
-        # Upsert each entity and link to event
+        # Upsert each entity and link to event.
+        # Materialize the selectin-loaded collection into a plain list
+        # to avoid re-triggering the lazy loader on each `not in` check
+        # and to be safe if this code is ever called on a new Event.
         linked_count = 0
+        existing_entities = list(event.entities)
         for ent_dict in unique_entities:
             entity = await _upsert_entity(db, ent_dict)
-            # Link to event if not already linked
-            if entity not in event.entities:
+            if entity not in existing_entities:
                 event.entities.append(entity)
+                existing_entities.append(entity)
                 linked_count += 1
 
         await db.commit()
