@@ -319,31 +319,30 @@ class XaiXSearchConnector(BaseConnector):
             match = re.search(r"/status/(\d+)", item.url)
             if not match:
                 continue
-            tweet: dict[str, Any] | None = tweet_by_id.get(match.group(1))
-            if not tweet:
+            enrichment = tweet_by_id.get(match.group(1))
+            if not enrichment:
                 continue
 
             # Merge fields that are richer in the JSON response
-            if tweet.get("author") and item.raw_data.get("author") in ("(unknown)", ""):
-                item.raw_data["author"] = tweet["author"]
+            if enrichment.get("author") and item.raw_data.get("author") in ("(unknown)", ""):
+                item.raw_data["author"] = enrichment["author"]
                 # Update title too
                 snippet = item.raw_data.get("text", "")[:100]
                 item.title = (
-                    f"{tweet['author']}: {snippet}"
+                    f"{enrichment['author']}: {snippet}"
                     if snippet
-                    else f"{tweet['author']}: (tweet via x_search)"
+                    else f"{enrichment['author']}: (tweet via x_search)"
                 )
 
-            if tweet.get("text") and not item.raw_data.get("text"):
-                item.raw_data["text"] = tweet["text"]
-                item.summary = tweet["text"][:500]
+            if enrichment.get("text") and not item.raw_data.get("text"):
+                item.raw_data["text"] = enrichment["text"]
+                item.summary = enrichment["text"][:500]
 
-            if tweet.get("timestamp") and not item.raw_data.get("timestamp"):
-                item.raw_data["timestamp"] = tweet["timestamp"]
-                # Parse occurred_at
+            if enrichment.get("timestamp") and not item.raw_data.get("timestamp"):
+                item.raw_data["timestamp"] = enrichment["timestamp"]
                 for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z"):
                     try:
-                        parsed_dt = datetime.strptime(tweet["timestamp"], fmt)
+                        parsed_dt = datetime.strptime(enrichment["timestamp"], fmt)
                         item.occurred_at = (
                             parsed_dt if parsed_dt.tzinfo else parsed_dt.replace(tzinfo=UTC)
                         )
@@ -351,8 +350,8 @@ class XaiXSearchConnector(BaseConnector):
                     except (ValueError, TypeError):
                         continue
 
-            if tweet.get("category") and item.raw_data.get("category") == "x_search":
-                item.raw_data["category"] = tweet["category"]
+            if enrichment.get("category") and item.raw_data.get("category") == "x_search":
+                item.raw_data["category"] = enrichment["category"]
 
     @staticmethod
     def _extract_citation_context(
