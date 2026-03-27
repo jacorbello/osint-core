@@ -20,6 +20,13 @@ from osint_core.schemas.entity import EntityList, EntityResponse
 from osint_core.schemas.event import EventList, EventResponse
 from osint_core.schemas.indicator import IndicatorList, IndicatorResponse
 from osint_core.schemas.job import JobCreateRequest, JobKindEnum, JobList, JobResponse
+from osint_core.schemas.lead import (
+    LeadListResponse,
+    LeadResponse,
+    LeadStatusEnum,
+    LeadTypeEnum,
+    LeadUpdateRequest,
+)
 from osint_core.schemas.plan import (
     PlanActivationRequest,
     PlanCreateRequest,
@@ -49,6 +56,11 @@ __all__ = [
     "JobList",
     "JobResponse",
     "JobStatusEnum",
+    "LeadListResponse",
+    "LeadResponse",
+    "LeadStatusEnum",
+    "LeadTypeEnum",
+    "LeadUpdateRequest",
     "PageInfo",
     "PlanActivationRequest",
     "PlanCreateRequest",
