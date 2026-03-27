@@ -1,0 +1,211 @@
+version: 2
+plan_id: cal-prospecting
+plan_type: child
+parent_plan_id: cortech-osint-master
+retention_class: evidentiary
+description: >-
+  Constitutional rights prospecting for The Center For American Liberty.
+  Monitors First Amendment, parental rights, religious liberty, and due process
+  violations across CA, TX, MN, and DC jurisdictions.
+
+keywords:
+  - First Amendment
+  - free speech
+  - campus speech
+  - academic freedom
+  - religious liberty
+  - parental rights
+  - due process
+  - Title IX
+  - DEI mandate
+  - compelled speech
+  - viewpoint discrimination
+  - student rights
+  - faculty termination
+  - speech code
+  - bias response team
+  - pronoun policy
+  - drag queen story hour
+  - curriculum objection
+  - vaccine mandate
+  - school choice
+
+sources:
+  # ── xAI x_search: California ──────────────────────────────────
+  - id: x_cal_california
+    type: xai_x_search
+    schedule_cron: "0 7,14 * * *"
+    params:
+      api_key: "${OSINT_XAI_API_KEY}"
+      model: "grok-4.20-reasoning"
+      lookback_hours: 12
+      max_results: 50
+      searches:
+        - "(\"free speech\" OR \"First Amendment\" OR \"viewpoint discrimination\") (UC OR UCLA OR Berkeley OR USC OR Stanford OR \"Cal State\") lang:en"
+        - "(\"Title IX\" OR \"due process\" OR \"campus speech code\") California university lang:en"
+        - "(\"religious liberty\" OR \"compelled speech\" OR \"pronoun policy\") California school lang:en"
+        - "student or professor punished for speech or beliefs at California university"
+      geo_terms: "California"
+      mission: >-
+        You are a constitutional rights analyst for The Center For American Liberty.
+        Search for incidents where students, faculty, or staff at California institutions
+        face discipline, termination, or policy enforcement that may violate First Amendment
+        rights, religious liberty, parental rights, or due process protections. Focus on
+        actionable cases with identified institutions and specific policy violations.
+      allowed_x_handles:
+        - TheFIREorg
+        - CampusReform
+        - GoldwaterInst
+        - CalLiberty
+        - FIREprez
+        - RealCandaceO
+        - JonathanTurley
+        - RobSchneider
+
+  # ── xAI x_search: Texas ───────────────────────────────────────
+  - id: x_cal_texas
+    type: xai_x_search
+    schedule_cron: "5 7,14 * * *"
+    params:
+      api_key: "${OSINT_XAI_API_KEY}"
+      model: "grok-4.20-reasoning"
+      lookback_hours: 12
+      max_results: 50
+      searches:
+        - "(\"free speech\" OR \"First Amendment\" OR \"viewpoint discrimination\") (UT OR \"Texas A&M\" OR Baylor OR \"Texas State\" OR \"Texas Tech\") lang:en"
+        - "(\"Title IX\" OR \"due process\" OR \"DEI mandate\") Texas university lang:en"
+        - "(\"parental rights\" OR \"curriculum objection\" OR \"school choice\") Texas lang:en"
+        - "student or professor punished for speech or beliefs at Texas university"
+      geo_terms: "Texas"
+      mission: >-
+        You are a constitutional rights analyst for The Center For American Liberty.
+        Search for incidents where students, faculty, or staff at Texas institutions
+        face discipline, termination, or policy enforcement that may violate First Amendment
+        rights, religious liberty, parental rights, or due process protections. Focus on
+        actionable cases with identified institutions and specific policy violations.
+      allowed_x_handles:
+        - TheFIREorg
+        - CampusReform
+        - GoldwaterInst
+        - FIREprez
+        - JonathanTurley
+        - TexasScorecard
+        - TCFPPolicy
+
+  # ── xAI x_search: Minnesota ───────────────────────────────────
+  - id: x_cal_minnesota
+    type: xai_x_search
+    schedule_cron: "10 7,14 * * *"
+    params:
+      api_key: "${OSINT_XAI_API_KEY}"
+      model: "grok-4.20-reasoning"
+      lookback_hours: 12
+      max_results: 50
+      searches:
+        - "(\"free speech\" OR \"First Amendment\" OR \"viewpoint discrimination\") (\"University of Minnesota\" OR \"Minnesota State\" OR \"St. Thomas\" OR Macalester) lang:en"
+        - "(\"Title IX\" OR \"due process\" OR \"DEI mandate\") Minnesota university lang:en"
+        - "(\"parental rights\" OR \"religious liberty\" OR \"school choice\") Minnesota lang:en"
+        - "student or professor punished for speech or beliefs at Minnesota university"
+      geo_terms: "Minnesota"
+      mission: >-
+        You are a constitutional rights analyst for The Center For American Liberty.
+        Search for incidents where students, faculty, or staff at Minnesota institutions
+        face discipline, termination, or policy enforcement that may violate First Amendment
+        rights, religious liberty, parental rights, or due process protections. Focus on
+        actionable cases with identified institutions and specific policy violations.
+      allowed_x_handles:
+        - TheFIREorg
+        - CampusReform
+        - GoldwaterInst
+        - FIREprez
+        - JonathanTurley
+        - AlphaNewsMN
+        - CtrAmExperiment
+
+  # ── xAI x_search: DC / Federal ────────────────────────────────
+  - id: x_cal_dc
+    type: xai_x_search
+    schedule_cron: "15 7,14 * * *"
+    params:
+      api_key: "${OSINT_XAI_API_KEY}"
+      model: "grok-4.20-reasoning"
+      lookback_hours: 12
+      max_results: 50
+      searches:
+        - "(\"free speech\" OR \"First Amendment\" OR \"viewpoint discrimination\") (Georgetown OR \"George Washington\" OR Howard OR \"American University\" OR \"Catholic University\") lang:en"
+        - "(\"Title IX\" OR \"due process\" OR \"campus speech\") \"Washington DC\" university lang:en"
+        - "(\"religious liberty\" OR \"parental rights\") federal policy OR regulation lang:en"
+        - "student or professor punished for speech or beliefs at DC university"
+      geo_terms: "Washington DC OR District of Columbia"
+      mission: >-
+        You are a constitutional rights analyst for The Center For American Liberty.
+        Search for incidents where students, faculty, or staff at DC-area institutions
+        face discipline, termination, or policy enforcement that may violate First Amendment
+        rights, religious liberty, parental rights, or due process protections. Also monitor
+        federal policy changes affecting campus speech and religious liberty nationwide.
+      allowed_x_handles:
+        - TheFIREorg
+        - CampusReform
+        - GoldwaterInst
+        - FIREprez
+        - JonathanTurley
+        - Heritage
+        - BeckettLaw
+
+source_profiles:
+  x_cal_california:
+    reliability: C
+    credibility: 3
+    corroboration_required: true
+    license: "oauth"
+  x_cal_texas:
+    reliability: C
+    credibility: 3
+    corroboration_required: true
+    license: "oauth"
+  x_cal_minnesota:
+    reliability: C
+    credibility: 3
+    corroboration_required: true
+    license: "oauth"
+  x_cal_dc:
+    reliability: C
+    credibility: 3
+    corroboration_required: true
+    license: "oauth"
+
+scoring:
+  recency_half_life_hours: 168
+  source_reputation:
+    x_cal_california: 0.4
+    x_cal_texas: 0.4
+    x_cal_minnesota: 0.4
+    x_cal_dc: 0.4
+  ioc_match_boost: 1.5
+
+enrichment:
+  nlp_enabled: true
+  mission: >-
+    Identify constitutional rights violations at educational institutions for
+    The Center For American Liberty. Focus on First Amendment, parental rights,
+    religious liberty, and due process cases with litigation potential.
+  classify_relevance: true
+  extract_entities: true
+  generate_summaries: true
+
+notifications:
+  routes:
+    - name: cal-prospecting-high
+      when:
+        severity_gte: high
+      channels:
+        - type: gotify
+          application: "osint-cal-prospecting"
+          priority: 8
+    - name: cal-prospecting-critical
+      when:
+        severity_gte: critical
+      channels:
+        - type: gotify
+          application: "osint-cal-prospecting"
+          priority: 10
