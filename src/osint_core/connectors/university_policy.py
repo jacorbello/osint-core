@@ -205,7 +205,7 @@ class UniversityPolicyConnector(BaseConnector):
 
         for tag in soup.select(selector):
             href = tag.get("href")
-            if not href:
+            if not href or not isinstance(href, str):
                 continue
             abs_url = urljoin(base_url, href)
             if abs_url in seen_urls:
