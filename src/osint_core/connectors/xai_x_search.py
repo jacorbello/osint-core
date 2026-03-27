@@ -70,7 +70,7 @@ class XaiXSearchConnector(BaseConnector):
         # objects (most reliable for full_text, post_url, username).
         # Fallback: extract from annotations when JSON parsing fails.
         items = self._parse_json_response(data)
-        if not items:
+        if items is None:
             items = self._parse_annotations(data)
 
         return items[:max_results]
@@ -214,15 +214,23 @@ class XaiXSearchConnector(BaseConnector):
         logger.error("xai_max_retries_exceeded", attempts=3)
         return None
 
-    def _parse_json_response(self, data: dict[str, Any]) -> list[RawItem]:
+    def _parse_json_response(self, data: dict[str, Any]) -> list[RawItem] | None:
+        """Parse structured JSON tweet objects from the response text.
+
+        Returns a list of RawItems on success (may be empty if the model
+        returned ``[]``), or ``None`` when the text is not valid JSON so
+        the caller can fall back to annotation parsing.
+        """
         text = self._extract_text(data)
         if not text:
-            return []
+            return None
 
         tweets: list[dict[str, Any]] = []
+        json_parsed = False
 
         try:
             parsed = json.loads(text)
+            json_parsed = True
             # Structured output returns {"tweets": [...]}
             if isinstance(parsed, dict) and "tweets" in parsed:
                 tweets = parsed["tweets"]
@@ -234,15 +242,17 @@ class XaiXSearchConnector(BaseConnector):
                 json_match = re.search(r"\[\s*\{[\s\S]*?\}\s*\]", text)
                 if json_match:
                     tweets = json.loads(json_match.group())
+                    json_parsed = True
             except json.JSONDecodeError:
                 tweets = self._recover_truncated_json(text)
                 if tweets:
+                    json_parsed = True
                     logger.warning(
                         "xai_truncated_json_recovered", count=len(tweets),
                     )
 
-        if not tweets:
-            return []
+        if not json_parsed:
+            return None
 
         items: list[RawItem] = []
         for tweet in tweets:

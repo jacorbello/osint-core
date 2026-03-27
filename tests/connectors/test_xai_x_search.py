@@ -165,9 +165,9 @@ async def test_fetch_json_primary_path(
 async def test_fetch_json_primary_ignores_annotations_when_json_valid(
     connector: XaiXSearchConnector, respx_mock,
 ):
-    """JSON parsing is used even when annotations are also present."""
-    response_no_annotations = {
-        "id": "resp_json_only",
+    """JSON parsing is used even when conflicting annotations are present."""
+    response = {
+        "id": "resp_json_with_conflicting_annotations",
         "output": [{
             "type": "message",
             "role": "assistant",
@@ -180,15 +180,20 @@ async def test_fetch_json_primary_ignores_annotations_when_json_valid(
                     "timestamp": "2026-03-26T10:00:00Z",
                     "category": "Test",
                 }]),
-                "annotations": [],
+                # Annotations reference a DIFFERENT tweet — should be ignored
+                "annotations": [
+                    {"type": "url_citation", "url": "https://x.com/OtherUser/status/000000"},
+                    {"type": "url_citation", "url": "https://x.com/i/status/111111"},
+                ],
             }],
         }],
     }
     respx_mock.post("https://api.x.ai/v1/responses").mock(
-        return_value=httpx.Response(200, json=response_no_annotations),
+        return_value=httpx.Response(200, json=response),
     )
     items = await connector.fetch()
 
+    # JSON is primary — only the JSON tweet is returned, not the annotation URLs
     assert len(items) == 1
     assert items[0].url == "https://x.com/TestUser/status/999999"
     assert items[0].raw_data["author"] == "@TestUser"
