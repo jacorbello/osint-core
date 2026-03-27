@@ -516,3 +516,69 @@ async def test_annotation_fallback_uses_response_text_when_no_context(
     # Should have the response text as summary, not empty string
     assert "threats detected" in items[0].summary.lower()
     assert items[0].raw_data["text"] != ""
+
+
+@pytest.mark.asyncio
+async def test_annotation_assigns_paragraphs_by_position(
+    connector: XaiXSearchConnector, respx_mock,
+):
+    """Each citation gets its own paragraph from the response text."""
+    response = {
+        "id": "resp_multi",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": (
+                    "@AustinPD reports shots fired near Congress Ave.\n\n"
+                    "@KVUE confirms police activity downtown, suspect in custody."
+                ),
+                "annotations": [
+                    {"type": "url_citation", "url": "https://x.com/i/status/111111"},
+                    {"type": "url_citation", "url": "https://x.com/i/status/222222"},
+                ],
+            }],
+        }],
+    }
+    respx_mock.post("https://api.x.ai/v1/responses").mock(
+        return_value=httpx.Response(200, json=response),
+    )
+    items = await connector.fetch()
+
+    assert len(items) == 2
+    # Each item gets its own paragraph
+    assert "shots fired" in items[0].summary.lower()
+    assert "police activity" in items[1].summary.lower()
+    # @authors extracted from paragraphs
+    assert items[0].raw_data["author"] == "@AustinPD"
+    assert items[1].raw_data["author"] == "@KVUE"
+
+
+@pytest.mark.asyncio
+async def test_annotation_empty_text_uses_placeholder(
+    connector: XaiXSearchConnector, respx_mock,
+):
+    """When response text is empty, items still get created with placeholder."""
+    response = {
+        "id": "resp_empty_text",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": "",
+                "annotations": [
+                    {"type": "url_citation", "url": "https://x.com/i/status/888888"},
+                ],
+            }],
+        }],
+    }
+    respx_mock.post("https://api.x.ai/v1/responses").mock(
+        return_value=httpx.Response(200, json=response),
+    )
+    items = await connector.fetch()
+
+    assert len(items) == 1
+    assert items[0].summary != ""
+    assert items[0].url == "https://x.com/i/status/888888"

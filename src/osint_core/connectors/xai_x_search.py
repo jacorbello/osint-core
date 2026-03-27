@@ -269,7 +269,7 @@ class XaiXSearchConnector(BaseConnector):
                 paragraphs[idx] if idx < len(paragraphs) else ""
             )
             if not paragraph:
-                paragraph = text_context[:500]
+                paragraph = text_context[:500] if text_context.strip() else f"Tweet {url}"
 
             # Extract @username from paragraph if URL author is 'i' (redirect)
             display_author = f"@{author}"
