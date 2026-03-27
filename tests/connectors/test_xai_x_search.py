@@ -582,3 +582,38 @@ async def test_annotation_empty_text_uses_placeholder(
     assert len(items) == 1
     assert items[0].summary != ""
     assert items[0].url == "https://x.com/i/status/888888"
+
+
+@pytest.mark.asyncio
+async def test_fetch_parses_new_field_names(
+    connector: XaiXSearchConnector, respx_mock,
+):
+    """JSON with post_url/username/full_text fields is parsed correctly."""
+    response = {
+        "id": "resp_new_fields",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": json.dumps([{
+                    "post_url": "https://x.com/TestUser/status/999999",
+                    "username": "@TestUser",
+                    "full_text": "Original tweet content here",
+                    "summary": "Brief relevance summary",
+                    "category": "Threat",
+                    "timestamp": "2026-03-26T10:00:00Z",
+                }]),
+                "annotations": [],
+            }],
+        }],
+    }
+    respx_mock.post("https://api.x.ai/v1/responses").mock(
+        return_value=httpx.Response(200, json=response),
+    )
+    items = await connector.fetch()
+    assert len(items) == 1
+    assert items[0].url == "https://x.com/TestUser/status/999999"
+    assert items[0].raw_data["author"] == "@TestUser"
+    assert "Original tweet content" in items[0].raw_data["text"]
+    assert "Brief relevance" in items[0].summary
