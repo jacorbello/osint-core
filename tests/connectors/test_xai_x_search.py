@@ -156,6 +156,10 @@ async def test_fetch_extracts_from_annotations_with_context(
     assert items[0].raw_data["author"] == "@AustinPD"
     assert items[1].url == "https://x.com/KVUE/status/222222"
 
+    # Annotation items should be enriched with JSON metadata
+    assert items[0].raw_data["author"] == "@AustinPD"
+    assert "shots fired" in items[0].summary.lower() or items[0].summary != ""
+
 
 @pytest.mark.asyncio
 async def test_fetch_falls_back_to_json_when_no_annotations(

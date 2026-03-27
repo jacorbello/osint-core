@@ -69,9 +69,12 @@ class XaiXSearchConnector(BaseConnector):
         # Primary: extract tweets from annotations (Grok's native
         # citation behavior with x_search). Fallback: try JSON parsing
         # in case the model returned structured data.
-        items = self._parse_annotation_fallback(data)
+        items = self._parse_annotations(data)
         if not items:
             items = self._parse_json_response(data)
+        else:
+            # Try to enrich annotation items with structured metadata
+            self._enrich_from_json(data, items)
 
         return items[:max_results]
 
@@ -230,10 +233,10 @@ class XaiXSearchConnector(BaseConnector):
 
         return items
 
-    def _parse_annotation_fallback(
+    def _parse_annotations(
         self, data: dict[str, Any],
     ) -> list[RawItem]:
-        logger.warning("xai_json_parse_failed_using_annotations")
+        logger.info("xai_extracting_from_annotations")
         annotations = self._extract_annotations(data)
         text_context = self._extract_text(data) or ""
 
@@ -281,6 +284,75 @@ class XaiXSearchConnector(BaseConnector):
             )
 
         return items
+
+    def _enrich_from_json(
+        self, data: dict[str, Any], items: list[RawItem],
+    ) -> None:
+        """Enrich annotation-extracted items with structured JSON metadata."""
+        text = self._extract_text(data)
+        if not text:
+            return
+
+        tweets: list[dict[str, Any]] = []
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and "tweets" in parsed:
+                tweets = parsed["tweets"]
+            elif isinstance(parsed, list):
+                tweets = parsed
+        except json.JSONDecodeError:
+            return
+
+        if not tweets:
+            return
+
+        # Index tweets by status ID for fast lookup
+        tweet_by_id: dict[str, dict[str, Any]] = {}
+        for tweet in tweets:
+            url = tweet.get("tweet_url", "")
+            match = re.search(r"/status/(\d+)", url)
+            if match:
+                tweet_by_id[match.group(1)] = tweet
+
+        # Enrich items
+        for item in items:
+            match = re.search(r"/status/(\d+)", item.url)
+            if not match:
+                continue
+            tweet = tweet_by_id.get(match.group(1))
+            if not tweet:
+                continue
+
+            # Merge fields that are richer in the JSON response
+            if tweet.get("author") and item.raw_data.get("author") in ("(unknown)", ""):
+                item.raw_data["author"] = tweet["author"]
+                # Update title too
+                snippet = item.raw_data.get("text", "")[:100]
+                item.title = (
+                    f"{tweet['author']}: {snippet}"
+                    if snippet
+                    else f"{tweet['author']}: (tweet via x_search)"
+                )
+
+            if tweet.get("text") and not item.raw_data.get("text"):
+                item.raw_data["text"] = tweet["text"]
+                item.summary = tweet["text"][:500]
+
+            if tweet.get("timestamp") and not item.raw_data.get("timestamp"):
+                item.raw_data["timestamp"] = tweet["timestamp"]
+                # Parse occurred_at
+                for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z"):
+                    try:
+                        parsed_dt = datetime.strptime(tweet["timestamp"], fmt)
+                        item.occurred_at = (
+                            parsed_dt if parsed_dt.tzinfo else parsed_dt.replace(tzinfo=UTC)
+                        )
+                        break
+                    except (ValueError, TypeError):
+                        continue
+
+            if tweet.get("category") and item.raw_data.get("category") == "x_search":
+                item.raw_data["category"] = tweet["category"]
 
     @staticmethod
     def _extract_citation_context(
