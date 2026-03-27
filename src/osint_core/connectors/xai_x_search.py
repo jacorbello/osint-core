@@ -66,15 +66,12 @@ class XaiXSearchConnector(BaseConnector):
             return []
 
         data = resp.json()
-        # Primary: extract tweets from annotations (Grok's native
-        # citation behavior with x_search). Fallback: try JSON parsing
-        # in case the model returned structured data.
-        items = self._parse_annotations(data)
-        if not items:
-            items = self._parse_json_response(data)
-        else:
-            # Try to enrich annotation items with structured metadata
-            self._enrich_from_json(data, items)
+        # Primary: parse structured JSON when Grok returns valid tweet
+        # objects (most reliable for full_text, post_url, username).
+        # Fallback: extract from annotations when JSON parsing fails.
+        items = self._parse_json_response(data)
+        if items is None:
+            items = self._parse_annotations(data)
 
         return items[:max_results]
 
@@ -217,15 +214,23 @@ class XaiXSearchConnector(BaseConnector):
         logger.error("xai_max_retries_exceeded", attempts=3)
         return None
 
-    def _parse_json_response(self, data: dict[str, Any]) -> list[RawItem]:
+    def _parse_json_response(self, data: dict[str, Any]) -> list[RawItem] | None:
+        """Parse structured JSON tweet objects from the response text.
+
+        Returns a list of RawItems on success (may be empty if the model
+        returned ``[]``), or ``None`` when the text is not valid JSON so
+        the caller can fall back to annotation parsing.
+        """
         text = self._extract_text(data)
         if not text:
-            return []
+            return None
 
         tweets: list[dict[str, Any]] = []
+        json_parsed = False
 
         try:
             parsed = json.loads(text)
+            json_parsed = True
             # Structured output returns {"tweets": [...]}
             if isinstance(parsed, dict) and "tweets" in parsed:
                 tweets = parsed["tweets"]
@@ -237,15 +242,17 @@ class XaiXSearchConnector(BaseConnector):
                 json_match = re.search(r"\[\s*\{[\s\S]*?\}\s*\]", text)
                 if json_match:
                     tweets = json.loads(json_match.group())
+                    json_parsed = True
             except json.JSONDecodeError:
                 tweets = self._recover_truncated_json(text)
                 if tweets:
+                    json_parsed = True
                     logger.warning(
                         "xai_truncated_json_recovered", count=len(tweets),
                     )
 
-        if not tweets:
-            return []
+        if not json_parsed:
+            return None
 
         items: list[RawItem] = []
         for tweet in tweets:
@@ -318,82 +325,6 @@ class XaiXSearchConnector(BaseConnector):
             )
 
         return items
-
-    def _enrich_from_json(
-        self, data: dict[str, Any], items: list[RawItem],
-    ) -> None:
-        """Enrich annotation-extracted items with structured JSON metadata."""
-        text = self._extract_text(data)
-        if not text:
-            return
-
-        tweets: list[dict[str, Any]] = []
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, dict) and "tweets" in parsed:
-                tweets = parsed["tweets"]
-            elif isinstance(parsed, list):
-                tweets = parsed
-        except json.JSONDecodeError:
-            return
-
-        if not tweets:
-            return
-
-        # Index tweets by status ID for fast lookup
-        tweet_by_id: dict[str, dict[str, Any]] = {}
-        for tweet in tweets:
-            url = tweet.get("post_url") or tweet.get("tweet_url", "")
-            match = re.search(r"/status/(\d+)", url)
-            if match:
-                tweet_by_id[match.group(1)] = tweet
-
-        # Enrich items
-        for item in items:
-            match = re.search(r"/status/(\d+)", item.url)
-            if not match:
-                continue
-            enrichment = tweet_by_id.get(match.group(1))
-            if not enrichment:
-                continue
-
-            # Merge fields that are richer in the JSON response
-            enrich_author = enrichment.get("username") or enrichment.get("author", "")
-            if enrich_author and item.raw_data.get("author") in ("(unknown)", ""):
-                item.raw_data["author"] = enrich_author
-                # Update title too
-                snippet = item.raw_data.get("text", "")[:100]
-                item.title = (
-                    f"{enrich_author}: {snippet}"
-                    if snippet
-                    else f"{enrich_author}: (tweet via x_search)"
-                )
-
-            # Update URL if JSON has a more specific one (username vs /i/ redirect)
-            enrich_url = enrichment.get("post_url") or enrichment.get("tweet_url", "")
-            if enrich_url and "/i/status/" in item.url and "/i/status/" not in enrich_url:
-                item.url = enrich_url
-                item.raw_data["tweet_url"] = enrich_url
-
-            enrich_text = enrichment.get("full_text") or enrichment.get("text", "")
-            if enrich_text:
-                item.raw_data["text"] = enrich_text
-                item.summary = enrich_text[:500]
-
-            if enrichment.get("timestamp") and not item.raw_data.get("timestamp"):
-                item.raw_data["timestamp"] = enrichment["timestamp"]
-                for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z"):
-                    try:
-                        parsed_dt = datetime.strptime(enrichment["timestamp"], fmt)
-                        item.occurred_at = (
-                            parsed_dt if parsed_dt.tzinfo else parsed_dt.replace(tzinfo=UTC)
-                        )
-                        break
-                    except (ValueError, TypeError):
-                        continue
-
-            if enrichment.get("category") and item.raw_data.get("category") == "x_search":
-                item.raw_data["category"] = enrichment["category"]
 
     @staticmethod
     def _extract_text(data: dict[str, Any]) -> str:

@@ -141,10 +141,10 @@ def connector(config: SourceConfig) -> XaiXSearchConnector:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_fetch_extracts_from_annotations_with_context(
+async def test_fetch_json_primary_path(
     connector: XaiXSearchConnector, respx_mock,
 ):
-    """When response has annotations, tweets are extracted from citations (primary path)."""
+    """When response has valid JSON, tweets are parsed from JSON (primary path)."""
     respx_mock.post("https://api.x.ai/v1/responses").mock(
         return_value=httpx.Response(200, json=SAMPLE_JSON_RESPONSE),
     )
@@ -156,18 +156,18 @@ async def test_fetch_extracts_from_annotations_with_context(
     assert items[0].raw_data["author"] == "@AustinPD"
     assert items[1].url == "https://x.com/KVUE/status/222222"
 
-    # Annotation items should be enriched with JSON metadata
-    assert items[0].raw_data["author"] == "@AustinPD"
-    assert "shots fired" in items[0].summary.lower() or items[0].summary != ""
+    # JSON-parsed items have actual tweet text, not Grok prose
+    assert "shots fired" in items[0].raw_data["text"].lower()
+    assert "police activity" in items[1].raw_data["text"].lower()
 
 
 @pytest.mark.asyncio
-async def test_fetch_falls_back_to_json_when_no_annotations(
+async def test_fetch_json_primary_ignores_annotations_when_json_valid(
     connector: XaiXSearchConnector, respx_mock,
 ):
-    """When no annotations, JSON parsing is used as fallback."""
-    response_no_annotations = {
-        "id": "resp_json_only",
+    """JSON parsing is used even when conflicting annotations are present."""
+    response = {
+        "id": "resp_json_with_conflicting_annotations",
         "output": [{
             "type": "message",
             "role": "assistant",
@@ -180,19 +180,85 @@ async def test_fetch_falls_back_to_json_when_no_annotations(
                     "timestamp": "2026-03-26T10:00:00Z",
                     "category": "Test",
                 }]),
-                "annotations": [],
+                # Annotations reference a DIFFERENT tweet — should be ignored
+                "annotations": [
+                    {"type": "url_citation", "url": "https://x.com/OtherUser/status/000000"},
+                    {"type": "url_citation", "url": "https://x.com/i/status/111111"},
+                ],
             }],
         }],
     }
     respx_mock.post("https://api.x.ai/v1/responses").mock(
-        return_value=httpx.Response(200, json=response_no_annotations),
+        return_value=httpx.Response(200, json=response),
     )
     items = await connector.fetch()
 
+    # JSON is primary — only the JSON tweet is returned, not the annotation URLs
     assert len(items) == 1
     assert items[0].url == "https://x.com/TestUser/status/999999"
     assert items[0].raw_data["author"] == "@TestUser"
     assert items[0].occurred_at == datetime(2026, 3, 26, 10, 0, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_fetch_json_primary_with_mismatched_annotation_ids(
+    connector: XaiXSearchConnector, respx_mock,
+):
+    """Core bug: annotation /i/status/ IDs differ from JSON post_url IDs.
+
+    With JSON-primary parsing, the correct URLs, authors, and text come
+    through regardless of annotation ID mismatches.
+    """
+    response = {
+        "id": "resp_mismatch",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": json.dumps([
+                    {
+                        "post_url": "https://x.com/cbsaustin/status/2037294022058811585",
+                        "username": "@cbsaustin",
+                        "full_text": "Austin police respond to shooting on Riverside Dr.",
+                        "summary": "Shooting on Riverside",
+                        "category": "Crime",
+                        "timestamp": "2026-03-26T14:00:00Z",
+                    },
+                    {
+                        "post_url": "https://x.com/AustinPD/status/2037300000000000001",
+                        "username": "@AustinPD",
+                        "full_text": "APD investigating incident near downtown.",
+                        "summary": "Downtown incident",
+                        "category": "Law Enforcement",
+                        "timestamp": "2026-03-26T14:15:00Z",
+                    },
+                ]),
+                "annotations": [
+                    # These have DIFFERENT status IDs (redirect format)
+                    {"type": "url_citation", "url": "https://x.com/i/status/2036995284908048426"},
+                    {"type": "url_citation", "url": "https://x.com/i/status/2036995284908048427"},
+                ],
+            }],
+        }],
+    }
+    respx_mock.post("https://api.x.ai/v1/responses").mock(
+        return_value=httpx.Response(200, json=response),
+    )
+    items = await connector.fetch()
+
+    assert len(items) == 2
+    # JSON-parsed: correct usernames, not /i/ redirect
+    assert items[0].raw_data["author"] == "@cbsaustin"
+    assert items[1].raw_data["author"] == "@AustinPD"
+    # JSON-parsed: actual tweet text, not raw JSON blob
+    assert "shooting on riverside" in items[0].raw_data["text"].lower()
+    assert "investigating incident" in items[1].raw_data["text"].lower()
+    # JSON-parsed: proper post_url with username
+    assert "cbsaustin" in items[0].url
+    assert "AustinPD" in items[1].url
+    assert "/i/status/" not in items[0].url
+    assert "/i/status/" not in items[1].url
 
 
 @pytest.mark.asyncio
