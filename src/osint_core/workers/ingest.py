@@ -181,13 +181,15 @@ async def _ingest_source_async(
                     indicator_dicts = extract_indicators(
                         f"{item.title} {item.summary}"
                     )
-                    # Hydrate collection to avoid MissingGreenlet from
-                    # selectin lazy loader on a newly created Event whose
-                    # relationship collections have not been loaded.
-                    # Safe here because event is new — no pre-existing
-                    # indicators to preserve.
+                    # Bypass the selectin lazy loader on the new Event by
+                    # setting the collection directly on the instance dict,
+                    # avoiding SQLAlchemy's instrumented __set__ which
+                    # triggers a loader callback (MissingGreenlet).
                     if indicator_dicts:
-                        event.indicators = []
+                        from sqlalchemy.orm.attributes import (
+                            set_committed_value,
+                        )
+                        set_committed_value(event, "indicators", [])
                     for ind_dict in indicator_dicts:
                         indicator = await _upsert_indicator(
                             db, ind_dict, source_id
