@@ -240,9 +240,14 @@ class XaiXSearchConnector(BaseConnector):
         annotations = self._extract_annotations(data)
         text_context = self._extract_text(data) or ""
 
-        items: list[RawItem] = []
-        seen_ids: set[str] = set()
+        # Split response into paragraphs for per-tweet context assignment
+        paragraphs = [
+            p.strip() for p in re.split(r"\n\n+", text_context) if p.strip()
+        ]
 
+        # Collect unique tweet citations
+        tweet_urls: list[tuple[str, str, str]] = []  # (url, author, status_id)
+        seen_ids: set[str] = set()
         for ann in annotations:
             if ann.get("type") != "url_citation":
                 continue
@@ -250,32 +255,39 @@ class XaiXSearchConnector(BaseConnector):
             match = _TWEET_URL_RE.search(url)
             if not match:
                 continue
-
             author = match.group(1)
             status_id = match.group(2)
             if status_id in seen_ids:
                 continue
             seen_ids.add(status_id)
+            tweet_urls.append((url, author, status_id))
 
-            # x.com/i/status/... is a redirect URL — author unknown
-            display_author = f"@{author}" if author != "i" else "(unknown)"
-
-            # Extract context around this citation from the response text
-            snippet = self._extract_citation_context(
-                text_context, url, status_id,
+        items: list[RawItem] = []
+        for idx, (url, author, _status_id) in enumerate(tweet_urls):
+            # Assign paragraph by position (best effort)
+            paragraph = (
+                paragraphs[idx] if idx < len(paragraphs) else ""
             )
+            if not paragraph:
+                paragraph = text_context[:500]
+
+            # Extract @username from paragraph if URL author is 'i' (redirect)
+            display_author = f"@{author}"
+            if author == "i":
+                at_match = re.search(r"@(\w{2,})", paragraph)
+                display_author = (
+                    f"@{at_match.group(1)}" if at_match else "(unknown)"
+                )
 
             items.append(
                 RawItem(
-                    title=f"{display_author}: {snippet[:100]}"
-                    if snippet
-                    else f"{display_author}: (tweet via x_search)",
+                    title=f"{display_author}: {paragraph[:100]}",
                     url=url,
-                    summary=snippet[:500] if snippet else text_context[:500],
+                    summary=paragraph[:500],
                     raw_data={
                         "tweet_url": url,
                         "author": display_author,
-                        "text": snippet if snippet else text_context[:500],
+                        "text": paragraph,
                         "timestamp": "",
                         "category": "x_search",
                     },
@@ -352,23 +364,6 @@ class XaiXSearchConnector(BaseConnector):
 
             if enrichment.get("category") and item.raw_data.get("category") == "x_search":
                 item.raw_data["category"] = enrichment["category"]
-
-    @staticmethod
-    def _extract_citation_context(
-        text: str, url: str, status_id: str,
-    ) -> str:
-        """Extract text around a citation URL or status ID in the response."""
-        # Try to find the URL or status ID in the text and grab surrounding context
-        for needle in (url, status_id):
-            idx = text.find(needle)
-            if idx != -1:
-                start = max(0, text.rfind("\n", 0, idx) + 1)
-                end = text.find("\n", idx)
-                if end == -1:
-                    end = min(len(text), idx + 300)
-                return text[start:end].strip()
-        # Fallback: no context found
-        return ""
 
     @staticmethod
     def _extract_text(data: dict[str, Any]) -> str:
