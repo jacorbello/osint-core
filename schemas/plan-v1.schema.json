@@ -55,7 +55,8 @@
               "cisa_kev",
               "urlhaus_api",
               "threatfox_api",
-              "github_releases"
+              "github_releases",
+              "university_policy"
             ],
             "description": "Source collector type."
           },
