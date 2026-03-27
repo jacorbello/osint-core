@@ -84,12 +84,23 @@ class XaiXSearchConnector(BaseConnector):
         )
         geo_terms = self.config.extra.get("geo_terms", "")
 
-        search_lines = "\n".join(
-            f"{i + 1}. {q}" for i, q in enumerate(searches)
-        )
+        # Build search instructions with x_keyword_search / x_semantic_search prefixes
+        search_sections: list[str] = []
+        for i, q in enumerate(searches, 1):
+            # Heuristic: queries with boolean operators (OR/AND) or lang: are keyword
+            is_keyword = any(
+                op in q for op in ("OR", "AND", "lang:", "-filter:")
+            )
+            prefix = "x_keyword_search" if is_keyword else "x_semantic_search"
+            search_sections.append(f"### Search {i}\n{prefix}: {q}")
 
         parts = [
             "You are an OSINT analyst searching X/Twitter.",
+            "",
+            "## CRITICAL INSTRUCTIONS",
+            "You MUST execute ALL of the following searches using your "
+            "x_keyword_search and x_semantic_search tools.",
+            "Do NOT skip any searches. Execute each one separately.",
             "",
             "## MISSION",
             mission,
@@ -101,18 +112,27 @@ class XaiXSearchConnector(BaseConnector):
         parts += [
             "",
             "## SEARCHES TO EXECUTE",
-            "Execute ALL of the following searches:",
-            search_lines,
+            *search_sections,
             "",
             "## OUTPUT FORMAT",
-            f"Report the top {max_results} most relevant tweets you find. "
-            "For EACH tweet, write a short paragraph that includes:",
-            "- The @username of the author",
-            "- What the tweet says (quote or paraphrase the key content)",
-            "- Why it is relevant to the mission",
+            "Return results as a JSON array:",
             "",
-            "Write in plain text. Include the tweet URL inline so it "
-            "appears as a citation. Do NOT return JSON.",
+            "[",
+            "  {",
+            '    "post_url": "https://x.com/username/status/1234567890",'
+            "",
+            '    "username": "@username",',
+            '    "full_text": "The exact original post text",',
+            '    "summary": "Brief description of why this is relevant",',
+            '    "category": "short label for the type of signal",',
+            '    "timestamp": "YYYY-MM-DDTHH:MM:SSZ"',
+            "  }",
+            "]",
+            "",
+            f"Return at most {max_results} results. "
+            "Return empty array [] if no qualifying posts found.",
+            "",
+            "BEGIN SEARCHING NOW.",
         ]
 
         return "\n".join(parts)
@@ -321,7 +341,7 @@ class XaiXSearchConnector(BaseConnector):
         # Index tweets by status ID for fast lookup
         tweet_by_id: dict[str, dict[str, Any]] = {}
         for tweet in tweets:
-            url = tweet.get("tweet_url", "")
+            url = tweet.get("post_url") or tweet.get("tweet_url", "")
             match = re.search(r"/status/(\d+)", url)
             if match:
                 tweet_by_id[match.group(1)] = tweet
@@ -336,19 +356,21 @@ class XaiXSearchConnector(BaseConnector):
                 continue
 
             # Merge fields that are richer in the JSON response
-            if enrichment.get("author") and item.raw_data.get("author") in ("(unknown)", ""):
-                item.raw_data["author"] = enrichment["author"]
+            enrich_author = enrichment.get("username") or enrichment.get("author", "")
+            if enrich_author and item.raw_data.get("author") in ("(unknown)", ""):
+                item.raw_data["author"] = enrich_author
                 # Update title too
                 snippet = item.raw_data.get("text", "")[:100]
                 item.title = (
-                    f"{enrichment['author']}: {snippet}"
+                    f"{enrich_author}: {snippet}"
                     if snippet
-                    else f"{enrichment['author']}: (tweet via x_search)"
+                    else f"{enrich_author}: (tweet via x_search)"
                 )
 
-            if enrichment.get("text") and not item.raw_data.get("text"):
-                item.raw_data["text"] = enrichment["text"]
-                item.summary = enrichment["text"][:500]
+            enrich_text = enrichment.get("full_text") or enrichment.get("text", "")
+            if enrich_text and not item.raw_data.get("text"):
+                item.raw_data["text"] = enrich_text
+                item.summary = enrich_text[:500]
 
             if enrichment.get("timestamp") and not item.raw_data.get("timestamp"):
                 item.raw_data["timestamp"] = enrichment["timestamp"]
@@ -409,12 +431,14 @@ class XaiXSearchConnector(BaseConnector):
     def _tweet_to_raw_item(
         tweet: dict[str, Any],
     ) -> RawItem | None:
-        tweet_url = tweet.get("tweet_url", "")
+        # Support both field naming conventions
+        tweet_url = tweet.get("post_url") or tweet.get("tweet_url", "")
         if not tweet_url:
             return None
 
-        author = tweet.get("author", "")
-        text = tweet.get("text", "")
+        author = tweet.get("username") or tweet.get("author", "")
+        text = tweet.get("full_text") or tweet.get("text", "")
+        summary = tweet.get("summary", "") or text
         timestamp_str = tweet.get("timestamp", "")
         category = tweet.get("category", "")
 
@@ -431,7 +455,7 @@ class XaiXSearchConnector(BaseConnector):
         return RawItem(
             title=f"{author}: {text[:100]}" if author else text[:100],
             url=tweet_url,
-            summary=text[:500],
+            summary=summary[:500] if summary else text[:500],
             raw_data={
                 "tweet_url": tweet_url,
                 "author": author,
