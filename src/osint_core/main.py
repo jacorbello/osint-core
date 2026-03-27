@@ -18,6 +18,7 @@ from osint_core.api.routes import (
     health,
     indicators,
     jobs,
+    leads,
     plan,
     preferences,
     search,
@@ -75,4 +76,5 @@ app.include_router(search.router)
 app.include_router(jobs.router)
 app.include_router(audit.router)
 app.include_router(watches.router)
+app.include_router(leads.router)
 app.include_router(preferences.router)
