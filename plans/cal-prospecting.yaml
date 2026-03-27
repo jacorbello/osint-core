@@ -152,6 +152,30 @@ sources:
         - Heritage
         - BeckettLaw
 
+  # ── RSS: FIRE (Foundation for Individual Rights and Expression) ──
+  - id: rss_fire
+    type: rss
+    url: "https://www.thefire.org/feed"
+    schedule_cron: "20 7,14 * * *"
+
+  # ── RSS: Higher Ed Dive ──────────────────────────────────────
+  - id: rss_higher_ed_dive
+    type: rss
+    url: "https://www.highereddive.com/feeds/news/"
+    schedule_cron: "25 7,14 * * *"
+
+  # ── RSS: Reason / Volokh Conspiracy ──────────────────────────
+  - id: rss_volokh
+    type: rss
+    url: "https://reason.com/volokh/feed/"
+    schedule_cron: "30 7,14 * * *"
+
+  # ── RSS: Courthouse News Service ─────────────────────────────
+  - id: rss_courthouse_news
+    type: rss
+    url: "https://www.courthousenews.com/feed/"
+    schedule_cron: "35 7,14 * * *"
+
 source_profiles:
   x_cal_california:
     reliability: C
@@ -173,6 +197,26 @@ source_profiles:
     credibility: 3
     corroboration_required: true
     license: "oauth"
+  rss_fire:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "public"
+  rss_higher_ed_dive:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "public"
+  rss_volokh:
+    reliability: B
+    credibility: 3
+    corroboration_required: false
+    license: "public"
+  rss_courthouse_news:
+    reliability: B
+    credibility: 2
+    corroboration_required: false
+    license: "public"
 
 scoring:
   recency_half_life_hours: 168
@@ -181,6 +225,10 @@ scoring:
     x_cal_texas: 0.4
     x_cal_minnesota: 0.4
     x_cal_dc: 0.4
+    rss_fire: 0.9
+    rss_higher_ed_dive: 0.7
+    rss_volokh: 0.8
+    rss_courthouse_news: 0.85
   ioc_match_boost: 1.5
 
 enrichment:
