@@ -319,7 +319,7 @@ class XaiXSearchConnector(BaseConnector):
             match = re.search(r"/status/(\d+)", item.url)
             if not match:
                 continue
-            tweet = tweet_by_id.get(match.group(1))
+            tweet: dict[str, Any] | None = tweet_by_id.get(match.group(1))
             if not tweet:
                 continue
 
