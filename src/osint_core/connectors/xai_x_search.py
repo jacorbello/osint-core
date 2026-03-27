@@ -84,7 +84,9 @@ class XaiXSearchConnector(BaseConnector):
         )
         geo_terms = self.config.extra.get("geo_terms", "")
 
-        # Build search instructions with x_keyword_search / x_semantic_search prefixes
+        # x_keyword_search / x_semantic_search are prompt-level instructions
+        # that guide Grok's use of its internal x_search tool (the only
+        # registered API tool). This matches the n8n workflow pattern.
         search_sections: list[str] = []
         for i, q in enumerate(searches, 1):
             # Heuristic: queries with boolean operators (OR/AND) or lang: are keyword
@@ -367,8 +369,14 @@ class XaiXSearchConnector(BaseConnector):
                     else f"{enrich_author}: (tweet via x_search)"
                 )
 
+            # Update URL if JSON has a more specific one (username vs /i/ redirect)
+            enrich_url = enrichment.get("post_url") or enrichment.get("tweet_url", "")
+            if enrich_url and "/i/status/" in item.url and "/i/status/" not in enrich_url:
+                item.url = enrich_url
+                item.raw_data["tweet_url"] = enrich_url
+
             enrich_text = enrichment.get("full_text") or enrichment.get("text", "")
-            if enrich_text and not item.raw_data.get("text"):
+            if enrich_text:
                 item.raw_data["text"] = enrich_text
                 item.summary = enrich_text[:500]
 
