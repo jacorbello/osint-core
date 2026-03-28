@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +28,8 @@ CONSTITUTIONAL_LABELS = frozenset({
     "parental-rights",
 })
 
+VALID_SEVERITIES = frozenset({"info", "low", "medium", "high", "critical"})
+
 DEFAULT_CONFIDENCE_THRESHOLD = 0.3
 
 
@@ -50,23 +51,43 @@ def _normalize(value: str) -> str:
     return value.lower().strip()
 
 
-def compute_incident_fingerprint(institution: str, key: str) -> str:
-    """Fingerprint for incident leads: institution + affected person or source URL hash."""
+def compute_incident_fingerprint(
+    institution: str, key: str, plan_id: str | None = None,
+) -> str:
+    """Fingerprint for incident leads: institution + affected person or source URL hash.
+
+    Includes plan_id so identical incidents in different plans do not collide.
+    """
     raw = f"incident|{_normalize(institution)}|{_normalize(key)}"
+    if plan_id is not None:
+        raw = f"{raw}|plan:{plan_id}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def compute_policy_fingerprint(institution: str, policy_name: str) -> str:
-    """Fingerprint for policy leads: institution + normalized policy name."""
+def compute_policy_fingerprint(
+    institution: str, policy_name: str, plan_id: str | None = None,
+) -> str:
+    """Fingerprint for policy leads: institution + normalized policy name.
+
+    Includes plan_id so identical policies in different plans do not collide.
+    """
     raw = f"policy|{_normalize(institution)}|{_normalize(policy_name)}"
+    if plan_id is not None:
+        raw = f"{raw}|plan:{plan_id}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def compute_fingerprint(lead_type: str, institution: str, key: str) -> str:
-    """Dispatch to the appropriate fingerprint strategy."""
+def compute_fingerprint(
+    lead_type: str, institution: str, key: str, plan_id: str | None = None,
+) -> str:
+    """Dispatch to the appropriate fingerprint strategy.
+
+    If plan_id is provided, it is incorporated into the fingerprint to scope
+    deduplication by plan.
+    """
     if lead_type == "policy":
-        return compute_policy_fingerprint(institution, key)
-    return compute_incident_fingerprint(institution, key)
+        return compute_policy_fingerprint(institution, key, plan_id=plan_id)
+    return compute_incident_fingerprint(institution, key, plan_id=plan_id)
 
 
 # ---------------------------------------------------------------------------
@@ -130,9 +151,10 @@ def _entity_completeness(event: Event) -> float:
     # Check for jurisdiction
     if metadata.get("jurisdiction"):
         score += 0.2
-    # Check for constitutional basis
+    # Check for constitutional basis (only count valid labels)
     basis = metadata.get("constitutional_basis", [])
-    if basis:
+    valid_basis = [b for b in basis if b in CONSTITUTIONAL_LABELS]
+    if valid_basis:
         score += 0.3
     # Check for lead_type classification
     if metadata.get("lead_type"):
@@ -158,8 +180,14 @@ class LeadMatcher:
         """
         metadata = event.metadata_ or {}
 
-        # Extract lead fields from enriched metadata
-        lead_type = metadata.get("lead_type", "incident")
+        # Extract and normalize lead_type
+        raw_lead_type = metadata.get("lead_type")
+        if isinstance(raw_lead_type, str):
+            lead_type = raw_lead_type.strip().lower()
+        else:
+            lead_type = "incident"
+        if lead_type not in {"incident", "policy"}:
+            lead_type = "incident"
         institution = metadata.get("institution", "")
         jurisdiction = metadata.get("jurisdiction")
         constitutional_basis = [
@@ -177,7 +205,9 @@ class LeadMatcher:
             # Fall back to source_id-based institution grouping
             institution = event.source_id
 
-        fingerprint = compute_fingerprint(lead_type, institution, key)
+        fingerprint = compute_fingerprint(
+            lead_type, institution, key, plan_id=self.config.plan_id,
+        )
 
         # Look up existing lead
         result = await db.execute(
@@ -212,11 +242,12 @@ class LeadMatcher:
         """Create a new Lead from event data."""
         completeness = _entity_completeness(event)
         source_type = _source_type(event.source_id)
+        severity = _normalize_severity(event.severity)
 
         confidence = compute_confidence(
             source_count=1,
             source_types={source_type},
-            severity=event.severity,
+            severity=severity,
             entity_completeness=completeness,
             source_reputation=self.config.source_reputation,
             source_ids=[event.source_id],
@@ -234,7 +265,7 @@ class LeadMatcher:
             constitutional_basis=constitutional_basis,
             jurisdiction=jurisdiction,
             institution=institution,
-            severity=event.severity,
+            severity=severity,
             confidence=confidence,
             dedupe_fingerprint=fingerprint,
             plan_id=self.config.plan_id,
@@ -257,23 +288,24 @@ class LeadMatcher:
         if event.id not in lead.event_ids:
             set_committed_value(lead, "event_ids", [*lead.event_ids, event.id])
 
+        # Update severity first so confidence uses the best value
+        event_severity = _normalize_severity(event.severity)
+        if event_severity and _severity_rank(event_severity) > _severity_rank(lead.severity):
+            lead.severity = event_severity
+
         # Recompute confidence with updated source info
-        source_ids = _collect_source_ids(lead, event)
+        source_ids = await _collect_source_ids(lead, event, db)
         source_types = {_source_type(sid) for sid in source_ids}
         completeness = _entity_completeness(event)
 
         lead.confidence = compute_confidence(
             source_count=len(lead.event_ids),
             source_types=source_types,
-            severity=event.severity or lead.severity,
+            severity=lead.severity,
             entity_completeness=completeness,
             source_reputation=self.config.source_reputation,
             source_ids=source_ids,
         )
-
-        # Update severity if event is more severe
-        if event.severity and _severity_rank(event.severity) > _severity_rank(lead.severity):
-            lead.severity = event.severity
 
         # Merge constitutional basis
         existing_basis = set(lead.constitutional_basis or [])
@@ -300,6 +332,14 @@ def _severity_rank(severity: str | None) -> int:
     return _SEVERITY_RANKS.get(severity or "info", 0)
 
 
+def _normalize_severity(severity: str | None) -> str | None:
+    """Return severity if valid, otherwise None."""
+    if severity is None:
+        return None
+    normed = severity.strip().lower()
+    return normed if normed in VALID_SEVERITIES else None
+
+
 def _source_type(source_id: str) -> str:
     """Infer source type from source_id prefix convention."""
     if source_id.startswith("x_"):
@@ -311,9 +351,15 @@ def _source_type(source_id: str) -> str:
     return "unknown"
 
 
-def _collect_source_ids(lead: Lead, new_event: Event) -> list[str]:
-    """Collect unique source IDs. Since we only have event_ids on the lead,
-    we return the new event's source plus a synthetic count based on event count."""
-    # In production this would query events by ID, but for now we use
-    # the new event source plus the event count as a proxy
-    return [new_event.source_id]
+async def _collect_source_ids(
+    lead: Lead, new_event: Event, db: AsyncSession,
+) -> list[str]:
+    """Collect unique source IDs from all events attached to the lead."""
+    existing_ids = [eid for eid in lead.event_ids if eid != new_event.id]
+    source_ids: set[str] = {new_event.source_id}
+    if existing_ids:
+        result = await db.execute(
+            select(Event.source_id).where(Event.id.in_(existing_ids))
+        )
+        source_ids.update(row[0] for row in result.all())
+    return sorted(source_ids)

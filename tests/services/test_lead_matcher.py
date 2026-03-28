@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from osint_core.services.lead_matcher import (
-    CONSTITUTIONAL_LABELS,
     LeadMatcher,
     LeadMatcherConfig,
     compute_confidence,
@@ -15,6 +14,7 @@ from osint_core.services.lead_matcher import (
     compute_incident_fingerprint,
     compute_policy_fingerprint,
     _entity_completeness,
+    _normalize_severity,
     _source_type,
 )
 
@@ -73,9 +73,13 @@ def _make_lead(
 
 def _mock_db(existing_lead=None):
     db = AsyncMock()
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = existing_lead
-    db.execute = AsyncMock(return_value=result)
+    # First call returns the lead lookup result; subsequent calls return
+    # empty event source_id results (for _collect_source_ids queries).
+    lead_result = MagicMock()
+    lead_result.scalar_one_or_none.return_value = existing_lead
+    source_result = MagicMock()
+    source_result.all.return_value = []
+    db.execute = AsyncMock(side_effect=[lead_result, source_result])
     db.add = MagicMock()
     return db
 
@@ -201,10 +205,35 @@ class TestEntityCompleteness:
         event = _make_event(metadata={"institution": "UCLA"})
         assert _entity_completeness(event) == pytest.approx(0.3)
 
+    def test_invalid_constitutional_basis_not_counted(self):
+        event = _make_event(metadata={
+            "institution": "UCLA",
+            "constitutional_basis": ["BOGUS-LABEL"],
+        })
+        # institution=0.3, invalid basis=0.0 -> 0.3
+        assert _entity_completeness(event) == pytest.approx(0.3)
+
 
 # ---------------------------------------------------------------------------
 # Source type inference tests
 # ---------------------------------------------------------------------------
+
+
+class TestSeverityNormalization:
+    def test_valid_severity(self):
+        assert _normalize_severity("high") == "high"
+
+    def test_none_severity(self):
+        assert _normalize_severity(None) is None
+
+    def test_invalid_severity_returns_none(self):
+        assert _normalize_severity("UNKNOWN") is None
+
+    def test_whitespace_stripped(self):
+        assert _normalize_severity("  medium  ") == "medium"
+
+    def test_case_normalized(self):
+        assert _normalize_severity("HIGH") == "high"
 
 
 class TestSourceType:
@@ -258,7 +287,7 @@ class TestMatchEventToLead:
     async def test_updates_existing_lead(self, matcher):
         event = _make_event()
         existing = _make_lead(
-            fingerprint=compute_fingerprint("incident", "UC Berkeley", "Dr. Smith"),
+            fingerprint=compute_fingerprint("incident", "UC Berkeley", "Dr. Smith", plan_id="cal-prospecting"),
         )
         db = _mock_db(existing_lead=existing)
 
@@ -320,7 +349,7 @@ class TestMatchEventToLead:
             "affected_person": "Dr. Smith",
         })
         existing = _make_lead(
-            fingerprint=compute_fingerprint("incident", "UC Berkeley", "Dr. Smith"),
+            fingerprint=compute_fingerprint("incident", "UC Berkeley", "Dr. Smith", plan_id="cal-prospecting"),
             constitutional_basis=["1A-free-speech"],
         )
         db = _mock_db(existing_lead=existing)
@@ -333,7 +362,7 @@ class TestMatchEventToLead:
     async def test_update_bumps_severity(self, matcher):
         event = _make_event(severity="high")
         existing = _make_lead(
-            fingerprint=compute_fingerprint("incident", "UC Berkeley", "Dr. Smith"),
+            fingerprint=compute_fingerprint("incident", "UC Berkeley", "Dr. Smith", plan_id="cal-prospecting"),
             severity="low",
         )
         db = _mock_db(existing_lead=existing)
