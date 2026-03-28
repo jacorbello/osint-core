@@ -25,6 +25,7 @@ celery_app = Celery(
         "osint_core.workers.digest",
         "osint_core.workers.nlp_enrich",
         "osint_core.workers.retention",
+        "osint_core.workers.prospecting",
     ],
 )
 
@@ -52,6 +53,7 @@ celery_app.conf.update(
         "osint.rescore_all_events": {"queue": "score"},
         "osint.send_notification": {"queue": "notify"},
         "osint.compile_digest": {"queue": "digest"},
+        "osint.match_leads": {"queue": "enrich"},
         "osint.purge_expired_events": {"queue": "osint"},
     },
 )
