@@ -9,15 +9,14 @@ import pytest
 from osint_core.services.lead_matcher import (
     LeadMatcher,
     LeadMatcherConfig,
+    _entity_completeness,
+    _normalize_severity,
+    _source_type,
     compute_confidence,
     compute_fingerprint,
     compute_incident_fingerprint,
     compute_policy_fingerprint,
-    _entity_completeness,
-    _normalize_severity,
-    _source_type,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -287,7 +286,10 @@ class TestMatchEventToLead:
     async def test_updates_existing_lead(self, matcher):
         event = _make_event()
         existing = _make_lead(
-            fingerprint=compute_fingerprint("incident", "UC Berkeley", "Dr. Smith", plan_id="cal-prospecting"),
+            fingerprint=compute_fingerprint(
+                "incident", "UC Berkeley", "Dr. Smith",
+                plan_id="cal-prospecting",
+            ),
         )
         db = _mock_db(existing_lead=existing)
 
@@ -349,7 +351,10 @@ class TestMatchEventToLead:
             "affected_person": "Dr. Smith",
         })
         existing = _make_lead(
-            fingerprint=compute_fingerprint("incident", "UC Berkeley", "Dr. Smith", plan_id="cal-prospecting"),
+            fingerprint=compute_fingerprint(
+                "incident", "UC Berkeley", "Dr. Smith",
+                plan_id="cal-prospecting",
+            ),
             constitutional_basis=["1A-free-speech"],
         )
         db = _mock_db(existing_lead=existing)
@@ -362,7 +367,10 @@ class TestMatchEventToLead:
     async def test_update_bumps_severity(self, matcher):
         event = _make_event(severity="high")
         existing = _make_lead(
-            fingerprint=compute_fingerprint("incident", "UC Berkeley", "Dr. Smith", plan_id="cal-prospecting"),
+            fingerprint=compute_fingerprint(
+                "incident", "UC Berkeley", "Dr. Smith",
+                plan_id="cal-prospecting",
+            ),
             severity="low",
         )
         db = _mock_db(existing_lead=existing)

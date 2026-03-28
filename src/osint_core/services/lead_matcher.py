@@ -13,7 +13,6 @@ from sqlalchemy.orm.attributes import set_committed_value
 from osint_core.models.event import Event
 from osint_core.models.lead import Lead
 
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -182,10 +181,7 @@ class LeadMatcher:
 
         # Extract and normalize lead_type
         raw_lead_type = metadata.get("lead_type")
-        if isinstance(raw_lead_type, str):
-            lead_type = raw_lead_type.strip().lower()
-        else:
-            lead_type = "incident"
+        lead_type = raw_lead_type.strip().lower() if isinstance(raw_lead_type, str) else "incident"
         if lead_type not in {"incident", "policy"}:
             lead_type = "incident"
         institution = metadata.get("institution", "")
