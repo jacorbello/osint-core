@@ -110,7 +110,7 @@ class CourtListenerClient:
         return _parse_response(resp.json())
 
 
-def _parse_response(data: list | dict) -> list[VerifiedCitation]:
+def _parse_response(data: list[object] | dict[str, object]) -> list[VerifiedCitation]:
     """Parse the CourtListener citation-lookup response into VerifiedCitation objects."""
     citations: list[VerifiedCitation] = []
 
