@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 
@@ -28,6 +29,7 @@ class VerifiedCitation:
     courtlistener_url: str
     verified: bool
     relevance: str = ""
+    holding_summary: str = ""
 
 
 @dataclass
@@ -68,13 +70,12 @@ class CourtListenerClient:
         truncated = text[:_MAX_TEXT_LENGTH]
 
         wait = self._rate_limiter.acquire()
-        if wait > 0:
+        while wait > 0:
             logger.warning(
                 "courtlistener_rate_limited", wait_seconds=round(wait, 1),
             )
-            import asyncio
             await asyncio.sleep(wait)
-            self._rate_limiter.acquire()
+            wait = self._rate_limiter.acquire()
 
         headers: dict[str, str] = {}
         if self.api_key:
@@ -90,13 +91,7 @@ class CourtListenerClient:
                 resp.raise_for_status()
         except httpx.TimeoutException:
             logger.warning("courtlistener_timeout", text_len=len(truncated))
-            return [VerifiedCitation(
-                case_name="",
-                citation=truncated[:100],
-                courtlistener_url="",
-                verified=False,
-                relevance="verification timed out",
-            )]
+            return []
         except httpx.HTTPStatusError as exc:
             logger.warning(
                 "courtlistener_http_error",
@@ -107,7 +102,13 @@ class CourtListenerClient:
             logger.warning("courtlistener_error", error=str(exc))
             return []
 
-        return _parse_response(resp.json())
+        try:
+            body = resp.json()
+        except (ValueError, TypeError):
+            logger.warning("courtlistener_invalid_json", text_len=len(truncated))
+            return []
+
+        return _parse_response(body)
 
 
 def _parse_response(data: list[object] | dict[str, object]) -> list[VerifiedCitation]:
@@ -128,6 +129,8 @@ def _parse_response(data: list[object] | dict[str, object]) -> list[VerifiedCita
         if cl_url and not cl_url.startswith("http"):
             cl_url = f"{_BASE_URL}{cl_url}"
 
+        holding = item.get("holding_summary") or item.get("holdingSummary") or ""
+
         # A citation is verified if we got a non-empty absolute_url
         verified = bool(cl_url)
 
@@ -137,6 +140,7 @@ def _parse_response(data: list[object] | dict[str, object]) -> list[VerifiedCita
             courtlistener_url=cl_url,
             verified=verified,
             relevance="matched" if verified else "not independently verified",
+            holding_summary=str(holding),
         ))
 
     return citations

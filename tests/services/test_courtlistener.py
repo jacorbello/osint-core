@@ -49,6 +49,19 @@ class TestParseResponse:
         result = _parse_response(data)
         assert len(result) == 1
 
+    def test_parses_holding_summary(self):
+        data = [
+            {
+                "case_name": "Tinker v. Des Moines",
+                "citation": "393 U.S. 503",
+                "absolute_url": "/opinion/12345/tinker-v-des-moines/",
+                "holding_summary": "Students retain First Amendment rights in school.",
+            }
+        ]
+        result = _parse_response(data)
+        assert len(result) == 1
+        assert result[0].holding_summary == "Students retain First Amendment rights in school."
+
     def test_full_url_preserved(self):
         data = [{"case_name": "C", "citation": "1", "absolute_url": "https://example.com/op/1/"}]
         result = _parse_response(data)
@@ -110,7 +123,7 @@ class TestCourtListenerClient:
         assert result[0].case_name == "Tinker v. Des Moines"
 
     @pytest.mark.asyncio()
-    async def test_timeout_returns_unverified(self, client):
+    async def test_timeout_returns_empty(self, client):
         with patch("osint_core.services.courtlistener.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
@@ -120,9 +133,7 @@ class TestCourtListenerClient:
 
             result = await client.verify_citations("Some legal text")
 
-        assert len(result) == 1
-        assert result[0].verified is False
-        assert "timed out" in result[0].relevance
+        assert result == []
 
     @pytest.mark.asyncio()
     async def test_http_error_returns_empty(self, client):
@@ -163,6 +174,24 @@ class TestCourtListenerClient:
 
         call_kwargs = mock_client.post.call_args
         assert call_kwargs.kwargs["headers"]["Authorization"] == "Token test-key"
+
+    @pytest.mark.asyncio()
+    async def test_invalid_json_returns_empty(self, client):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.side_effect = ValueError("Invalid JSON")
+
+        with patch("osint_core.services.courtlistener.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            result = await client.verify_citations("Some text")
+
+        assert result == []
 
     @pytest.mark.asyncio()
     async def test_truncates_long_text(self, client):
