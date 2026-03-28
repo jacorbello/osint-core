@@ -3,11 +3,13 @@ generation, citation verification, and PDF rendering."""
 
 from __future__ import annotations
 
+import asyncio
 import importlib.resources
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 import structlog
@@ -17,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.config import settings
 from osint_core.models.lead import Lead
+from osint_core.services.pdf_export import upload_pdf_to_minio
 
 logger = structlog.get_logger()
 
@@ -119,7 +122,7 @@ def _render_pdf_html(context: dict[str, Any]) -> str:
         importlib.resources.files("osint_core") / "templates"
     )
     env = Environment(loader=FileSystemLoader(template_dir), autoescape=True)
-    template = env.get_template("prospecting_report.html")
+    template = env.get_template("prospecting_report.html.j2")
     return template.render(**context)
 
 
@@ -137,11 +140,15 @@ class ProspectingReportGenerator:
             return None
 
         now = datetime.now(UTC)
-        report_date = now.strftime("%B %d, %Y — %I:%M %p CST")
+        ct_now = now.astimezone(ZoneInfo("America/Chicago"))
+        tz_abbr = ct_now.strftime("%Z")  # CST or CDT depending on DST
+        report_date = ct_now.strftime(f"%B %d, %Y — %I:%M %p {tz_abbr}")
 
         # Build lead contexts with narrative sections
         lead_contexts = []
         all_source_citations: list[str] = []
+        # TODO(#137): Legal citation verification via CourtListener is deferred
+        # to a follow-up PR once the CourtListener service is integrated.
         all_legal_citations: list[dict[str, Any]] = []
 
         for lead in leads:
@@ -193,17 +200,23 @@ class ProspectingReportGenerator:
         html = _render_pdf_html(context)
 
         # Render PDF via WeasyPrint
-        try:
-            import weasyprint
-            pdf_bytes = weasyprint.HTML(string=html).write_pdf()
-        except Exception as exc:
-            logger.error("pdf_render_failed", error=str(exc))
-            pdf_bytes = html.encode()
+        import weasyprint
+
+        def _blocked_url_fetcher(url: str, **kwargs: Any) -> dict[str, str]:
+            """Disable external URL fetching to prevent SSRF via embedded resources."""
+            return {"string": "", "mime_type": "text/plain"}
+
+        pdf_bytes = weasyprint.HTML(
+            string=html,
+            url_fetcher=_blocked_url_fetcher,
+        ).write_pdf()
 
         # Archive to MinIO
         artifact_uri = await _archive_pdf(pdf_bytes, now)
+        if not artifact_uri:
+            raise RuntimeError("PDF archival to MinIO failed; aborting report cycle")
 
-        # Update lead statuses
+        # Update lead statuses only after successful archival
         for lead in leads:
             lead.reported_at = now
             if lead.status == "new":
@@ -224,35 +237,20 @@ class ProspectingReportGenerator:
         )
 
 
+_REPORT_BUCKET = "osint-reports"
+
+
 async def _archive_pdf(pdf_bytes: bytes, timestamp: datetime) -> str:
-    """Upload PDF to MinIO and return the artifact URI."""
+    """Upload PDF to MinIO via threadpool and return the artifact URI."""
+    date_path = timestamp.strftime("%Y/%m/%d")
+    time_part = timestamp.strftime("%H%M%S")
+    object_name = f"prospecting/{date_path}/report-{time_part}.pdf"
+
     try:
-        from io import BytesIO
-
-        from minio import Minio
-
-        client = Minio(
-            settings.minio_endpoint,
-            access_key=settings.minio_access_key,
-            secret_key=settings.minio_secret_key,
-            secure=settings.minio_secure,
+        uri = await asyncio.to_thread(
+            upload_pdf_to_minio, pdf_bytes, object_name, bucket=_REPORT_BUCKET
         )
-
-        bucket = "osint-reports"
-        if not client.bucket_exists(bucket):
-            client.make_bucket(bucket)
-
-        date_path = timestamp.strftime("%Y/%m/%d")
-        time_part = timestamp.strftime("%H%M%S")
-        object_name = f"prospecting/{date_path}/report-{time_part}.pdf"
-        client.put_object(
-            bucket,
-            object_name,
-            BytesIO(pdf_bytes),
-            len(pdf_bytes),
-            content_type="application/pdf",
-        )
-        return f"minio://{bucket}/{object_name}"
+        return uri
     except Exception as exc:
         logger.warning("minio_upload_failed", error=str(exc))
         return ""

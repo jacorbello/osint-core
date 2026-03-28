@@ -1,26 +1,19 @@
 """Tests for the ProspectingReportGenerator service."""
 
 import json
-import sys
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Mock weasyprint before importing the module under test
-if "weasyprint" not in sys.modules:
-    _mock_wp = MagicMock()
-    _mock_html = MagicMock()
-    _mock_html.write_pdf.return_value = b"%PDF-1.4 mock"
-    _mock_wp.HTML.return_value = _mock_html
-    sys.modules["weasyprint"] = _mock_wp
-
 from osint_core.services.prospecting_report import (
     ProspectingReportGenerator,
     _fallback_narrative,
     _select_reportable_leads,
 )
+
+_MOD = "osint_core.services.prospecting_report"
 
 
 def _make_lead(
@@ -126,9 +119,9 @@ class TestProspectingReportGenerator:
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = vllm_response
 
-        with patch("osint_core.services.prospecting_report.httpx.AsyncClient") as mock_cls, \
-             patch("osint_core.services.prospecting_report._archive_pdf", return_value="minio://test"), \
-             patch("osint_core.services.prospecting_report._render_pdf_html", return_value="<html></html>"):
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://test"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
             mock_client = AsyncMock()
             mock_client.post = AsyncMock(return_value=mock_resp)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -148,9 +141,9 @@ class TestProspectingReportGenerator:
         lead_reviewing = _make_lead(status="reviewing")
         db = _mock_db([lead_new, lead_reviewing])
 
-        with patch("osint_core.services.prospecting_report.httpx.AsyncClient") as mock_cls, \
-             patch("osint_core.services.prospecting_report._archive_pdf", return_value=""), \
-             patch("osint_core.services.prospecting_report._render_pdf_html", return_value="<html></html>"):
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
             mock_client = AsyncMock()
             mock_resp = MagicMock()
             mock_resp.raise_for_status = MagicMock()
@@ -167,13 +160,32 @@ class TestProspectingReportGenerator:
         db.commit.assert_called_once()
 
     @pytest.mark.asyncio()
+    async def test_archive_failure_raises(self, generator):
+        db = _mock_db([_make_lead()])
+
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value=""), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            mock_client = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            with pytest.raises(RuntimeError, match="PDF archival"):
+                await generator.generate_report(db)
+
+    @pytest.mark.asyncio()
     async def test_fallback_on_vllm_failure(self, generator):
         leads = [_make_lead()]
         db = _mock_db(leads)
 
-        with patch("osint_core.services.prospecting_report.httpx.AsyncClient") as mock_cls, \
-             patch("osint_core.services.prospecting_report._archive_pdf", return_value=""), \
-             patch("osint_core.services.prospecting_report._render_pdf_html", return_value="<html></html>"):
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
             mock_client = AsyncMock()
             mock_client.post = AsyncMock(side_effect=Exception("vLLM down"))
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
