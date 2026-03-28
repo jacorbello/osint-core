@@ -9,6 +9,7 @@ import respx
 from osint_core.workers.nlp_enrich import (
     _enrich_event_async,
     _validate_attack_techniques,
+    _validate_constitutional_fields,
 )
 
 
@@ -386,3 +387,260 @@ async def test_call_vllm_parses_markdown_wrapped_json():
     result = await _call_vllm("test prompt")
     assert result["relevance"] == "relevant"
     assert result["summary"] == "s"
+
+
+# ---------------------------------------------------------------------------
+# Constitutional classification tests
+# ---------------------------------------------------------------------------
+
+
+class TestValidateConstitutionalFields:
+    """Tests for _validate_constitutional_fields helper."""
+
+    def test_valid_fields(self):
+        result = _validate_constitutional_fields({
+            "constitutional_basis": ["1A-free-speech", "14A-due-process"],
+            "lead_type": "incident",
+            "institution": "UC Berkeley",
+            "jurisdiction": "CA",
+        })
+        assert result["constitutional_basis"] == ["1A-free-speech", "14A-due-process"]
+        assert result["lead_type"] == "incident"
+        assert result["institution"] == "UC Berkeley"
+        assert result["jurisdiction"] == "CA"
+
+    def test_filters_invalid_constitutional_basis(self):
+        result = _validate_constitutional_fields({
+            "constitutional_basis": ["1A-free-speech", "INVALID", "parental-rights"],
+        })
+        assert result["constitutional_basis"] == ["1A-free-speech", "parental-rights"]
+
+    def test_non_list_basis_returns_empty(self):
+        result = _validate_constitutional_fields({
+            "constitutional_basis": "1A-free-speech",
+        })
+        assert result["constitutional_basis"] == []
+
+    def test_missing_basis_returns_empty(self):
+        result = _validate_constitutional_fields({})
+        assert result["constitutional_basis"] == []
+
+    def test_invalid_lead_type_returns_none(self):
+        result = _validate_constitutional_fields({"lead_type": "unknown"})
+        assert result["lead_type"] is None
+
+    def test_policy_lead_type(self):
+        result = _validate_constitutional_fields({"lead_type": "policy"})
+        assert result["lead_type"] == "policy"
+
+    def test_empty_institution_returns_none(self):
+        result = _validate_constitutional_fields({"institution": ""})
+        assert result["institution"] is None
+
+    def test_null_institution_returns_none(self):
+        result = _validate_constitutional_fields({"institution": None})
+        assert result["institution"] is None
+
+    def test_invalid_jurisdiction_returns_none(self):
+        result = _validate_constitutional_fields({"jurisdiction": "NY"})
+        assert result["jurisdiction"] is None
+
+    def test_valid_jurisdictions(self):
+        for j in ("CA", "TX", "MN", "DC"):
+            result = _validate_constitutional_fields({"jurisdiction": j})
+            assert result["jurisdiction"] == j
+
+
+def _make_cal_event():
+    """Create a mock event associated with the CAL prospecting plan."""
+    event = MagicMock()
+    event.id = "event-cal-001"
+    event.title = "Professor fired for classroom speech at UC Davis"
+    event.summary = None
+    event.nlp_summary = None
+    event.nlp_relevance = None
+    event.plan_version = MagicMock()
+    event.plan_version.plan_id = "cal-prospecting"
+    event.plan_version.content = {
+        "enrichment": {
+            "nlp_enabled": True,
+            "mission": "Identify constitutional rights violations at educational institutions.",
+        },
+        "keywords": ["free speech", "First Amendment", "campus speech"],
+    }
+    event.metadata_ = {}
+    event.plan_version_id = "plan-uuid"
+    return event
+
+
+@pytest.mark.asyncio
+async def test_cal_plan_uses_constitutional_prompt():
+    """CAL plan events should use the constitutional classification prompt."""
+    event = _make_cal_event()
+
+    vllm_response = {
+        "summary": "Professor terminated for expressing views in class.",
+        "relevance": "relevant",
+        "entities": [
+            {"name": "UC Davis", "type": "organization"},
+            {"name": "Prof. Smith", "type": "affected_individual"},
+        ],
+        "constitutional_basis": ["1A-free-speech"],
+        "lead_type": "incident",
+        "institution": "UC Davis",
+        "jurisdiction": "CA",
+    }
+
+    engine = _mock_engine()
+    session = _mock_session(event)
+
+    with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
+         patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf, \
+         patch("osint_core.workers.nlp_enrich._call_vllm", return_value=vllm_response) as mock_vllm:
+        mock_sf.return_value = MagicMock(return_value=session)
+        result = await _enrich_event_async("event-cal-001")
+
+    assert result["status"] == "enriched"
+    # Verify constitutional fields stored in metadata
+    assert event.metadata_["constitutional_basis"] == ["1A-free-speech"]
+    assert event.metadata_["lead_type"] == "incident"
+    assert event.metadata_["institution"] == "UC Davis"
+    assert event.metadata_["jurisdiction"] == "CA"
+    # Verify ATT&CK techniques NOT stored for CAL events
+    assert "attack_techniques" not in event.metadata_
+
+    # Verify the CAL system message was used
+    call_kwargs = mock_vllm.call_args
+    assert call_kwargs.kwargs["system_message"] is not None
+    assert "constitutional rights" in call_kwargs.kwargs["system_message"]
+    assert call_kwargs.kwargs["max_tokens"] == 800
+
+
+@pytest.mark.asyncio
+async def test_non_cal_plan_uses_original_prompt():
+    """Non-CAL plan events should use the standard ATT&CK prompt."""
+    event = MagicMock()
+    event.id = "event-other"
+    event.title = "Phishing campaign detected"
+    event.summary = None
+    event.nlp_summary = None
+    event.nlp_relevance = None
+    event.plan_version = MagicMock()
+    event.plan_version.plan_id = "some-other-plan"
+    event.plan_version.content = {
+        "enrichment": {"nlp_enabled": True, "mission": "Monitor phishing"},
+        "keywords": ["phishing"],
+    }
+    event.metadata_ = {}
+
+    vllm_response = {
+        "summary": "Phishing campaign detected.",
+        "relevance": "relevant",
+        "entities": [],
+        "attack_techniques": [{"id": "T1566", "name": "Phishing"}],
+    }
+
+    engine = _mock_engine()
+    session = _mock_session(event)
+
+    with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
+         patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf, \
+         patch("osint_core.workers.nlp_enrich._call_vllm", return_value=vllm_response) as mock_vllm:
+        mock_sf.return_value = MagicMock(return_value=session)
+        result = await _enrich_event_async("event-other")
+
+    assert result["status"] == "enriched"
+    # ATT&CK techniques stored
+    assert event.metadata_["attack_techniques"] == [{"id": "T1566", "name": "Phishing"}]
+    # Constitutional fields NOT stored
+    assert "constitutional_basis" not in event.metadata_
+
+    # Verify default system message (None means use default)
+    call_kwargs = mock_vllm.call_args
+    assert call_kwargs.kwargs["system_message"] is None
+    assert call_kwargs.kwargs["max_tokens"] == 500
+
+
+@pytest.mark.asyncio
+async def test_cal_plan_filters_invalid_constitutional_basis():
+    """Invalid constitutional basis labels should be filtered out."""
+    event = _make_cal_event()
+
+    vllm_response = {
+        "summary": "Policy change at UCLA.",
+        "relevance": "relevant",
+        "entities": [],
+        "constitutional_basis": ["1A-free-speech", "MADE-UP-LABEL", "14A-equal-protection"],
+        "lead_type": "policy",
+        "institution": "UCLA",
+        "jurisdiction": "CA",
+    }
+
+    engine = _mock_engine()
+    session = _mock_session(event)
+
+    with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
+         patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf, \
+         patch("osint_core.workers.nlp_enrich._call_vllm", return_value=vllm_response):
+        mock_sf.return_value = MagicMock(return_value=session)
+        await _enrich_event_async("event-cal-001")
+
+    assert "MADE-UP-LABEL" not in event.metadata_["constitutional_basis"]
+    assert event.metadata_["constitutional_basis"] == ["1A-free-speech", "14A-equal-protection"]
+
+
+@pytest.mark.asyncio
+async def test_cal_plan_handles_invalid_jurisdiction():
+    """Invalid jurisdiction values should be set to None."""
+    event = _make_cal_event()
+
+    vllm_response = {
+        "summary": "Event in New York.",
+        "relevance": "tangential",
+        "entities": [],
+        "constitutional_basis": [],
+        "lead_type": "incident",
+        "institution": "NYU",
+        "jurisdiction": "NY",
+    }
+
+    engine = _mock_engine()
+    session = _mock_session(event)
+
+    with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
+         patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf, \
+         patch("osint_core.workers.nlp_enrich._call_vllm", return_value=vllm_response):
+        mock_sf.return_value = MagicMock(return_value=session)
+        await _enrich_event_async("event-cal-001")
+
+    assert event.metadata_["jurisdiction"] is None
+
+
+@pytest.mark.asyncio
+async def test_cal_plan_multiple_constitutional_bases():
+    """Events can have multiple constitutional bases."""
+    event = _make_cal_event()
+
+    vllm_response = {
+        "summary": "Religious student group denied campus access.",
+        "relevance": "relevant",
+        "entities": [],
+        "constitutional_basis": ["1A-religion", "1A-assembly", "14A-equal-protection"],
+        "lead_type": "incident",
+        "institution": "Texas A&M",
+        "jurisdiction": "TX",
+    }
+
+    engine = _mock_engine()
+    session = _mock_session(event)
+
+    with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
+         patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf, \
+         patch("osint_core.workers.nlp_enrich._call_vllm", return_value=vllm_response):
+        mock_sf.return_value = MagicMock(return_value=session)
+        await _enrich_event_async("event-cal-001")
+
+    assert len(event.metadata_["constitutional_basis"]) == 3
+    assert event.metadata_["lead_type"] == "incident"
+    assert event.metadata_["institution"] == "Texas A&M"
+    assert event.metadata_["jurisdiction"] == "TX"

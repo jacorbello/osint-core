@@ -21,6 +21,15 @@ from osint_core.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
+_CAL_PLAN_ID = "cal-prospecting"
+
+_VALID_CONSTITUTIONAL_BASES = frozenset({
+    "1A-free-speech", "1A-religion", "1A-assembly", "1A-press",
+    "14A-due-process", "14A-equal-protection", "parental-rights",
+})
+
+_VALID_JURISDICTIONS = frozenset({"CA", "TX", "MN", "DC"})
+
 _SYSTEM_MESSAGE = (
     "You are an intelligence analyst. Respond with JSON only.\n"
     "Respond with exactly this JSON structure:\n"
@@ -37,6 +46,38 @@ _SYSTEM_MESSAGE = (
     "T1595 Active Scanning, T1583 Acquire Infrastructure, T1498 Network Denial of Service,\n"
     "T1557 Adversary-in-the-Middle, T1040 Network Sniffing.\n"
     "Return an empty list if no techniques apply."
+)
+
+_CAL_SYSTEM_MESSAGE = (
+    "You are a constitutional rights analyst for The Center For American Liberty. "
+    "Respond with JSON only.\n"
+    "Respond with exactly this JSON structure:\n"
+    '{"summary": "1-2 sentence English summary of the event",\n'
+    '"relevance": "relevant|tangential|irrelevant",\n'
+    '"entities": [{"name": "...", "type": '
+    '"person|organization|location|indicator|official|affected_individual"}],\n'
+    '"constitutional_basis": ["1A-free-speech"],\n'
+    '"lead_type": "incident|policy",\n'
+    '"institution": "Name of the state university or institution involved",\n'
+    '"jurisdiction": "CA|TX|MN|DC"}\n'
+    "\n"
+    "For constitutional_basis, classify using one or more of these labels:\n"
+    "1A-free-speech, 1A-religion, 1A-assembly, 1A-press, "
+    "14A-due-process, 14A-equal-protection, parental-rights.\n"
+    "Return an empty list if no constitutional basis applies.\n"
+    "\n"
+    "For lead_type, classify as 'incident' (a specific event involving individuals) "
+    "or 'policy' (a rule, regulation, or institutional policy change).\n"
+    "\n"
+    "For institution, extract the name of the university or educational institution. "
+    "Return null if no institution is identified.\n"
+    "\n"
+    "For jurisdiction, extract the state/district: CA, TX, MN, or DC. "
+    "Return null if the jurisdiction cannot be determined.\n"
+    "\n"
+    "For entities, use extended types: person, organization, location, indicator, "
+    "official (university administrators, government officials), "
+    "affected_individual (students, faculty, staff whose rights are at issue)."
 )
 
 _USER_TEMPLATE = """Event title: {title}
@@ -77,15 +118,49 @@ def _validate_attack_techniques(raw: Any) -> list[dict[str, str]]:
     return validated
 
 
-async def _call_vllm(prompt: str) -> dict[str, Any]:
+def _validate_constitutional_fields(result: dict[str, Any]) -> dict[str, Any]:
+    """Extract and validate CAL constitutional classification fields.
+
+    Returns a dict with validated ``constitutional_basis``, ``lead_type``,
+    ``institution``, and ``jurisdiction`` suitable for storing in event metadata.
+    """
+    raw_basis = result.get("constitutional_basis")
+    basis = (
+        [b for b in raw_basis if isinstance(b, str) and b in _VALID_CONSTITUTIONAL_BASES]
+        if isinstance(raw_basis, list) else []
+    )
+
+    raw_lead = result.get("lead_type")
+    lead_type = raw_lead if isinstance(raw_lead, str) and raw_lead in ("incident", "policy") else None
+
+    raw_inst = result.get("institution")
+    institution = raw_inst if isinstance(raw_inst, str) and raw_inst else None
+
+    raw_juris = result.get("jurisdiction")
+    jurisdiction = raw_juris if isinstance(raw_juris, str) and raw_juris in _VALID_JURISDICTIONS else None
+
+    return {
+        "constitutional_basis": basis,
+        "lead_type": lead_type,
+        "institution": institution,
+        "jurisdiction": jurisdiction,
+    }
+
+
+async def _call_vllm(
+    prompt: str,
+    *,
+    system_message: str | None = None,
+    max_tokens: int = 500,
+) -> dict[str, Any]:
     url = f"{settings.vllm_url}/v1/chat/completions"
     payload = {
         "model": settings.llm_model,
         "messages": [
-            {"role": "system", "content": _SYSTEM_MESSAGE},
+            {"role": "system", "content": system_message or _SYSTEM_MESSAGE},
             {"role": "user", "content": prompt},
         ],
-        "max_tokens": 500,
+        "max_tokens": max_tokens,
         "temperature": 0.1,
     }
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -122,8 +197,10 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
             return {"event_id": event_id, "status": "skipped"}
 
         plan_content: dict[str, Any] = {}
+        plan_id: str | None = None
         if event.plan_version:
             plan_content = event.plan_version.content or {}
+            plan_id = event.plan_version.plan_id
         else:
             logger.warning(
                 "NLP enrich: event %s has no plan_version (plan_version_id=%s)",
@@ -150,8 +227,15 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
             keywords=", ".join(keywords),
         )
 
+        # Select prompt and token budget based on plan
+        is_cal = plan_id == _CAL_PLAN_ID
+        system_msg = _CAL_SYSTEM_MESSAGE if is_cal else None
+        vllm_max_tokens = 800 if is_cal else 500
+
         try:
-            result = await _call_vllm(user_msg)
+            result = await _call_vllm(
+                user_msg, system_message=system_msg, max_tokens=vllm_max_tokens,
+            )
         except (
             TimeoutError,
             httpx.TimeoutException,
@@ -170,10 +254,20 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
         if relevance in ("relevant", "tangential", "irrelevant"):
             event.nlp_relevance = relevance
 
-        # Store ATT&CK technique classifications in event metadata
-        techniques = _validate_attack_techniques(result.get("attack_techniques"))
         meta = dict(event.metadata_ or {})
-        meta["attack_techniques"] = techniques
+
+        if is_cal:
+            # Store CAL constitutional classification in metadata
+            cal_fields = _validate_constitutional_fields(result)
+            meta["constitutional_basis"] = cal_fields["constitutional_basis"]
+            meta["lead_type"] = cal_fields["lead_type"]
+            meta["institution"] = cal_fields["institution"]
+            meta["jurisdiction"] = cal_fields["jurisdiction"]
+        else:
+            # Store ATT&CK technique classifications in event metadata
+            techniques = _validate_attack_techniques(result.get("attack_techniques"))
+            meta["attack_techniques"] = techniques
+
         event.metadata_ = meta
 
         await db.commit()
