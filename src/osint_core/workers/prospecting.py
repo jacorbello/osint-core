@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid as uuid_mod
 from typing import Any
 
 from sqlalchemy import select
@@ -33,8 +34,9 @@ async def _match_leads_async(event_ids: list[str], plan_id: str) -> dict[str, An
     errors: list[str] = []
 
     async with async_session() as db:
-        # Load events
-        stmt = select(Event).where(Event.id.in_(event_ids))
+        # Load events — convert string IDs to UUID for the IN clause
+        uuid_ids = [uuid_mod.UUID(eid) for eid in event_ids]
+        stmt = select(Event).where(Event.id.in_(uuid_ids))
         result = await db.execute(stmt)
         events = list(result.scalars().all())
 
@@ -56,11 +58,7 @@ async def _match_leads_async(event_ids: list[str], plan_id: str) -> dict[str, An
             try:
                 lead = await matcher.match_event_to_lead(event, db)
                 if lead is not None:
-                    action = "created" if lead.id not in [eid for eid in (lead.event_ids or []) if eid != event.id] else "updated"
-                    if len(lead.event_ids) == 1:
-                        action = "created"
-                    else:
-                        action = "updated"
+                    action = "created" if len(lead.event_ids) == 1 else "updated"
                     results[str(event.id)] = action
                     logger.info(
                         "match_leads: %s lead lead_id=%s event_id=%s",
@@ -94,7 +92,8 @@ async def _match_leads_async(event_ids: list[str], plan_id: str) -> dict[str, An
 def match_leads_task(self: Any, event_ids: list[str], plan_id: str) -> dict[str, Any]:
     """Match enriched events to leads for a prospecting plan.
 
-    Runs after NLP enrichment in the ingest pipeline chain for CAL plan sources.
+    Called with event IDs and plan_id after NLP enrichment completes.
+    Pipeline chaining is handled by the caller (e.g. ingest worker).
     """
     loop = asyncio.new_event_loop()
     try:

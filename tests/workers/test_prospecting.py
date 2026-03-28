@@ -62,7 +62,6 @@ def _mock_db_context(events):
 
     # First call returns events, subsequent calls return lead lookup
     call_count = 0
-    original_execute = db.execute
 
     async def execute_side_effect(*args, **kwargs):
         nonlocal call_count
@@ -114,9 +113,20 @@ async def test_processes_batch_creates_leads():
 async def test_error_in_one_event_doesnt_block_others():
     """Error processing one event shouldn't prevent processing others."""
     good_event = _make_event()
-    bad_event = _make_event(title="Bad event")
-    # Make the bad event's metadata_ raise when accessed by LeadMatcher
-    type(bad_event).metadata_ = property(lambda self: (_ for _ in ()).throw(ValueError("boom")))
+
+    # Use a dedicated mock subclass to avoid class-level property mutation
+    class _BadMock(MagicMock):
+        @property
+        def metadata_(self):
+            raise ValueError("boom")
+
+    bad_event = _BadMock()
+    bad_event.id = uuid.uuid4()
+    bad_event.source_id = "rss_fire"
+    bad_event.title = "Bad event"
+    bad_event.severity = "medium"
+    bad_event.nlp_summary = None
+    bad_event.summary = None
 
     ctx, db = _mock_db_context([good_event, bad_event])
 
@@ -139,7 +149,7 @@ async def test_no_events_found():
     ctx, db = _mock_db_context([])
 
     with patch("osint_core.workers.prospecting.async_session", return_value=ctx):
-        result = await _match_leads_async(["fake-id"], "cal-prospecting")
+        result = await _match_leads_async([str(uuid.uuid4())], "cal-prospecting")
 
     assert result["status"] == "no_events"
 
