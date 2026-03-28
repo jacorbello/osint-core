@@ -33,6 +33,10 @@ async def test_skips_event_with_existing_nlp_data():
     event = MagicMock()
     event.nlp_relevance = "relevant"
     event.nlp_summary = "Already summarized"
+    event.plan_version = MagicMock()
+    event.plan_version.plan_id = "some-plan"
+    event.plan_version.content = {"enrichment": {"nlp_enabled": True}}
+    event.metadata_ = {"attack_techniques": [{"id": "T1566", "name": "Phishing"}]}
 
     engine = _mock_engine()
     session = _mock_session(event)
@@ -42,6 +46,39 @@ async def test_skips_event_with_existing_nlp_data():
         mock_sf.return_value = MagicMock(return_value=session)
         result = await _enrich_event_async("event-123")
         assert result["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_re_enriches_when_plan_switches_to_cal():
+    """Events enriched under ATT&CK prompt get re-enriched when plan changes to CAL."""
+    event = _make_cal_event()
+    event.nlp_relevance = "relevant"
+    event.nlp_summary = "Previously enriched summary."
+    # Has ATT&CK metadata but no CAL metadata — should re-enrich
+    event.metadata_ = {"attack_techniques": [{"id": "T1566", "name": "Phishing"}]}
+
+    vllm_response = {
+        "summary": "Re-enriched for CAL.",
+        "relevance": "relevant",
+        "entities": [],
+        "constitutional_basis": ["1A-free-speech"],
+        "lead_type": "incident",
+        "institution": "UC Davis",
+        "jurisdiction": "CA",
+    }
+
+    engine = _mock_engine()
+    session = _mock_session(event)
+
+    with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
+         patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf, \
+         patch("osint_core.workers.nlp_enrich._call_vllm", return_value=vllm_response):
+        mock_sf.return_value = MagicMock(return_value=session)
+        result = await _enrich_event_async("event-cal-001")
+
+    assert result["status"] == "enriched"
+    assert event.metadata_["constitutional_basis"] == ["1A-free-speech"]
+    assert "attack_techniques" not in event.metadata_
 
 
 @pytest.mark.asyncio
@@ -376,6 +413,27 @@ async def test_call_vllm_includes_system_role():
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_call_vllm_custom_system_message_and_max_tokens():
+    """Custom system_message and max_tokens are forwarded in the payload."""
+    content = json.dumps({
+        "summary": "s", "relevance": "relevant",
+        "entities": [], "constitutional_basis": [],
+    })
+    vllm_response = {"choices": [{"message": {"content": content}}]}
+    route = respx.post("http://localhost:8001/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=vllm_response),
+    )
+    from osint_core.workers.nlp_enrich import _call_vllm
+    custom_msg = "You are a constitutional rights analyst. Respond with JSON only."
+    await _call_vllm("test prompt", system_message=custom_msg, max_tokens=800)
+    sent = route.calls.last.request
+    body = json.loads(sent.content)
+    assert body["messages"][0]["content"] == custom_msg
+    assert body["max_tokens"] == 800
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_call_vllm_parses_markdown_wrapped_json():
     """vLLM sometimes wraps JSON in markdown code fences."""
     wrapped = '```json\n{"summary":"s","relevance":"relevant","entities":[]}\n```'
@@ -449,6 +507,22 @@ class TestValidateConstitutionalFields:
         for j in ("CA", "TX", "MN", "DC"):
             result = _validate_constitutional_fields({"jurisdiction": j})
             assert result["jurisdiction"] == j
+
+    def test_normalizes_lowercase_jurisdiction(self):
+        result = _validate_constitutional_fields({"jurisdiction": "ca"})
+        assert result["jurisdiction"] == "CA"
+
+    def test_normalizes_full_state_name(self):
+        result = _validate_constitutional_fields({"jurisdiction": "California"})
+        assert result["jurisdiction"] == "CA"
+
+    def test_normalizes_texas(self):
+        result = _validate_constitutional_fields({"jurisdiction": "texas"})
+        assert result["jurisdiction"] == "TX"
+
+    def test_normalizes_district_of_columbia(self):
+        result = _validate_constitutional_fields({"jurisdiction": "District of Columbia"})
+        assert result["jurisdiction"] == "DC"
 
 
 def _make_cal_event():
@@ -587,6 +661,86 @@ async def test_cal_plan_filters_invalid_constitutional_basis():
 
     assert "MADE-UP-LABEL" not in event.metadata_["constitutional_basis"]
     assert event.metadata_["constitutional_basis"] == ["1A-free-speech", "14A-equal-protection"]
+
+
+@pytest.mark.asyncio
+async def test_cal_plan_removes_stale_attack_techniques():
+    """CAL enrichment removes prior ATT&CK keys from metadata."""
+    event = _make_cal_event()
+    event.metadata_ = {"attack_techniques": [{"id": "T1566", "name": "Phishing"}], "other": 1}
+
+    vllm_response = {
+        "summary": "Speech code adopted at UT Austin.",
+        "relevance": "relevant",
+        "entities": [],
+        "constitutional_basis": ["1A-free-speech"],
+        "lead_type": "policy",
+        "institution": "UT Austin",
+        "jurisdiction": "TX",
+    }
+
+    engine = _mock_engine()
+    session = _mock_session(event)
+
+    with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
+         patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf, \
+         patch("osint_core.workers.nlp_enrich._call_vllm", return_value=vllm_response):
+        mock_sf.return_value = MagicMock(return_value=session)
+        result = await _enrich_event_async("event-cal-001")
+
+    assert result["status"] == "enriched"
+    assert "attack_techniques" not in event.metadata_
+    assert event.metadata_["constitutional_basis"] == ["1A-free-speech"]
+    assert event.metadata_["other"] == 1  # unrelated keys preserved
+
+
+@pytest.mark.asyncio
+async def test_non_cal_plan_removes_stale_constitutional_keys():
+    """Non-CAL enrichment removes prior CAL-specific keys from metadata."""
+    event = MagicMock()
+    event.id = "event-switched"
+    event.title = "Phishing campaign"
+    event.summary = None
+    event.nlp_summary = None
+    event.nlp_relevance = None
+    event.plan_version = MagicMock()
+    event.plan_version.plan_id = "cyber-plan"
+    event.plan_version.content = {
+        "enrichment": {"nlp_enabled": True, "mission": "Monitor threats"},
+        "keywords": ["phishing"],
+    }
+    event.metadata_ = {
+        "constitutional_basis": ["1A-free-speech"],
+        "lead_type": "incident",
+        "institution": "UC Davis",
+        "jurisdiction": "CA",
+        "other": 2,
+    }
+    event.plan_version_id = "plan-uuid"
+
+    vllm_response = {
+        "summary": "Phishing campaign detected.",
+        "relevance": "relevant",
+        "entities": [],
+        "attack_techniques": [{"id": "T1566", "name": "Phishing"}],
+    }
+
+    engine = _mock_engine()
+    session = _mock_session(event)
+
+    with patch("osint_core.workers.nlp_enrich.create_async_engine", return_value=engine), \
+         patch("osint_core.workers.nlp_enrich.async_sessionmaker") as mock_sf, \
+         patch("osint_core.workers.nlp_enrich._call_vllm", return_value=vllm_response):
+        mock_sf.return_value = MagicMock(return_value=session)
+        result = await _enrich_event_async("event-switched")
+
+    assert result["status"] == "enriched"
+    assert "constitutional_basis" not in event.metadata_
+    assert "lead_type" not in event.metadata_
+    assert "institution" not in event.metadata_
+    assert "jurisdiction" not in event.metadata_
+    assert event.metadata_["attack_techniques"] == [{"id": "T1566", "name": "Phishing"}]
+    assert event.metadata_["other"] == 2  # unrelated keys preserved
 
 
 @pytest.mark.asyncio

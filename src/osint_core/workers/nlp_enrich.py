@@ -30,6 +30,20 @@ _VALID_CONSTITUTIONAL_BASES = frozenset({
 
 _VALID_JURISDICTIONS = frozenset({"CA", "TX", "MN", "DC"})
 
+_JURISDICTION_ALIASES: dict[str, str] = {
+    "california": "CA", "ca": "CA",
+    "texas": "TX", "tx": "TX",
+    "minnesota": "MN", "mn": "MN",
+    "washington dc": "DC", "district of columbia": "DC", "dc": "DC",
+    "d.c.": "DC",
+}
+
+# Keys exclusive to each enrichment mode — cleared when switching modes.
+_CAL_META_KEYS = frozenset({
+    "constitutional_basis", "lead_type", "institution", "jurisdiction",
+})
+_DEFAULT_META_KEYS = frozenset({"attack_techniques"})
+
 _SYSTEM_MESSAGE = (
     "You are an intelligence analyst. Respond with JSON only.\n"
     "Respond with exactly this JSON structure:\n"
@@ -137,7 +151,13 @@ def _validate_constitutional_fields(result: dict[str, Any]) -> dict[str, Any]:
     institution = raw_inst if isinstance(raw_inst, str) and raw_inst else None
 
     raw_juris = result.get("jurisdiction")
-    jurisdiction = raw_juris if isinstance(raw_juris, str) and raw_juris in _VALID_JURISDICTIONS else None
+    jurisdiction: str | None = None
+    if isinstance(raw_juris, str):
+        upper = raw_juris.strip().upper()
+        if upper in _VALID_JURISDICTIONS:
+            jurisdiction = upper
+        else:
+            jurisdiction = _JURISDICTION_ALIASES.get(raw_juris.strip().lower())
 
     return {
         "constitutional_basis": basis,
@@ -192,10 +212,6 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
             await engine.dispose()
             return {"event_id": event_id, "status": "not_found"}
 
-        if event.nlp_relevance and event.nlp_summary:
-            await engine.dispose()
-            return {"event_id": event_id, "status": "skipped"}
-
         plan_content: dict[str, Any] = {}
         plan_id: str | None = None
         if event.plan_version:
@@ -206,6 +222,18 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
                 "NLP enrich: event %s has no plan_version (plan_version_id=%s)",
                 event_id, event.plan_version_id,
             )
+
+        # Skip only if NLP fields exist AND the plan-specific metadata is already present.
+        # This allows re-enrichment when events switch plans (e.g. ATT&CK -> CAL).
+        is_cal = plan_id == _CAL_PLAN_ID
+        meta_present = dict(event.metadata_ or {})
+        if event.nlp_relevance and event.nlp_summary:
+            if is_cal and all(k in meta_present for k in _CAL_META_KEYS):
+                await engine.dispose()
+                return {"event_id": event_id, "status": "skipped"}
+            if not is_cal and "attack_techniques" in meta_present:
+                await engine.dispose()
+                return {"event_id": event_id, "status": "skipped"}
 
         enrichment = plan_content.get("enrichment", {})
         if not enrichment.get("nlp_enabled", False):
@@ -228,7 +256,6 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
         )
 
         # Select prompt and token budget based on plan
-        is_cal = plan_id == _CAL_PLAN_ID
         system_msg = _CAL_SYSTEM_MESSAGE if is_cal else None
         vllm_max_tokens = 800 if is_cal else 500
 
@@ -257,16 +284,20 @@ async def _enrich_event_async(event_id: str) -> dict[str, Any]:
         meta = dict(event.metadata_ or {})
 
         if is_cal:
-            # Store CAL constitutional classification in metadata
+            # Store CAL constitutional classification; remove stale ATT&CK keys
             cal_fields = _validate_constitutional_fields(result)
             meta["constitutional_basis"] = cal_fields["constitutional_basis"]
             meta["lead_type"] = cal_fields["lead_type"]
             meta["institution"] = cal_fields["institution"]
             meta["jurisdiction"] = cal_fields["jurisdiction"]
+            for k in _DEFAULT_META_KEYS:
+                meta.pop(k, None)
         else:
-            # Store ATT&CK technique classifications in event metadata
+            # Store ATT&CK technique classifications; remove stale CAL keys
             techniques = _validate_attack_techniques(result.get("attack_techniques"))
             meta["attack_techniques"] = techniques
+            for k in _CAL_META_KEYS:
+                meta.pop(k, None)
 
         event.metadata_ = meta
 
