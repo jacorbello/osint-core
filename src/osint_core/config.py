@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
 
+    # --- CourtListener ---
+    courtlistener_api_key: str = ""
+
     # --- Shodan ---
     shodan_api_key: str = ""
 
