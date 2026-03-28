@@ -145,7 +145,10 @@ def _validate_constitutional_fields(result: dict[str, Any]) -> dict[str, Any]:
     )
 
     raw_lead = result.get("lead_type")
-    lead_type = raw_lead if isinstance(raw_lead, str) and raw_lead in ("incident", "policy") else None
+    lead_type = (
+        raw_lead if isinstance(raw_lead, str) and raw_lead in ("incident", "policy")
+        else None
+    )
 
     raw_inst = result.get("institution")
     institution = raw_inst if isinstance(raw_inst, str) and raw_inst else None
