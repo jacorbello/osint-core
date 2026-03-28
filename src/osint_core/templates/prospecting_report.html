@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <link rel="stylesheet" href="prospecting_report.css">
+    <style>
+        {% include 'prospecting_report.css' %}
+    </style>
 </head>
 <body>
 
@@ -255,7 +257,7 @@
             {{ cite.citation }} — <em>{{ cite.case_name }}</em>
             {% if cite.verified %}
                 <span class="citation-verified">✓ Verified via CourtListener</span>
-                {% if cite.courtlistener_url %}
+                {% if cite.courtlistener_url and cite.courtlistener_url.startswith('https://') %}
                     (<a href="{{ cite.courtlistener_url }}">view</a>)
                 {% endif %}
             {% else %}

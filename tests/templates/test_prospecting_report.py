@@ -158,8 +158,8 @@ class TestProspectingReportTemplate:
         ctx["summary"]["total_leads"] = 0
         html = _render(ctx)
         assert "No reportable leads" in html
-        # Should not contain any lead sections
-        assert "lead-section" not in html
+        # Should not contain any lead section divs (CSS may reference the class)
+        assert 'class="lead-section"' not in html
 
     def test_single_lead(self):
         ctx = _sample_context(leads=[_sample_lead()])
