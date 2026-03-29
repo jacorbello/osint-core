@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -12,6 +13,11 @@ from osint_core.api.routes.leads import get_lead, list_leads, update_lead
 from osint_core.models.lead import LeadStatusEnum
 from osint_core.schemas.lead import LeadListResponse, LeadUpdateRequest
 from tests.helpers import make_request, make_user, run_async
+
+
+def _compiled_sql(stmt) -> str:
+    """Compile a SQLAlchemy statement to a SQL string for assertion."""
+    return str(stmt.compile(compile_kwargs={"literal_binds": True}))
 
 
 def _make_lead(
@@ -144,6 +150,13 @@ def test_list_leads_with_status_filter():
 
     assert len(result.items) == 1
     assert db.execute.call_count == 2
+    # Verify both item and count queries include the status WHERE clause
+    items_stmt = db.execute.call_args_list[0][0][0]
+    count_stmt = db.execute.call_args_list[1][0][0]
+    items_sql = _compiled_sql(items_stmt)
+    count_sql = _compiled_sql(count_stmt)
+    assert "status" in items_sql
+    assert "status" in count_sql
 
 
 def test_list_leads_with_jurisdiction_filter():
@@ -166,6 +179,10 @@ def test_list_leads_with_jurisdiction_filter():
     )
 
     assert len(result.items) == 1
+    items_sql = _compiled_sql(db.execute.call_args_list[0][0][0])
+    count_sql = _compiled_sql(db.execute.call_args_list[1][0][0])
+    assert "jurisdiction" in items_sql
+    assert "jurisdiction" in count_sql
 
 
 def test_list_leads_with_lead_type_filter():
@@ -188,6 +205,10 @@ def test_list_leads_with_lead_type_filter():
     )
 
     assert len(result.items) == 1
+    items_sql = _compiled_sql(db.execute.call_args_list[0][0][0])
+    count_sql = _compiled_sql(db.execute.call_args_list[1][0][0])
+    assert "lead_type" in items_sql
+    assert "lead_type" in count_sql
 
 
 def test_list_leads_with_date_filters():
@@ -210,6 +231,10 @@ def test_list_leads_with_date_filters():
     )
 
     assert len(result.items) == 1
+    items_sql = _compiled_sql(db.execute.call_args_list[0][0][0])
+    count_sql = _compiled_sql(db.execute.call_args_list[1][0][0])
+    assert "first_surfaced_at" in items_sql
+    assert "first_surfaced_at" in count_sql
 
 
 def test_list_leads_with_all_filters():
@@ -237,6 +262,11 @@ def test_list_leads_with_all_filters():
     )
 
     assert len(result.items) == 1
+    items_sql = _compiled_sql(db.execute.call_args_list[0][0][0])
+    count_sql = _compiled_sql(db.execute.call_args_list[1][0][0])
+    for col in ("status", "jurisdiction", "lead_type", "first_surfaced_at"):
+        assert col in items_sql, f"Missing {col} filter in items query"
+        assert col in count_sql, f"Missing {col} filter in count query"
 
 
 def test_list_leads_pagination_has_more():
@@ -327,6 +357,9 @@ def test_get_lead_not_found():
 
     assert isinstance(result, JSONResponse)
     assert result.status_code == 404
+    body = json.loads(result.body)
+    assert body["code"] == "not_found"
+    assert body["detail"] == "Lead not found"
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +406,7 @@ def test_update_lead_valid_transition_reviewing_to_qualified():
 
     assert lead.status == LeadStatusEnum.qualified
     db.commit.assert_awaited_once()
+    db.refresh.assert_awaited_once()
 
 
 def test_update_lead_valid_transition_qualified_to_contacted():
@@ -392,6 +426,8 @@ def test_update_lead_valid_transition_qualified_to_contacted():
     )
 
     assert lead.status == LeadStatusEnum.contacted
+    db.commit.assert_awaited_once()
+    db.refresh.assert_awaited_once()
 
 
 def test_update_lead_valid_transition_contacted_to_retained():
@@ -411,10 +447,12 @@ def test_update_lead_valid_transition_contacted_to_retained():
     )
 
     assert lead.status == LeadStatusEnum.retained
+    db.commit.assert_awaited_once()
+    db.refresh.assert_awaited_once()
 
 
 def test_update_lead_valid_transition_new_to_declined():
-    """Any non-terminal status can transition to declined."""
+    """Successful transition from new to declined."""
     lead_id = uuid.uuid4()
     lead = _make_lead(lead_id=lead_id, status=LeadStatusEnum.new)
     db = _make_single_db(lead)
@@ -430,6 +468,8 @@ def test_update_lead_valid_transition_new_to_declined():
     )
 
     assert lead.status == LeadStatusEnum.declined
+    db.commit.assert_awaited_once()
+    db.refresh.assert_awaited_once()
 
 
 def test_update_lead_valid_transition_stale_to_reviewing():
@@ -449,6 +489,8 @@ def test_update_lead_valid_transition_stale_to_reviewing():
     )
 
     assert lead.status == LeadStatusEnum.reviewing
+    db.commit.assert_awaited_once()
+    db.refresh.assert_awaited_once()
 
 
 def test_update_lead_invalid_transition_retained_to_new():
@@ -469,6 +511,10 @@ def test_update_lead_invalid_transition_retained_to_new():
 
     assert isinstance(result, JSONResponse)
     assert result.status_code == 422
+    body = json.loads(result.body)
+    assert body["code"] == "invalid_status_transition"
+    assert "retained" in body["detail"]
+    assert "new" in body["detail"]
     db.commit.assert_not_awaited()
 
 
@@ -490,6 +536,10 @@ def test_update_lead_invalid_transition_declined_to_qualified():
 
     assert isinstance(result, JSONResponse)
     assert result.status_code == 422
+    body = json.loads(result.body)
+    assert body["code"] == "invalid_status_transition"
+    assert "declined" in body["detail"]
+    assert "qualified" in body["detail"]
 
 
 def test_update_lead_invalid_transition_new_to_contacted():
@@ -510,6 +560,10 @@ def test_update_lead_invalid_transition_new_to_contacted():
 
     assert isinstance(result, JSONResponse)
     assert result.status_code == 422
+    body = json.loads(result.body)
+    assert body["code"] == "invalid_status_transition"
+    assert "new" in body["detail"]
+    assert "contacted" in body["detail"]
 
 
 def test_update_lead_not_found():
@@ -529,3 +583,6 @@ def test_update_lead_not_found():
 
     assert isinstance(result, JSONResponse)
     assert result.status_code == 404
+    body = json.loads(result.body)
+    assert body["code"] == "not_found"
+    assert body["detail"] == "Lead not found"
