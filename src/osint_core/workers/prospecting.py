@@ -1,9 +1,10 @@
-"""Celery tasks for prospecting lead matching after event enrichment."""
+"""Celery tasks for prospecting lead matching, report generation, and scheduling."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid as uuid_mod
 from typing import Any
 
@@ -102,6 +103,147 @@ def match_leads_task(self: Any, event_ids: list[str], plan_id: str) -> dict[str,
         logger.exception("Lead matching failed for events %s", event_ids)
         raise self.retry(
             exc=exc, countdown=min(2 ** self.request.retries * 30, 900),
+        ) from exc
+    finally:
+        loop.close()
+
+
+async def _generate_report_async() -> dict[str, Any]:
+    """Generate a prospecting report and send it via email."""
+    from osint_core.services.prospecting_report import ProspectingReportGenerator
+    from osint_core.services.resend_notifier import ResendNotifier
+
+    start = time.monotonic()
+
+    async with async_session() as db:
+        generator = ProspectingReportGenerator()
+        result = await generator.generate_report(db)
+
+    if result is None:
+        logger.info(
+            "prospecting_report_skipped",
+            reason="no_new_leads",
+        )
+        return {"status": "skipped", "reason": "no_new_leads"}
+
+    # Read recipients from config — plan custom section or env
+    from osint_core.config import settings
+
+    recipients_raw = getattr(settings, "resend_recipients", "") or ""
+    recipients = [r.strip() for r in recipients_raw.split(",") if r.strip()]
+
+    if not recipients:
+        logger.warning(
+            "prospecting_report_no_recipients",
+            lead_count=result.lead_count,
+        )
+        return {
+            "status": "skipped",
+            "reason": "no_recipients",
+            "lead_count": result.lead_count,
+        }
+
+    notifier = ResendNotifier()
+    # Use the first lead's executive summary for email body
+    executive_summary = f"Report generated with {result.lead_count} leads on {result.report_date}."
+    sent = await notifier.send_report(
+        pdf_bytes=result.pdf_bytes,
+        executive_summary=executive_summary,
+        recipients=recipients,
+    )
+
+    elapsed = time.monotonic() - start
+    logger.info(
+        "prospecting_report_complete",
+        lead_count=result.lead_count,
+        artifact_uri=result.artifact_uri,
+        email_sent=sent,
+        recipients_count=len(recipients),
+        elapsed_seconds=round(elapsed, 2),
+    )
+
+    return {
+        "status": "completed",
+        "lead_count": result.lead_count,
+        "artifact_uri": result.artifact_uri,
+        "email_sent": sent,
+        "elapsed_seconds": round(elapsed, 2),
+    }
+
+
+@celery_app.task(bind=True, name="osint.generate_prospecting_report", max_retries=1)  # type: ignore[untyped-decorator]
+def generate_prospecting_report_task(self: Any) -> dict[str, Any]:
+    """Generate a prospecting report and email it via Resend.
+
+    Scheduled via Celery beat at 8 AM and 3 PM CST (13:00, 20:00 UTC).
+    Gracefully skips if no new leads exist or no recipients are configured.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_generate_report_async())
+    except Exception as exc:
+        logger.exception("Prospecting report generation failed")
+        raise self.retry(
+            exc=exc, countdown=min(2 ** self.request.retries * 60, 300),
+        ) from exc
+    finally:
+        loop.close()
+
+
+async def _collect_sources_async(plan_id: str) -> dict[str, Any]:
+    """Trigger ingest for all sources in the prospecting plan."""
+    from osint_core.services.plan_store import PlanStore
+
+    async with async_session() as db:
+        store = PlanStore()
+        plan_version = await store.get_active(db, plan_id)
+
+    if plan_version is None:
+        logger.warning("collect_sources_no_plan", plan_id=plan_id)
+        return {"status": "skipped", "reason": "no_active_plan"}
+
+    content = plan_version.content or {}
+    sources = content.get("sources", [])
+
+    if not sources:
+        logger.warning("collect_sources_empty", plan_id=plan_id)
+        return {"status": "skipped", "reason": "no_sources"}
+
+    from osint_core.workers.ingest import ingest_source_task
+
+    dispatched = 0
+    for source in sources:
+        source_id = source.get("id")
+        if source_id:
+            ingest_source_task.delay(plan_id=plan_id, source_id=source_id)
+            dispatched += 1
+
+    logger.info(
+        "collect_sources_dispatched",
+        plan_id=plan_id,
+        source_count=dispatched,
+    )
+
+    return {
+        "status": "completed",
+        "plan_id": plan_id,
+        "sources_dispatched": dispatched,
+    }
+
+
+@celery_app.task(bind=True, name="osint.collect_prospecting_sources", max_retries=1)  # type: ignore[untyped-decorator]
+def collect_prospecting_sources_task(self: Any, plan_id: str = _CAL_PLAN_ID) -> dict[str, Any]:
+    """Trigger ingest for all CAL prospecting sources.
+
+    Scheduled via Celery beat ~1 hour before report generation (12:00, 19:00 UTC).
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_collect_sources_async(plan_id))
+    except Exception as exc:
+        logger.exception("Prospecting source collection failed")
+        raise self.retry(
+            exc=exc, countdown=min(2 ** self.request.retries * 60, 300),
         ) from exc
     finally:
         loop.close()

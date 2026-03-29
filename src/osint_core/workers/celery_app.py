@@ -54,6 +54,8 @@ celery_app.conf.update(
         "osint.send_notification": {"queue": "notify"},
         "osint.compile_digest": {"queue": "digest"},
         "osint.match_leads": {"queue": "enrich"},
+        "osint.generate_prospecting_report": {"queue": "osint"},
+        "osint.collect_prospecting_sources": {"queue": "ingest"},
         "osint.purge_expired_events": {"queue": "osint"},
     },
 )
@@ -63,6 +65,19 @@ celery_app.conf.beat_schedule = {
     "purge-expired-events-daily": {
         "task": "osint.purge_expired_events",
         "schedule": crontab(hour=3, minute=0),  # daily at 03:00 America/Chicago
+    },
+    # Prospecting collection: 1 hour before report generation
+    # 12:00 / 19:00 UTC = ~7 AM / ~2 PM CST (note: CDT = UTC-5 during DST)
+    "collect-prospecting-sources": {
+        "task": "osint.collect_prospecting_sources",
+        "schedule": crontab(hour="12,19", minute=0),
+        "kwargs": {"plan_id": "cal-prospecting"},
+    },
+    # Prospecting report generation + email
+    # 13:00 / 20:00 UTC = 8 AM / 3 PM CST
+    "generate-prospecting-report": {
+        "task": "osint.generate_prospecting_report",
+        "schedule": crontab(hour="13,20", minute=0),
     },
 }
 
