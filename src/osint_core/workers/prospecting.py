@@ -23,10 +23,18 @@ _CAL_PLAN_ID = "cal-prospecting"
 def _build_matcher_config(plan_content: dict[str, Any], plan_id: str) -> LeadMatcherConfig:
     """Build a LeadMatcherConfig from plan content."""
     scoring = plan_content.get("scoring", {})
-    return LeadMatcherConfig(
-        plan_id=plan_id,
-        source_reputation=scoring.get("source_reputation", {}),
-    )
+    custom = plan_content.get("custom", {})
+
+    kwargs: dict[str, Any] = {
+        "plan_id": plan_id,
+        "source_reputation": scoring.get("source_reputation", {}),
+    }
+
+    threshold = custom.get("lead_confidence_threshold")
+    if threshold is not None:
+        kwargs["confidence_threshold"] = float(threshold)
+
+    return LeadMatcherConfig(**kwargs)
 
 
 async def _match_leads_async(event_ids: list[str], plan_id: str) -> dict[str, Any]:

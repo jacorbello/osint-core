@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from osint_core.workers.prospecting import _match_leads_async
+from osint_core.workers.prospecting import _build_matcher_config, _match_leads_async
 
 
 def _make_event(
@@ -201,3 +201,71 @@ async def test_structlog_fields():
     log_msg = call_args[0][0] % call_args[0][1:]
     assert "lead_id=" in log_msg
     assert "event_id=" in log_msg
+
+
+def test_build_matcher_config_reads_custom_threshold():
+    """Config built with custom threshold from plan YAML."""
+    plan_content = {
+        "scoring": {"source_reputation": {"rss_fire": 0.9}},
+        "custom": {"lead_confidence_threshold": 0.5},
+    }
+    config = _build_matcher_config(plan_content, "cal-prospecting")
+    assert config.confidence_threshold == 0.5
+    assert config.plan_id == "cal-prospecting"
+    assert config.source_reputation == {"rss_fire": 0.9}
+
+
+def test_build_matcher_config_default_when_no_custom():
+    """Config uses default threshold when custom section is missing."""
+    plan_content = {
+        "scoring": {"source_reputation": {"rss_fire": 0.9}},
+    }
+    config = _build_matcher_config(plan_content, "cal-prospecting")
+    assert config.confidence_threshold == 0.3  # DEFAULT_CONFIDENCE_THRESHOLD
+    assert config.plan_id == "cal-prospecting"
+
+
+def test_build_matcher_config_default_when_key_missing():
+    """Config uses default threshold when custom exists but key is absent."""
+    plan_content = {
+        "scoring": {},
+        "custom": {"other_setting": True},
+    }
+    config = _build_matcher_config(plan_content, "cal-prospecting")
+    assert config.confidence_threshold == 0.3
+
+
+def test_build_matcher_config_string_threshold_cast_to_float():
+    """Threshold from YAML may arrive as string; ensure it's cast to float."""
+    plan_content = {
+        "scoring": {},
+        "custom": {"lead_confidence_threshold": "0.7"},
+    }
+    config = _build_matcher_config(plan_content, "cal-prospecting")
+    assert config.confidence_threshold == 0.7
+    assert isinstance(config.confidence_threshold, float)
+
+
+@pytest.mark.asyncio
+async def test_custom_threshold_passed_to_lead_matcher():
+    """Plan-specified threshold is forwarded to LeadMatcher via config."""
+    event = _make_event(
+        plan_content={
+            "scoring": {"source_reputation": {"rss_fire": 0.9}},
+            "custom": {"lead_confidence_threshold": 0.8},
+        },
+    )
+
+    ctx, db = _mock_db_context([event])
+
+    with patch("osint_core.workers.prospecting.async_session", return_value=ctx), \
+         patch("osint_core.workers.prospecting.LeadMatcher") as mock_matcher_cls:
+        mock_matcher = MagicMock()
+        mock_matcher.match_event_to_lead = AsyncMock(return_value=None)
+        mock_matcher_cls.return_value = mock_matcher
+
+        await _match_leads_async([str(event.id)], "cal-prospecting")
+
+    # Verify LeadMatcher was constructed with the custom threshold
+    config_arg = mock_matcher_cls.call_args[0][0]
+    assert config_arg.confidence_threshold == 0.8
