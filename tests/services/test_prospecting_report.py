@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from osint_core.services.courtlistener import VerifiedCitation
 from osint_core.services.prospecting_report import (
     ProspectingReportGenerator,
     _fallback_narrative,
@@ -196,3 +197,134 @@ class TestProspectingReportGenerator:
 
         assert result is not None
         assert result.lead_count == 1
+
+    @pytest.mark.asyncio()
+    async def test_courtlistener_citations_included_in_report(self):
+        leads = [_make_lead()]
+        db = _mock_db(leads)
+
+        mock_citations = [
+            VerifiedCitation(
+                case_name="Tinker v. Des Moines",
+                citation="393 U.S. 503",
+                courtlistener_url="https://www.courtlistener.com/opinion/123/",
+                verified=True,
+                relevance="matched",
+                holding_summary="Students have free speech rights.",
+            ),
+            VerifiedCitation(
+                case_name="Unknown v. State",
+                citation="999 F.3d 1",
+                courtlistener_url="",
+                verified=False,
+                relevance="not independently verified",
+                holding_summary="",
+            ),
+        ]
+        mock_cl = AsyncMock()
+        mock_cl.api_key = "test-key"
+        mock_cl.verify_citations = AsyncMock(return_value=mock_citations)
+        generator = ProspectingReportGenerator(courtlistener=mock_cl)
+
+        vllm_response = {
+            "choices": [{
+                "message": {
+                    "content": json.dumps({
+                        "executive_summary": "Summary referencing Tinker v. Des Moines",
+                        "constitutional_analysis": "Analysis",
+                    }),
+                },
+            }],
+        }
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = vllm_response
+
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            result = await generator.generate_report(db)
+
+        assert result is not None
+        # Verify CourtListener was called
+        mock_cl.verify_citations.assert_called_once()
+        # Verify legal citations passed to template context
+        render_kwargs = mock_render.call_args
+        ctx = render_kwargs.args[0] if render_kwargs.args else render_kwargs.kwargs
+        legal_cites = ctx.get("all_legal_citations") or []
+        assert len(legal_cites) == 2
+        assert legal_cites[0]["verified"] is True
+        assert legal_cites[1]["verified"] is False
+
+    @pytest.mark.asyncio()
+    async def test_report_succeeds_when_courtlistener_unavailable(self):
+        leads = [_make_lead()]
+        db = _mock_db(leads)
+
+        mock_cl = AsyncMock()
+        mock_cl.api_key = "test-key"
+        mock_cl.verify_citations = AsyncMock(side_effect=Exception("API down"))
+        generator = ProspectingReportGenerator(courtlistener=mock_cl)
+
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            mock_client = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            result = await generator.generate_report(db)
+
+        assert result is not None
+        assert result.lead_count == 1
+
+    @pytest.mark.asyncio()
+    async def test_unverified_citations_flagged(self):
+        leads = [_make_lead()]
+        db = _mock_db(leads)
+
+        mock_citations = [
+            VerifiedCitation(
+                case_name="Fake v. Case",
+                citation="000 U.S. 000",
+                courtlistener_url="",
+                verified=False,
+                relevance="not independently verified",
+                holding_summary="",
+            ),
+        ]
+        mock_cl = AsyncMock()
+        mock_cl.api_key = "test-key"
+        mock_cl.verify_citations = AsyncMock(return_value=mock_citations)
+        generator = ProspectingReportGenerator(courtlistener=mock_cl)
+
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+            mock_client = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            await generator.generate_report(db)
+
+        render_kwargs = mock_render.call_args
+        ctx = render_kwargs.args[0] if render_kwargs.args else render_kwargs.kwargs
+        legal_cites = ctx.get("all_legal_citations") or []
+        assert len(legal_cites) == 1
+        assert legal_cites[0]["relevance"] == "not independently verified"
