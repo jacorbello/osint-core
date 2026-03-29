@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # --- CourtListener ---
     courtlistener_api_key: str = ""
 
+    # --- Resend ---
+    resend_api_key: str = ""
+    resend_from_email: str = "reports@corbello.io"
+
     # --- Shodan ---
     shodan_api_key: str = ""
 
