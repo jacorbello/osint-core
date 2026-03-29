@@ -19,7 +19,6 @@ from osint_core.connectors.telegram import TelegramConnector
 from osint_core.connectors.threatfox import ThreatFoxConnector
 from osint_core.connectors.university_policy import UniversityPolicyConnector
 from osint_core.connectors.urlhaus import UrlhausConnector
-from osint_core.connectors.university_policy import UniversityPolicyConnector
 from osint_core.connectors.xai_x_search import XaiXSearchConnector
 
 __all__ = [
@@ -69,4 +68,3 @@ registry.register("reddit", RedditConnector)
 registry.register("pastebin", PasteSiteConnector)
 registry.register("university_policy", UniversityPolicyConnector)
 registry.register("xai_x_search", XaiXSearchConnector)
-registry.register("university_policy", UniversityPolicyConnector)
