@@ -1,8 +1,8 @@
 # Configuration Reference
 
-All configuration is managed through environment variables prefixed with `OSINT_`.
-Values are loaded by `src/osint_core/config.py` using
-[pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
+Core application configuration is managed through environment variables prefixed with `OSINT_`.
+This page documents the `OSINT_` variables that are loaded by `src/osint_core/config.py` using
+[pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/). Other components may read additional `OSINT_` environment variables directly; refer to their module documentation for details.
 
 ## Environment Variables
 
@@ -39,6 +39,8 @@ Values are loaded by `src/osint_core/config.py` using
 |----------|----------|---------|-------------|
 | `OSINT_VLLM_URL` | No | `http://localhost:8001` | vLLM inference server URL. Falls back to deprecated `OSINT_OLLAMA_URL` if set. |
 | `OSINT_LLM_MODEL` | No | `meta-llama/Llama-3.2-3B-Instruct` | LLM model identifier. Falls back to deprecated `OSINT_OLLAMA_MODEL` if set. |
+| `OSINT_OLLAMA_URL` | No | `""` | Deprecated. Legacy inference server URL used only for backward compatibility. Prefer `OSINT_VLLM_URL`. |
+| `OSINT_OLLAMA_MODEL` | No | `""` | Deprecated. Legacy model identifier used only for backward compatibility. Prefer `OSINT_LLM_MODEL`. |
 
 ### MinIO (Object Storage)
 
@@ -49,12 +51,14 @@ Values are loaded by `src/osint_core/config.py` using
 | `OSINT_MINIO_SECRET_KEY` | Yes* | `""` | MinIO secret key. Required for object storage operations. |
 | `OSINT_MINIO_SECURE` | No | `false` | Use HTTPS for MinIO connections. |
 
-### Gotify (Push Notifications)
+### Gotify & Notifications (Push Notifications)
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `OSINT_GOTIFY_URL` | No | `http://gotify/message` | Gotify message endpoint URL. |
 | `OSINT_GOTIFY_TOKEN` | Yes* | `""` | Gotify application token. Required for push notifications. |
+| `OSINT_NOTIFY_THRESHOLD` | No | `medium` | Minimum event severity required to send notifications (for example: `low`, `medium`, `high`). |
+| `OSINT_SLACK_WEBHOOK_URL` | No | `""` | Slack Incoming Webhook URL. When set, enables Slack notifications. |
 
 ### SMTP (Email Notifications)
 
@@ -78,6 +82,7 @@ Values are loaded by `src/osint_core/config.py` using
 |----------|----------|---------|-------------|
 | `OSINT_RESEND_API_KEY` | Yes* | `""` | API key for the [Resend](https://resend.com/) transactional email service. Required for sending prospecting reports via email. Store in Infisical under `cortech-infra/prod`. |
 | `OSINT_RESEND_FROM_EMAIL` | No | `reports@corbello.io` | Sender email address used for prospecting report delivery. Must be a verified domain in Resend. |
+| `OSINT_RESEND_RECIPIENTS` | No | `""` | Comma-separated list of default recipient email addresses for prospecting report emails. |
 
 ### Shodan
 
@@ -138,13 +143,15 @@ API keys and credentials should be stored in **Infisical** under the
 `cortech-infra/prod` environment rather than committed to source control or
 passed as plain-text environment variables in deployment manifests.
 
-The following variables are secrets and must be managed through Infisical:
+The following variables are examples of secrets and should be managed through Infisical (non-exhaustive):
 
 - `OSINT_DATABASE_URL` (contains credentials)
 - `OSINT_MINIO_ACCESS_KEY` / `OSINT_MINIO_SECRET_KEY`
 - `OSINT_GOTIFY_TOKEN`
+- `OSINT_SMTP_USER`
 - `OSINT_SMTP_PASSWORD`
 - `OSINT_COURTLISTENER_API_KEY`
 - `OSINT_RESEND_API_KEY`
 - `OSINT_SHODAN_API_KEY`
 - `OSINT_TELEGRAM_BOT_TOKEN`
+- `OSINT_SLACK_WEBHOOK_URL`
