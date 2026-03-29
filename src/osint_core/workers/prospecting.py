@@ -23,10 +23,36 @@ _CAL_PLAN_ID = "cal-prospecting"
 def _build_matcher_config(plan_content: dict[str, Any], plan_id: str) -> LeadMatcherConfig:
     """Build a LeadMatcherConfig from plan content."""
     scoring = plan_content.get("scoring", {})
-    return LeadMatcherConfig(
-        plan_id=plan_id,
-        source_reputation=scoring.get("source_reputation", {}),
-    )
+    custom = plan_content.get("custom", {})
+
+    kwargs: dict[str, Any] = {
+        "plan_id": plan_id,
+        "source_reputation": scoring.get("source_reputation", {}),
+    }
+
+    threshold = custom.get("lead_confidence_threshold")
+    if threshold is not None:
+        try:
+            parsed_threshold = float(threshold)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid lead_confidence_threshold=%r for plan_id=%s; "
+                "falling back to default.",
+                threshold,
+                plan_id,
+            )
+        else:
+            if 0.0 <= parsed_threshold <= 1.0:
+                kwargs["confidence_threshold"] = parsed_threshold
+            else:
+                logger.warning(
+                    "Out-of-range lead_confidence_threshold=%r for plan_id=%s; "
+                    "expected value between 0.0 and 1.0. Falling back to default.",
+                    parsed_threshold,
+                    plan_id,
+                )
+
+    return LeadMatcherConfig(**kwargs)
 
 
 async def _match_leads_async(event_ids: list[str], plan_id: str) -> dict[str, Any]:
