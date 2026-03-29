@@ -581,3 +581,127 @@ class TestMinIOArchival:
         # archive_pdfs is False so PDF should not be archived
         assert len(items) == 1
         assert items[0].raw_data.get("minio_uri") is None
+
+
+# --- CSS selector validation ---
+
+
+class TestCSSSelectorValidation:
+    def test_valid_selectors_pass_validation(self):
+        """Valid CSS selectors are accepted without error."""
+        config = SourceConfig(
+            id="test-valid",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Example University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        # Should not raise
+        connector = UniversityPolicyConnector(config)
+        assert connector is not None
+
+    def test_valid_compound_selector_passes(self):
+        """Compound selectors (comma-separated) are accepted."""
+        config = SourceConfig(
+            id="test-compound",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Example University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "a[href$='.pdf'], a[href*='policy']",
+                    },
+                ],
+            },
+        )
+        connector = UniversityPolicyConnector(config)
+        assert connector is not None
+
+    def test_malformed_selector_raises_value_error(self):
+        """Malformed CSS selector raises ValueError at init with institution name."""
+        config = SourceConfig(
+            id="test-bad",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Bad University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "a[href$=",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="Bad University"):
+            UniversityPolicyConnector(config)
+
+    def test_malformed_selector_includes_selector_value(self):
+        """Error message includes the malformed selector value."""
+        config = SourceConfig(
+            id="test-bad2",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Another University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "###invalid",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="###invalid"):
+            UniversityPolicyConnector(config)
+
+    def test_multiple_institutions_all_validated(self):
+        """All institution selectors are validated; error on second bad one."""
+        config = SourceConfig(
+            id="test-multi",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Good University",
+                        "policy_url": "https://example.edu",
+                        "selector": "a.policy-link",
+                    },
+                    {
+                        "name": "Broken University",
+                        "policy_url": "https://example.edu",
+                        "selector": "[[[",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="Broken University"):
+            UniversityPolicyConnector(config)
+
+    def test_default_institutions_have_valid_selectors(self):
+        """All default institution selectors pass validation."""
+        config = SourceConfig(
+            id="test-defaults",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra=None,
+        )
+        # Should not raise — default selectors are all valid
+        connector = UniversityPolicyConnector(config)
+        assert connector is not None

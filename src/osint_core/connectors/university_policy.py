@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 import httpx
+import soupsieve
 import structlog
 from bs4 import BeautifulSoup
 from minio import Minio, S3Error
@@ -71,9 +72,28 @@ class UniversityPolicyConnector(BaseConnector):
         self._institutions: list[dict[str, str]] = extra.get(
             "institutions", DEFAULT_INSTITUTIONS
         )
+        self._validate_selectors()
         self._archive_pdfs: bool = extra.get("archive_pdfs", True)
         # In-memory hash store; a production deployment would persist this.
         self._known_hashes: dict[str, str] = {}
+
+    def _validate_selectors(self) -> None:
+        """Validate CSS selectors for all institutions at init time.
+
+        Raises ``ValueError`` with the institution name and malformed selector
+        so configuration errors surface immediately rather than mid-scrape.
+        """
+        for institution in self._institutions:
+            name = institution.get("name", "<unknown>")
+            selector = institution.get("selector", "")
+            try:
+                soupsieve.compile(selector)
+            except soupsieve.SelectorSyntaxError as exc:
+                msg = (
+                    f"Invalid CSS selector for institution {name!r}: "
+                    f"{selector!r} — {exc}"
+                )
+                raise ValueError(msg) from exc
 
     async def fetch(self) -> list[RawItem]:
         items: list[RawItem] = []
