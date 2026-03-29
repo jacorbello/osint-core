@@ -1,0 +1,273 @@
+/* Prospecting Report — WeasyPrint stylesheet */
+
+@page {
+    size: letter;
+    margin: 1in 0.75in;
+    @bottom-center {
+        content: "The Center For American Liberty — Confidential";
+        font-size: 8pt;
+        color: #888;
+    }
+    @bottom-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-size: 8pt;
+        color: #888;
+    }
+}
+
+@page cover {
+    margin: 0;
+    @bottom-center { content: none; }
+    @bottom-right { content: none; }
+}
+
+* { box-sizing: border-box; }
+
+body {
+    font-family: "Georgia", "Times New Roman", serif;
+    font-size: 11pt;
+    line-height: 1.5;
+    color: #1a1a1a;
+}
+
+/* --- Cover page --- */
+.cover {
+    page: cover;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    text-align: center;
+    background: #0d1b2a;
+    color: #ffffff;
+    padding: 2in;
+}
+
+.cover .org-name {
+    font-size: 28pt;
+    font-weight: bold;
+    letter-spacing: 1pt;
+    margin-bottom: 0.25in;
+}
+
+.cover .org-url {
+    font-size: 12pt;
+    color: #7fb3d3;
+    margin-bottom: 1in;
+}
+
+.cover .report-title {
+    font-size: 22pt;
+    font-weight: bold;
+    margin-bottom: 0.5in;
+    border-top: 2px solid #c0392b;
+    border-bottom: 2px solid #c0392b;
+    padding: 0.25in 0;
+}
+
+.cover .report-meta {
+    font-size: 12pt;
+    color: #b0bec5;
+    line-height: 1.8;
+}
+
+/* --- Section headings --- */
+h1 {
+    font-size: 18pt;
+    color: #0d1b2a;
+    border-bottom: 2px solid #c0392b;
+    padding-bottom: 4pt;
+    margin-top: 0.5in;
+}
+
+h2 {
+    font-size: 14pt;
+    color: #1b3a5c;
+    margin-top: 0.3in;
+}
+
+h3 {
+    font-size: 12pt;
+    color: #2c5282;
+    margin-top: 0.2in;
+}
+
+/* --- Executive summary --- */
+.executive-summary {
+    page-break-before: always;
+}
+
+.summary-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2in;
+    margin: 0.2in 0;
+}
+
+.stat-box {
+    background: #f0f4f8;
+    border-left: 4px solid #1b3a5c;
+    padding: 0.15in 0.2in;
+    min-width: 1.5in;
+}
+
+.stat-box .stat-value {
+    font-size: 20pt;
+    font-weight: bold;
+    color: #0d1b2a;
+}
+
+.stat-box .stat-label {
+    font-size: 9pt;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.5pt;
+}
+
+.jurisdiction-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.15in 0;
+}
+
+.jurisdiction-table th,
+.jurisdiction-table td {
+    border: 1px solid #ddd;
+    padding: 6pt 10pt;
+    text-align: left;
+}
+
+.jurisdiction-table th {
+    background: #0d1b2a;
+    color: white;
+    font-size: 9pt;
+    text-transform: uppercase;
+}
+
+/* --- Lead sections --- */
+.lead-section {
+    page-break-before: always;
+}
+
+.lead-header {
+    background: #f0f4f8;
+    padding: 0.15in 0.2in;
+    border-left: 4px solid #c0392b;
+    margin-bottom: 0.15in;
+}
+
+.lead-header .lead-title {
+    font-size: 14pt;
+    font-weight: bold;
+    color: #0d1b2a;
+    margin: 0;
+}
+
+.lead-header .lead-meta {
+    font-size: 9pt;
+    color: #555;
+    margin-top: 4pt;
+}
+
+.lead-subsection {
+    margin: 0.15in 0;
+}
+
+.lead-subsection h3 {
+    font-size: 11pt;
+    color: #1b3a5c;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 2pt;
+}
+
+.severity-badge {
+    display: inline-block;
+    padding: 2pt 8pt;
+    border-radius: 3pt;
+    font-size: 9pt;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.severity-critical { background: #c0392b; color: white; }
+.severity-high { background: #e74c3c; color: white; }
+.severity-medium { background: #f39c12; color: white; }
+.severity-low { background: #3498db; color: white; }
+.severity-info { background: #95a5a6; color: white; }
+
+.confidence-bar {
+    display: inline-block;
+    width: 1in;
+    height: 8pt;
+    background: #e0e0e0;
+    border-radius: 4pt;
+    overflow: hidden;
+    vertical-align: middle;
+}
+
+.confidence-fill {
+    height: 100%;
+    background: #27ae60;
+    border-radius: 4pt;
+}
+
+/* --- Citations --- */
+.citations-appendix {
+    page-break-before: always;
+}
+
+.citation-list {
+    list-style: none;
+    padding: 0;
+    counter-reset: citation-counter;
+}
+
+.citation-list li {
+    counter-increment: citation-counter;
+    padding: 4pt 0 4pt 0.3in;
+    border-bottom: 1px solid #eee;
+    font-size: 10pt;
+    position: relative;
+}
+
+.citation-list li::before {
+    content: "[" counter(citation-counter) "]";
+    position: absolute;
+    left: 0;
+    font-weight: bold;
+    color: #1b3a5c;
+}
+
+.citation-verified {
+    color: #27ae60;
+    font-weight: bold;
+    font-size: 9pt;
+}
+
+.citation-unverified {
+    color: #e74c3c;
+    font-size: 9pt;
+}
+
+/* --- Utilities --- */
+.no-leads-message {
+    text-align: center;
+    padding: 1in;
+    color: #888;
+    font-style: italic;
+}
+
+.constitutional-tags {
+    margin: 4pt 0;
+}
+
+.constitutional-tag {
+    display: inline-block;
+    background: #e8edf3;
+    color: #1b3a5c;
+    padding: 2pt 6pt;
+    border-radius: 2pt;
+    font-size: 9pt;
+    margin: 2pt 4pt 2pt 0;
+}

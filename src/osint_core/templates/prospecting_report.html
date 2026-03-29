@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        {% include 'prospecting_report.css' %}
+    </style>
+</head>
+<body>
+
+<!-- Cover Page -->
+<div class="cover">
+    <div class="org-name">The Center For American Liberty</div>
+    <div class="org-url">libertycenter.org</div>
+    <div class="report-title">Constitutional Rights<br>Prospecting Report</div>
+    <div class="report-meta">
+        {{ report_date }}<br>
+        Reporting Period: {{ report_period }}<br>
+        Classification: Confidential — Attorney Work Product
+    </div>
+</div>
+
+<!-- Executive Summary -->
+<div class="executive-summary">
+    <h1>Executive Summary</h1>
+
+    <div class="summary-stats">
+        <div class="stat-box">
+            <div class="stat-value">{{ summary.total_leads }}</div>
+            <div class="stat-label">Total Leads</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value">{{ summary.incidents }}</div>
+            <div class="stat-label">Incidents</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value">{{ summary.policies }}</div>
+            <div class="stat-label">Policy Changes</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value">{{ summary.high_priority_count }}</div>
+            <div class="stat-label">High Priority</div>
+        </div>
+    </div>
+
+    {% if summary.by_jurisdiction %}
+    <h2>Leads by Jurisdiction</h2>
+    <table class="jurisdiction-table">
+        <thead>
+            <tr>
+                <th>Jurisdiction</th>
+                <th>Count</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for jurisdiction, count in summary.by_jurisdiction.items() %}
+            <tr>
+                <td>{{ jurisdiction }}</td>
+                <td>{{ count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+
+<!-- Lead Sections -->
+{% if leads %}
+    {% for lead in leads %}
+    <div class="lead-section">
+        <div class="lead-header">
+            <div class="lead-title">{{ lead.title }}</div>
+            <div class="lead-meta">
+                <span class="severity-badge severity-{{ lead.severity or 'info' }}">
+                    {{ lead.severity or 'info' }}
+                </span>
+                &nbsp;
+                Confidence:
+                <span class="confidence-bar">
+                    <span class="confidence-fill" style="width: {{ (lead.confidence or 0) * 100 }}%"></span>
+                </span>
+                {{ "%.0f" | format((lead.confidence or 0) * 100) }}%
+                &nbsp;|&nbsp;
+                {{ lead.lead_type | capitalize }}
+                {% if lead.institution %} — {{ lead.institution }}{% endif %}
+                {% if lead.jurisdiction %} ({{ lead.jurisdiction }}){% endif %}
+            </div>
+        </div>
+
+        {% if lead.constitutional_basis %}
+        <div class="constitutional-tags">
+            {% for basis in lead.constitutional_basis %}
+            <span class="constitutional-tag">{{ basis }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if lead.lead_type == "incident" %}
+            {# --- Incident Lead Layout --- #}
+            {% if lead.sections and lead.sections.executive_summary %}
+            <div class="lead-subsection">
+                <h3>Executive Summary</h3>
+                <p>{{ lead.sections.executive_summary }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.constitutional_analysis %}
+            <div class="lead-subsection">
+                <h3>Constitutional Analysis</h3>
+                <p>{{ lead.sections.constitutional_analysis }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.parties %}
+            <div class="lead-subsection">
+                <h3>Parties Involved</h3>
+                <p>{{ lead.sections.parties }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.evidence %}
+            <div class="lead-subsection">
+                <h3>Evidence Summary</h3>
+                <p>{{ lead.sections.evidence }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.jurisdiction_analysis %}
+            <div class="lead-subsection">
+                <h3>Jurisdiction Analysis</h3>
+                <p>{{ lead.sections.jurisdiction_analysis }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.time_sensitivity %}
+            <div class="lead-subsection">
+                <h3>Time Sensitivity</h3>
+                <p>{{ lead.sections.time_sensitivity }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.recommendation %}
+            <div class="lead-subsection">
+                <h3>Recommendation</h3>
+                <p>{{ lead.sections.recommendation }}</p>
+            </div>
+            {% endif %}
+
+        {% else %}
+            {# --- Policy Lead Layout --- #}
+            {% if lead.sections and lead.sections.executive_summary %}
+            <div class="lead-subsection">
+                <h3>Executive Summary</h3>
+                <p>{{ lead.sections.executive_summary }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.constitutional_analysis %}
+            <div class="lead-subsection">
+                <h3>Constitutional Analysis</h3>
+                <p>{{ lead.sections.constitutional_analysis }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.affected_population %}
+            <div class="lead-subsection">
+                <h3>Affected Population</h3>
+                <p>{{ lead.sections.affected_population }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.policy_text %}
+            <div class="lead-subsection">
+                <h3>Policy Text</h3>
+                <p>{{ lead.sections.policy_text }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.precedents %}
+            <div class="lead-subsection">
+                <h3>Legal Precedents</h3>
+                <p>{{ lead.sections.precedents }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.jurisdiction_analysis %}
+            <div class="lead-subsection">
+                <h3>Jurisdiction Analysis</h3>
+                <p>{{ lead.sections.jurisdiction_analysis }}</p>
+            </div>
+            {% endif %}
+
+            {% if lead.sections and lead.sections.recommendation %}
+            <div class="lead-subsection">
+                <h3>Recommendation</h3>
+                <p>{{ lead.sections.recommendation }}</p>
+            </div>
+            {% endif %}
+        {% endif %}
+
+        {# --- Lead-level citations --- #}
+        {% if lead.source_citations or lead.legal_citations %}
+        <div class="lead-subsection">
+            <h3>Citations</h3>
+            {% if lead.source_citations %}
+            <p><strong>Source Material:</strong></p>
+            <ol class="citation-list">
+                {% for cite in lead.source_citations %}
+                <li>{{ cite }}</li>
+                {% endfor %}
+            </ol>
+            {% endif %}
+            {% if lead.legal_citations %}
+            <p><strong>Legal Citations:</strong></p>
+            <ol class="citation-list">
+                {% for cite in lead.legal_citations %}
+                <li>
+                    {{ cite.citation }} — <em>{{ cite.case_name }}</em>
+                    {% if cite.verified %}
+                        <span class="citation-verified">✓ Verified</span>
+                    {% else %}
+                        <span class="citation-unverified">⚠ Not independently verified</span>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ol>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="no-leads-message">
+        <p>No reportable leads for this period.</p>
+    </div>
+{% endif %}
+
+<!-- Citations Appendix -->
+{% if all_source_citations or all_legal_citations %}
+<div class="citations-appendix">
+    <h1>Citations Appendix</h1>
+
+    {% if all_source_citations %}
+    <h2>Source Material</h2>
+    <ol class="citation-list">
+        {% for cite in all_source_citations %}
+        <li>{{ cite }}</li>
+        {% endfor %}
+    </ol>
+    {% endif %}
+
+    {% if all_legal_citations %}
+    <h2>Legal Citations</h2>
+    <ol class="citation-list">
+        {% for cite in all_legal_citations %}
+        <li>
+            {{ cite.citation }} — <em>{{ cite.case_name }}</em>
+            {% if cite.verified %}
+                <span class="citation-verified">✓ Verified via CourtListener</span>
+                {% if cite.courtlistener_url and cite.courtlistener_url.startswith('https://') %}
+                    (<a href="{{ cite.courtlistener_url }}">view</a>)
+                {% endif %}
+            {% else %}
+                <span class="citation-unverified">⚠ Not independently verified</span>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ol>
+    {% endif %}
+</div>
+{% endif %}
+
+</body>
+</html>
