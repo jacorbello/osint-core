@@ -35,6 +35,7 @@ sources:
   - id: x_cal_california
     type: xai_x_search
     schedule_cron: "0 7,14 * * *"
+    weight: 1.0
     params:
       api_key: "${OSINT_XAI_API_KEY}"
       model: "grok-4.20-reasoning"
@@ -66,6 +67,7 @@ sources:
   - id: x_cal_texas
     type: xai_x_search
     schedule_cron: "5 7,14 * * *"
+    weight: 1.0
     params:
       api_key: "${OSINT_XAI_API_KEY}"
       model: "grok-4.20-reasoning"
@@ -96,6 +98,7 @@ sources:
   - id: x_cal_minnesota
     type: xai_x_search
     schedule_cron: "10 7,14 * * *"
+    weight: 1.0
     params:
       api_key: "${OSINT_XAI_API_KEY}"
       model: "grok-4.20-reasoning"
@@ -126,6 +129,7 @@ sources:
   - id: x_cal_dc
     type: xai_x_search
     schedule_cron: "15 7,14 * * *"
+    weight: 1.0
     params:
       api_key: "${OSINT_XAI_API_KEY}"
       model: "grok-4.20-reasoning"
@@ -157,24 +161,108 @@ sources:
     type: rss
     url: "https://www.thefire.org/feed"
     schedule_cron: "20 7,14 * * *"
+    weight: 1.5
+    params:
+      max_items: 30
 
   # ── RSS: Higher Ed Dive ──────────────────────────────────────
   - id: rss_higher_ed_dive
     type: rss
     url: "https://www.highereddive.com/feeds/news/"
     schedule_cron: "25 7,14 * * *"
+    weight: 1.2
+    params:
+      max_items: 30
 
   # ── RSS: Reason / Volokh Conspiracy ──────────────────────────
   - id: rss_volokh
     type: rss
     url: "https://reason.com/volokh/feed/"
     schedule_cron: "30 7,14 * * *"
+    weight: 1.3
+    params:
+      max_items: 30
 
   # ── RSS: Courthouse News Service ─────────────────────────────
   - id: rss_courthouse_news
     type: rss
     url: "https://www.courthousenews.com/feed/"
     schedule_cron: "35 7,14 * * *"
+    weight: 1.4
+    params:
+      max_items: 30
+
+  # ── University Policy: UC System ─────────────────────────────
+  - id: univ_uc
+    type: university_policy
+    schedule_cron: "0 8 * * 1"
+    weight: 1.8
+    params:
+      institutions:
+        - name: "University of California System"
+          policy_url: "https://policy.ucop.edu/advanced-search.php"
+          selector: "a.policy-link, table.policies a[href*='doc']"
+      archive_pdfs: true
+
+  # ── University Policy: CSU System ────────────────────────────
+  - id: univ_csu
+    type: university_policy
+    schedule_cron: "5 8 * * 1"
+    weight: 1.8
+    params:
+      institutions:
+        - name: "California State University System"
+          policy_url: "https://www.calstate.edu/csu-system/board-of-trustees/past-meetings"
+          selector: "a[href$='.pdf'], a[href*='policy']"
+      archive_pdfs: true
+
+  # ── University Policy: UT System ─────────────────────────────
+  - id: univ_ut
+    type: university_policy
+    schedule_cron: "10 8 * * 1"
+    weight: 1.8
+    params:
+      institutions:
+        - name: "University of Texas System"
+          policy_url: "https://www.utsystem.edu/offices/board-regents/regents-rules-and-regulations"
+          selector: "a[href$='.pdf'], a[href*='rule'], a[href*='policy']"
+      archive_pdfs: true
+
+  # ── University Policy: TAMU System ───────────────────────────
+  - id: univ_tamu
+    type: university_policy
+    schedule_cron: "15 8 * * 1"
+    weight: 1.8
+    params:
+      institutions:
+        - name: "Texas A&M University System"
+          policy_url: "https://policies.tamus.edu"
+          selector: "a[href*='policy'], a[href*='regulation']"
+      archive_pdfs: true
+
+  # ── University Policy: UMN ───────────────────────────────────
+  - id: univ_umn
+    type: university_policy
+    schedule_cron: "20 8 * * 1"
+    weight: 1.8
+    params:
+      institutions:
+        - name: "University of Minnesota"
+          policy_url: "https://policy.umn.edu/policies"
+          selector: "a[href*='policy']"
+      archive_pdfs: true
+
+  # ── University Policy: UDC ───────────────────────────────────
+  - id: univ_udc
+    type: university_policy
+    schedule_cron: "25 8 * * 1"
+    weight: 1.8
+    params:
+      institutions:
+        - name: "University of the District of Columbia"
+          policy_url: "https://www.udc.edu/policies/"
+          selector: "a[href$='.pdf'], a[href*='policy']"
+      archive_pdfs: true
 
 source_profiles:
   x_cal_california:
@@ -217,6 +305,36 @@ source_profiles:
     credibility: 2
     corroboration_required: false
     license: "public"
+  univ_uc:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public"
+  univ_csu:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public"
+  univ_ut:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public"
+  univ_tamu:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public"
+  univ_umn:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public"
+  univ_udc:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public"
 
 scoring:
   recency_half_life_hours: 168
@@ -229,6 +347,12 @@ scoring:
     rss_higher_ed_dive: 0.7
     rss_volokh: 0.8
     rss_courthouse_news: 0.85
+    univ_uc: 0.95
+    univ_csu: 0.95
+    univ_ut: 0.95
+    univ_tamu: 0.95
+    univ_umn: 0.95
+    univ_udc: 0.95
   ioc_match_boost: 1.5
 
 enrichment:
@@ -240,6 +364,20 @@ enrichment:
   classify_relevance: true
   extract_entities: true
   generate_summaries: true
+
+custom:
+  lead_confidence_threshold: 0.3
+  report_schedule:
+    timezone: "America/Chicago"
+    times:
+      - "08:00"
+      - "15:00"
+  resend:
+    from_email: "reports@corbello.io"
+    recipients:
+      - "${CAL_REPORT_RECIPIENT_1}"
+      - "${CAL_REPORT_RECIPIENT_2}"
+    subject_prefix: "CAL Prospecting Report"
 
 notifications:
   routes:
@@ -257,3 +395,9 @@ notifications:
         - type: gotify
           application: "osint-cal-prospecting"
           priority: 10
+    - name: cal-prospecting-email
+      when:
+        severity_gte: medium
+      channels:
+        - type: email
+          to: "${CAL_REPORT_RECIPIENT_1}"
