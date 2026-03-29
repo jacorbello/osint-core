@@ -101,7 +101,8 @@ async def _generate_narrative(lead: Lead) -> dict[str, str]:
     try:
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
-        return json.loads(content)
+        result: dict[str, str] = json.loads(content)
+        return result
     except (KeyError, IndexError, json.JSONDecodeError) as exc:
         logger.warning("narrative_parse_failed", lead_id=str(lead.id), error=str(exc))
         return _fallback_narrative(lead)
@@ -175,18 +176,20 @@ class ProspectingReportGenerator:
             })
 
         # Build summary stats
-        summary = {
+        by_jurisdiction: dict[str, int] = {}
+        for lead in leads:
+            j = lead.jurisdiction or "Unknown"
+            by_jurisdiction[j] = by_jurisdiction.get(j, 0) + 1
+
+        summary: dict[str, Any] = {
             "total_leads": len(leads),
             "incidents": sum(1 for ld in leads if ld.lead_type == "incident"),
             "policies": sum(1 for ld in leads if ld.lead_type == "policy"),
             "high_priority_count": sum(
                 1 for ld in leads if ld.severity in ("high", "critical")
             ),
-            "by_jurisdiction": {},
+            "by_jurisdiction": by_jurisdiction,
         }
-        for lead in leads:
-            j = lead.jurisdiction or "Unknown"
-            summary["by_jurisdiction"][j] = summary["by_jurisdiction"].get(j, 0) + 1
 
         # Render HTML
         context = {
