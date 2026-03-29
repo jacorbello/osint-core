@@ -8,6 +8,7 @@ import pytest
 from osint_core.services.resend_notifier import (
     ResendNotifier,
     _build_html_body,
+    _validate_recipients,
 )
 
 
@@ -158,3 +159,61 @@ class TestResendNotifier:
         payload = mock_client.post.call_args.kwargs["json"]
         encoded = payload["attachments"][0]["content"]
         assert base64.b64decode(encoded) == pdf_data
+
+    @pytest.mark.asyncio()
+    async def test_invalid_emails_filtered_out(self, notifier):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+
+        with (
+            patch("osint_core.services.resend_notifier.httpx.AsyncClient") as mock_cls,
+            patch("osint_core.services.resend_notifier.logger") as mock_logger,
+        ):
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            result = await notifier.send_report(
+                b"pdf", "summary", ["valid@example.com", "not-an-email", "also@valid.org"],
+            )
+
+        assert result is True
+        payload = mock_client.post.call_args.kwargs["json"]
+        assert payload["to"] == ["valid@example.com", "also@valid.org"]
+        mock_logger.warning.assert_any_call("resend_invalid_email", email="not-an-email")
+
+    @pytest.mark.asyncio()
+    async def test_all_invalid_emails_returns_false(self, notifier):
+        with patch("osint_core.services.resend_notifier.logger") as mock_logger:
+            result = await notifier.send_report(
+                b"pdf", "summary", ["bad-email", "@nope", "missing-domain@"],
+            )
+
+        assert result is False
+        mock_logger.warning.assert_any_call("resend_invalid_email", email="bad-email")
+        mock_logger.warning.assert_any_call("resend_invalid_email", email="@nope")
+        mock_logger.warning.assert_any_call("resend_invalid_email", email="missing-domain@")
+        mock_logger.warning.assert_any_call("resend_no_valid_recipients")
+
+
+class TestValidateRecipients:
+    def test_valid_emails_pass(self):
+        emails = ["user@example.com", "a.b+tag@domain.co"]
+        assert _validate_recipients(emails) == emails
+
+    def test_invalid_emails_filtered(self):
+        emails = ["good@example.com", "bad", "@nope.com", "no-domain@"]
+        with patch("osint_core.services.resend_notifier.logger") as mock_logger:
+            result = _validate_recipients(emails)
+
+        assert result == ["good@example.com"]
+        mock_logger.warning.assert_any_call("resend_invalid_email", email="bad")
+        mock_logger.warning.assert_any_call("resend_invalid_email", email="@nope.com")
+        mock_logger.warning.assert_any_call("resend_invalid_email", email="no-domain@")
+        assert mock_logger.warning.call_count == 3
+
+    def test_empty_list(self):
+        assert _validate_recipients([]) == []
