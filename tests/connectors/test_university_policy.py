@@ -693,6 +693,26 @@ class TestCSSSelectorValidation:
         with pytest.raises(ValueError, match="Broken University"):
             UniversityPolicyConnector(config)
 
+    def test_non_string_selector_raises_value_error(self):
+        """Non-string selector (e.g. None) raises ValueError at init."""
+        config = SourceConfig(
+            id="test-none-selector",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "None Selector University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": None,
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="None Selector University"):
+            UniversityPolicyConnector(config)
+
     def test_default_institutions_have_valid_selectors(self):
         """All default institution selectors pass validation."""
         config = SourceConfig(

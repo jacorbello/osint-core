@@ -86,6 +86,12 @@ class UniversityPolicyConnector(BaseConnector):
         for institution in self._institutions:
             name = institution.get("name", "<unknown>")
             selector = institution.get("selector", "")
+            if not isinstance(selector, str) or not selector:
+                msg = (
+                    f"Invalid CSS selector for institution {name!r}: "
+                    f"{selector!r} — selector must be a non-empty string"
+                )
+                raise ValueError(msg)
             try:
                 soupsieve.compile(selector)
             except soupsieve.SelectorSyntaxError as exc:
