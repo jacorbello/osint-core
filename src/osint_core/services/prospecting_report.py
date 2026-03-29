@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.config import settings
 from osint_core.models.lead import Lead
+from osint_core.services.courtlistener import CourtListenerClient
 from osint_core.services.pdf_export import upload_pdf_to_minio
 
 logger = structlog.get_logger()
@@ -130,6 +131,9 @@ def _render_pdf_html(context: dict[str, Any]) -> str:
 class ProspectingReportGenerator:
     """Orchestrates the full prospecting report pipeline."""
 
+    def __init__(self, *, courtlistener: CourtListenerClient | None = None) -> None:
+        self._courtlistener = courtlistener or CourtListenerClient()
+
     async def generate_report(self, db: AsyncSession) -> ReportResult | None:
         """Generate a prospecting report for all reportable leads.
 
@@ -148,8 +152,6 @@ class ProspectingReportGenerator:
         # Build lead contexts with narrative sections
         lead_contexts = []
         all_source_citations: list[str] = []
-        # TODO(#137): Legal citation verification via CourtListener is deferred
-        # to a follow-up PR once the CourtListener service is integrated.
         all_legal_citations: list[dict[str, Any]] = []
 
         for lead in leads:
@@ -160,6 +162,29 @@ class ProspectingReportGenerator:
             if lead.citations:
                 source_cites = lead.citations.get("sources", [])
                 all_source_citations.extend(source_cites)
+
+            # Verify legal citations via CourtListener
+            lead_legal_citations: list[dict[str, Any]] = []
+            narrative_text = " ".join(sections.values())
+            try:
+                verified = await self._courtlistener.verify_citations(narrative_text)
+                for vc in verified:
+                    cite_dict: dict[str, Any] = {
+                        "case_name": vc.case_name,
+                        "citation": vc.citation,
+                        "courtlistener_url": vc.courtlistener_url,
+                        "verified": vc.verified,
+                        "relevance": vc.relevance,
+                        "holding_summary": vc.holding_summary,
+                    }
+                    lead_legal_citations.append(cite_dict)
+                    all_legal_citations.append(cite_dict)
+            except Exception as exc:
+                logger.warning(
+                    "courtlistener_verification_failed",
+                    lead_id=str(lead.id),
+                    error=str(exc),
+                )
 
             lead_contexts.append({
                 "lead_type": lead.lead_type,
@@ -172,7 +197,7 @@ class ProspectingReportGenerator:
                 "confidence": lead.confidence,
                 "sections": sections,
                 "source_citations": source_cites,
-                "legal_citations": [],
+                "legal_citations": lead_legal_citations,
             })
 
         # Build summary stats
