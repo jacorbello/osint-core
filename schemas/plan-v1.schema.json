@@ -56,8 +56,17 @@
               "urlhaus_api",
               "threatfox_api",
               "github_releases",
-              "university_policy",
-              "xai_x_search"
+              "gdelt_api",
+              "reliefweb_api",
+              "shodan_api",
+              "otx_api",
+              "abusech_malwarebazaar",
+              "abusech_feodotracker",
+              "acled_api",
+              "nws_alerts",
+              "reddit",
+              "xai_x_search",
+              "university_policy"
             ],
             "description": "Source collector type."
           },

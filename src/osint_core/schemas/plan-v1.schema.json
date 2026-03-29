@@ -65,8 +65,8 @@
               "acled_api",
               "nws_alerts",
               "reddit",
-              "university_policy",
-              "xai_x_search"
+              "xai_x_search",
+              "university_policy"
             ],
             "description": "Source collector type."
           },
