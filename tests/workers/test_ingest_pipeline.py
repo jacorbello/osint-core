@@ -445,3 +445,227 @@ async def test_ingest_with_indicators_no_greenlet_error():
     assert result["ingested"] == 1
     assert result["errors"] == 0
     assert result["status"] == "succeeded"
+
+
+# ---------------------------------------------------------------------------
+# Lead matching integration for CAL prospecting plans
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cal_plan_dispatches_match_leads_task():
+    """CAL prospecting plan triggers match_leads_task via chord after enrichment."""
+    plan = _make_plan(
+        plan_id="cal-prospecting",
+        sources=[
+            {
+                "id": "src-1",
+                "type": "rss",
+                "url": "https://example.com/feed.xml",
+                "weight": 1.0,
+                "params": {},
+            }
+        ],
+    )
+    items = [_make_raw_item("CAL Item 1")]
+    mock_db = _make_mock_db()
+    patches = _patch_all(mock_db, plan, items)
+    task_self = _mock_task_self()
+
+    event_ids = [uuid.uuid4()]
+    event_id_iter = iter(event_ids)
+    original_add = mock_db.add
+
+    def side_effect_add(obj):
+        if hasattr(obj, "event_type"):
+            obj.id = next(event_id_iter)
+        return original_add(obj)
+
+    mock_db.add = MagicMock(side_effect=side_effect_add)
+
+    mock_chain = MagicMock()
+    mock_chord = MagicMock()
+    mock_chord.return_value.apply_async = MagicMock()
+    mock_match_leads = MagicMock()
+
+    with (
+        patch("osint_core.workers.ingest.async_session", patches["async_session"]),
+        patch("osint_core.workers.ingest.plan_store", patches["plan_store"]),
+        patch("osint_core.workers.ingest.registry", patches["registry"]),
+        patch("osint_core.workers.ingest.score_event_task", patches["score_event_task"]),
+        patch("osint_core.workers.ingest.vectorize_event_task", patches["vectorize_event_task"]),
+        patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
+        patch("osint_core.workers.ingest.nlp_enrich_task", MagicMock()),
+        patch("osint_core.workers.ingest.chain", mock_chain),
+        patch("osint_core.workers.ingest.chord", mock_chord),
+        patch("osint_core.workers.ingest.group", MagicMock()),
+        patch("osint_core.workers.ingest.extract_indicators", return_value=[]),
+        patch("osint_core.workers.ingest.match_leads_task", mock_match_leads),
+    ):
+        result = await _ingest_source_async(task_self, "src-1", "cal-prospecting")
+
+    assert result["ingested"] == 1
+    assert result["lead_match_dispatched"] is True
+
+    # chord should be called (enrichment group + match_leads_task callback)
+    mock_chord.assert_called_once()
+    mock_chord.return_value.apply_async.assert_called_once()
+    # Individual chain.apply_async should NOT be called (chord dispatches them)
+    mock_chain.return_value.apply_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_non_cal_plan_does_not_dispatch_match_leads():
+    """Non-CAL plans should NOT trigger match_leads_task."""
+    plan = _make_plan(plan_id="other-plan")
+    items = [_make_raw_item("Regular Item")]
+    mock_db = _make_mock_db()
+    patches = _patch_all(mock_db, plan, items)
+    task_self = _mock_task_self()
+
+    event_ids = [uuid.uuid4()]
+    event_id_iter = iter(event_ids)
+    original_add = mock_db.add
+
+    def side_effect_add(obj):
+        if hasattr(obj, "event_type"):
+            obj.id = next(event_id_iter)
+        return original_add(obj)
+
+    mock_db.add = MagicMock(side_effect=side_effect_add)
+
+    mock_chain = MagicMock()
+    mock_chain.return_value.apply_async = MagicMock()
+    mock_chord = MagicMock()
+    mock_match_leads = MagicMock()
+
+    with (
+        patch("osint_core.workers.ingest.async_session", patches["async_session"]),
+        patch("osint_core.workers.ingest.plan_store", patches["plan_store"]),
+        patch("osint_core.workers.ingest.registry", patches["registry"]),
+        patch("osint_core.workers.ingest.score_event_task", patches["score_event_task"]),
+        patch("osint_core.workers.ingest.vectorize_event_task", patches["vectorize_event_task"]),
+        patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
+        patch("osint_core.workers.ingest.nlp_enrich_task", MagicMock()),
+        patch("osint_core.workers.ingest.chain", mock_chain),
+        patch("osint_core.workers.ingest.chord", mock_chord),
+        patch("osint_core.workers.ingest.group", MagicMock()),
+        patch("osint_core.workers.ingest.extract_indicators", return_value=[]),
+        patch("osint_core.workers.ingest.match_leads_task", mock_match_leads),
+    ):
+        result = await _ingest_source_async(task_self, "src-1", "other-plan")
+
+    assert result["ingested"] == 1
+    assert result["lead_match_dispatched"] is False
+    mock_chord.assert_not_called()
+    # Non-CAL dispatches chains directly
+    mock_chain.return_value.apply_async.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cal_plan_graceful_degradation_on_chord_failure(caplog):
+    """Pipeline succeeds even if chord dispatch fails."""
+    plan = _make_plan(
+        plan_id="cal-prospecting",
+        sources=[
+            {
+                "id": "src-1",
+                "type": "rss",
+                "url": "https://example.com/feed.xml",
+                "weight": 1.0,
+                "params": {},
+            }
+        ],
+    )
+    items = [_make_raw_item("CAL Item")]
+    mock_db = _make_mock_db()
+    patches = _patch_all(mock_db, plan, items)
+    task_self = _mock_task_self()
+
+    event_ids = [uuid.uuid4()]
+    event_id_iter = iter(event_ids)
+    original_add = mock_db.add
+
+    def side_effect_add(obj):
+        if hasattr(obj, "event_type"):
+            obj.id = next(event_id_iter)
+        return original_add(obj)
+
+    mock_db.add = MagicMock(side_effect=side_effect_add)
+
+    mock_chain = MagicMock()
+    mock_chord = MagicMock()
+    mock_chord.return_value.apply_async = MagicMock(
+        side_effect=ConnectionError("broker unreachable")
+    )
+    mock_match_leads = MagicMock()
+
+    with (
+        patch("osint_core.workers.ingest.async_session", patches["async_session"]),
+        patch("osint_core.workers.ingest.plan_store", patches["plan_store"]),
+        patch("osint_core.workers.ingest.registry", patches["registry"]),
+        patch("osint_core.workers.ingest.score_event_task", patches["score_event_task"]),
+        patch("osint_core.workers.ingest.vectorize_event_task", patches["vectorize_event_task"]),
+        patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
+        patch("osint_core.workers.ingest.nlp_enrich_task", MagicMock()),
+        patch("osint_core.workers.ingest.chain", mock_chain),
+        patch("osint_core.workers.ingest.chord", mock_chord),
+        patch("osint_core.workers.ingest.group", MagicMock()),
+        patch("osint_core.workers.ingest.extract_indicators", return_value=[]),
+        patch("osint_core.workers.ingest.match_leads_task", mock_match_leads),
+    ):
+        result = await _ingest_source_async(task_self, "src-1", "cal-prospecting")
+
+    # Pipeline should still succeed despite chord failure
+    assert result["ingested"] == 1
+    assert result["status"] == "succeeded"
+    assert result["lead_match_dispatched"] is False
+    assert any("Failed to dispatch enrichment chord" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_cal_plan_no_match_leads_when_no_new_events():
+    """CAL plan with all duplicates should NOT dispatch match_leads_task."""
+    plan = _make_plan(
+        plan_id="cal-prospecting",
+        sources=[
+            {
+                "id": "src-1",
+                "type": "rss",
+                "url": "https://example.com/feed.xml",
+                "weight": 1.0,
+                "params": {},
+            }
+        ],
+    )
+    items = [_make_raw_item("Dup Item")]
+    mock_db = _make_mock_db()
+
+    # Make the dedupe check return an existing event ID (= duplicate)
+    dup_result = MagicMock()
+    dup_result.scalar_one_or_none.return_value = uuid.uuid4()
+    mock_db.execute = AsyncMock(return_value=dup_result)
+
+    patches = _patch_all(mock_db, plan, items)
+    task_self = _mock_task_self()
+
+    mock_chord = MagicMock()
+    mock_match_leads = MagicMock()
+
+    with (
+        patch("osint_core.workers.ingest.async_session", patches["async_session"]),
+        patch("osint_core.workers.ingest.plan_store", patches["plan_store"]),
+        patch("osint_core.workers.ingest.registry", patches["registry"]),
+        patch("osint_core.workers.ingest.score_event_task", patches["score_event_task"]),
+        patch("osint_core.workers.ingest.vectorize_event_task", patches["vectorize_event_task"]),
+        patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
+        patch("osint_core.workers.ingest.extract_indicators", return_value=[]),
+        patch("osint_core.workers.ingest.chord", mock_chord),
+        patch("osint_core.workers.ingest.match_leads_task", mock_match_leads),
+    ):
+        result = await _ingest_source_async(task_self, "src-1", "cal-prospecting")
+
+    assert result["skipped"] == 1
+    assert result["ingested"] == 0
+    assert result["lead_match_dispatched"] is False
+    mock_chord.assert_not_called()
