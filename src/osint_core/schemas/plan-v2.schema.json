@@ -103,6 +103,11 @@
     },
     "target_geo": {
       "$ref": "#/$defs/target_geo"
+    },
+    "custom": {
+      "type": "object",
+      "description": "Plan-specific custom configuration (lead thresholds, report schedule, notification settings, etc.).",
+      "additionalProperties": true
     }
   },
   "if": {
@@ -150,7 +155,8 @@
             "acled_api",
             "nws_alerts",
             "reddit",
-            "xai_x_search"
+            "xai_x_search",
+            "university_policy"
           ],
           "description": "Source collector type."
         },
@@ -260,7 +266,12 @@
         "mission": { "type": "string" },
         "classify_relevance": { "type": "boolean", "default": true },
         "extract_entities": { "type": "boolean", "default": true },
-        "generate_summaries": { "type": "boolean", "default": true }
+        "generate_summaries": { "type": "boolean", "default": true },
+        "constitutional_classification": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable constitutional rights classification for prospecting plans."
+        }
       }
     },
     "notifications": {
