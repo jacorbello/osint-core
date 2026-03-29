@@ -11,7 +11,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from celery import chain, group
+from celery import chain, chord, group
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -27,12 +27,10 @@ from osint_core.workers.celery_app import celery_app
 from osint_core.workers.enrich import correlate_event_task, vectorize_event_task
 from osint_core.workers.k8s_dispatch import enrich_entities_task
 from osint_core.workers.nlp_enrich import nlp_enrich_task
-from osint_core.workers.prospecting import match_leads_task
+from osint_core.workers.prospecting import _CAL_PLAN_ID, match_leads_task
 from osint_core.workers.score import score_event_task
 
 logger = logging.getLogger(__name__)
-
-_CAL_PROSPECTING_PLAN_ID = "cal-prospecting"
 
 _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 
@@ -218,11 +216,16 @@ async def _ingest_source_async(
 
     # Step 6: Chain downstream tasks
     # NLP enrich first, then score + vectorize + entity extraction in parallel,
-    # then correlate
+    # then correlate.
+    # For CAL prospecting plans, use a chord so match_leads_task fires only
+    # after ALL enrichment chains finish — avoids the race of a fixed countdown.
     dispatched = 0
+    use_chord = plan_id == _CAL_PLAN_ID and new_event_ids
+    enrichment_chains = []
+
     for event_id in new_event_ids:
         try:
-            chain(
+            enrichment = chain(
                 nlp_enrich_task.si(event_id),
                 group(
                     score_event_task.si(event_id),
@@ -230,7 +233,11 @@ async def _ingest_source_async(
                     enrich_entities_task.si(event_id),
                 ),
                 correlate_event_task.si(event_id),
-            ).apply_async()
+            )
+            if use_chord:
+                enrichment_chains.append(enrichment)
+            else:
+                enrichment.apply_async()
             dispatched += 1
         except Exception:
             logger.exception(
@@ -243,26 +250,40 @@ async def _ingest_source_async(
     )
 
     # Step 6b: Dispatch lead matching for CAL prospecting plans
+    # Only dispatch if all enrichment chains were built successfully
+    # (dispatch_failures == 0) so we never match against un-enriched events.
     lead_match_dispatched = False
-    if plan_id == _CAL_PROSPECTING_PLAN_ID and new_event_ids:
+    dispatch_failures = len(new_event_ids) - dispatched
+    if use_chord and dispatch_failures == 0:
         try:
-            match_leads_task.apply_async(
-                args=[new_event_ids, plan_id],
-                countdown=30,  # allow enrichment chains to complete first
-            )
+            chord(
+                group(enrichment_chains),
+                match_leads_task.si(new_event_ids, plan_id),
+            ).apply_async()
             lead_match_dispatched = True
             logger.info(
-                "Dispatched match_leads_task for %d events (plan=%s)",
+                "Dispatched enrichment chord with match_leads_task callback "
+                "for %d events (plan=%s)",
                 len(new_event_ids), plan_id,
             )
         except Exception:
             logger.exception(
-                "Failed to dispatch match_leads_task for %s (plan=%s)",
+                "Failed to dispatch enrichment chord for %s (plan=%s)",
                 source_id, plan_id,
             )
+    elif use_chord:
+        # Some enrichment chains failed to build — dispatch the successful
+        # ones without lead matching to avoid matching partial data.
+        for c in enrichment_chains:
+            try:
+                c.apply_async()
+            except Exception:
+                logger.exception(
+                    "Failed to dispatch fallback enrichment chain (source=%s, plan=%s)",
+                    source_id, plan_id,
+                )
 
     # Step 7: Record Job
-    dispatch_failures = len(new_event_ids) - dispatched
     if errors > 0 and ingested > 0:
         job_status = "partial_success"
     elif errors > 0:

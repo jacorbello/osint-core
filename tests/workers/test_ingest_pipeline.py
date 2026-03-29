@@ -454,7 +454,7 @@ async def test_ingest_with_indicators_no_greenlet_error():
 
 @pytest.mark.asyncio
 async def test_cal_plan_dispatches_match_leads_task():
-    """CAL prospecting plan triggers match_leads_task after enrichment."""
+    """CAL prospecting plan triggers match_leads_task via chord after enrichment."""
     plan = _make_plan(
         plan_id="cal-prospecting",
         sources=[
@@ -484,9 +484,9 @@ async def test_cal_plan_dispatches_match_leads_task():
     mock_db.add = MagicMock(side_effect=side_effect_add)
 
     mock_chain = MagicMock()
-    mock_chain.return_value.apply_async = MagicMock()
+    mock_chord = MagicMock()
+    mock_chord.return_value.apply_async = MagicMock()
     mock_match_leads = MagicMock()
-    mock_match_leads.apply_async = MagicMock()
 
     with (
         patch("osint_core.workers.ingest.async_session", patches["async_session"]),
@@ -497,6 +497,7 @@ async def test_cal_plan_dispatches_match_leads_task():
         patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
         patch("osint_core.workers.ingest.nlp_enrich_task", MagicMock()),
         patch("osint_core.workers.ingest.chain", mock_chain),
+        patch("osint_core.workers.ingest.chord", mock_chord),
         patch("osint_core.workers.ingest.group", MagicMock()),
         patch("osint_core.workers.ingest.extract_indicators", return_value=[]),
         patch("osint_core.workers.ingest.match_leads_task", mock_match_leads),
@@ -506,11 +507,11 @@ async def test_cal_plan_dispatches_match_leads_task():
     assert result["ingested"] == 1
     assert result["lead_match_dispatched"] is True
 
-    # match_leads_task should be called with event IDs and plan_id
-    mock_match_leads.apply_async.assert_called_once()
-    call_kwargs = mock_match_leads.apply_async.call_args
-    assert call_kwargs.kwargs["args"][1] == "cal-prospecting"
-    assert len(call_kwargs.kwargs["args"][0]) == 1
+    # chord should be called (enrichment group + match_leads_task callback)
+    mock_chord.assert_called_once()
+    mock_chord.return_value.apply_async.assert_called_once()
+    # Individual chain.apply_async should NOT be called (chord dispatches them)
+    mock_chain.return_value.apply_async.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -535,8 +536,8 @@ async def test_non_cal_plan_does_not_dispatch_match_leads():
 
     mock_chain = MagicMock()
     mock_chain.return_value.apply_async = MagicMock()
+    mock_chord = MagicMock()
     mock_match_leads = MagicMock()
-    mock_match_leads.apply_async = MagicMock()
 
     with (
         patch("osint_core.workers.ingest.async_session", patches["async_session"]),
@@ -547,6 +548,7 @@ async def test_non_cal_plan_does_not_dispatch_match_leads():
         patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
         patch("osint_core.workers.ingest.nlp_enrich_task", MagicMock()),
         patch("osint_core.workers.ingest.chain", mock_chain),
+        patch("osint_core.workers.ingest.chord", mock_chord),
         patch("osint_core.workers.ingest.group", MagicMock()),
         patch("osint_core.workers.ingest.extract_indicators", return_value=[]),
         patch("osint_core.workers.ingest.match_leads_task", mock_match_leads),
@@ -555,12 +557,14 @@ async def test_non_cal_plan_does_not_dispatch_match_leads():
 
     assert result["ingested"] == 1
     assert result["lead_match_dispatched"] is False
-    mock_match_leads.apply_async.assert_not_called()
+    mock_chord.assert_not_called()
+    # Non-CAL dispatches chains directly
+    mock_chain.return_value.apply_async.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_cal_plan_graceful_degradation_on_match_leads_failure(caplog):
-    """Pipeline succeeds even if match_leads_task dispatch fails."""
+async def test_cal_plan_graceful_degradation_on_chord_failure(caplog):
+    """Pipeline succeeds even if chord dispatch fails."""
     plan = _make_plan(
         plan_id="cal-prospecting",
         sources=[
@@ -590,11 +594,11 @@ async def test_cal_plan_graceful_degradation_on_match_leads_failure(caplog):
     mock_db.add = MagicMock(side_effect=side_effect_add)
 
     mock_chain = MagicMock()
-    mock_chain.return_value.apply_async = MagicMock()
-    mock_match_leads = MagicMock()
-    mock_match_leads.apply_async = MagicMock(
+    mock_chord = MagicMock()
+    mock_chord.return_value.apply_async = MagicMock(
         side_effect=ConnectionError("broker unreachable")
     )
+    mock_match_leads = MagicMock()
 
     with (
         patch("osint_core.workers.ingest.async_session", patches["async_session"]),
@@ -605,17 +609,18 @@ async def test_cal_plan_graceful_degradation_on_match_leads_failure(caplog):
         patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
         patch("osint_core.workers.ingest.nlp_enrich_task", MagicMock()),
         patch("osint_core.workers.ingest.chain", mock_chain),
+        patch("osint_core.workers.ingest.chord", mock_chord),
         patch("osint_core.workers.ingest.group", MagicMock()),
         patch("osint_core.workers.ingest.extract_indicators", return_value=[]),
         patch("osint_core.workers.ingest.match_leads_task", mock_match_leads),
     ):
         result = await _ingest_source_async(task_self, "src-1", "cal-prospecting")
 
-    # Pipeline should still succeed despite match_leads failure
+    # Pipeline should still succeed despite chord failure
     assert result["ingested"] == 1
     assert result["status"] == "succeeded"
     assert result["lead_match_dispatched"] is False
-    assert any("Failed to dispatch match_leads_task" in r.message for r in caplog.records)
+    assert any("Failed to dispatch enrichment chord" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -644,8 +649,8 @@ async def test_cal_plan_no_match_leads_when_no_new_events():
     patches = _patch_all(mock_db, plan, items)
     task_self = _mock_task_self()
 
+    mock_chord = MagicMock()
     mock_match_leads = MagicMock()
-    mock_match_leads.apply_async = MagicMock()
 
     with (
         patch("osint_core.workers.ingest.async_session", patches["async_session"]),
@@ -655,6 +660,7 @@ async def test_cal_plan_no_match_leads_when_no_new_events():
         patch("osint_core.workers.ingest.vectorize_event_task", patches["vectorize_event_task"]),
         patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
         patch("osint_core.workers.ingest.extract_indicators", return_value=[]),
+        patch("osint_core.workers.ingest.chord", mock_chord),
         patch("osint_core.workers.ingest.match_leads_task", mock_match_leads),
     ):
         result = await _ingest_source_async(task_self, "src-1", "cal-prospecting")
@@ -662,4 +668,4 @@ async def test_cal_plan_no_match_leads_when_no_new_events():
     assert result["skipped"] == 1
     assert result["ingested"] == 0
     assert result["lead_match_dispatched"] is False
-    mock_match_leads.apply_async.assert_not_called()
+    mock_chord.assert_not_called()
