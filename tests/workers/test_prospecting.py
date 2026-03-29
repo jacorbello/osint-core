@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from osint_core.services.lead_matcher import DEFAULT_CONFIDENCE_THRESHOLD
 from osint_core.workers.prospecting import _build_matcher_config, _match_leads_async
 
 
@@ -221,7 +222,7 @@ def test_build_matcher_config_default_when_no_custom():
         "scoring": {"source_reputation": {"rss_fire": 0.9}},
     }
     config = _build_matcher_config(plan_content, "cal-prospecting")
-    assert config.confidence_threshold == 0.3  # DEFAULT_CONFIDENCE_THRESHOLD
+    assert config.confidence_threshold == DEFAULT_CONFIDENCE_THRESHOLD
     assert config.plan_id == "cal-prospecting"
 
 
@@ -232,7 +233,27 @@ def test_build_matcher_config_default_when_key_missing():
         "custom": {"other_setting": True},
     }
     config = _build_matcher_config(plan_content, "cal-prospecting")
-    assert config.confidence_threshold == 0.3
+    assert config.confidence_threshold == DEFAULT_CONFIDENCE_THRESHOLD
+
+
+def test_build_matcher_config_invalid_threshold_falls_back():
+    """Non-numeric threshold falls back to default with warning."""
+    plan_content = {
+        "scoring": {},
+        "custom": {"lead_confidence_threshold": "not-a-number"},
+    }
+    config = _build_matcher_config(plan_content, "cal-prospecting")
+    assert config.confidence_threshold == DEFAULT_CONFIDENCE_THRESHOLD
+
+
+def test_build_matcher_config_out_of_range_threshold_falls_back():
+    """Threshold outside 0.0-1.0 falls back to default with warning."""
+    plan_content = {
+        "scoring": {},
+        "custom": {"lead_confidence_threshold": 5.0},
+    }
+    config = _build_matcher_config(plan_content, "cal-prospecting")
+    assert config.confidence_threshold == DEFAULT_CONFIDENCE_THRESHOLD
 
 
 def test_build_matcher_config_string_threshold_cast_to_float():
