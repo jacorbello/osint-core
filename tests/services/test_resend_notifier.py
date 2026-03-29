@@ -8,6 +8,7 @@ import pytest
 from osint_core.services.resend_notifier import (
     ResendNotifier,
     _build_html_body,
+    _validate_recipients,
 )
 
 
@@ -158,3 +159,45 @@ class TestResendNotifier:
         payload = mock_client.post.call_args.kwargs["json"]
         encoded = payload["attachments"][0]["content"]
         assert base64.b64decode(encoded) == pdf_data
+
+    @pytest.mark.asyncio()
+    async def test_invalid_emails_filtered_out(self, notifier):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("osint_core.services.resend_notifier.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            result = await notifier.send_report(
+                b"pdf", "summary", ["valid@example.com", "not-an-email", "also@valid.org"],
+            )
+
+        assert result is True
+        payload = mock_client.post.call_args.kwargs["json"]
+        assert payload["to"] == ["valid@example.com", "also@valid.org"]
+
+    @pytest.mark.asyncio()
+    async def test_all_invalid_emails_returns_false(self, notifier):
+        result = await notifier.send_report(
+            b"pdf", "summary", ["bad-email", "@nope", "missing-domain@"],
+        )
+        assert result is False
+
+
+class TestValidateRecipients:
+    def test_valid_emails_pass(self):
+        emails = ["user@example.com", "a.b+tag@domain.co"]
+        assert _validate_recipients(emails) == emails
+
+    def test_invalid_emails_filtered(self):
+        emails = ["good@example.com", "bad", "@nope.com", "no-domain@"]
+        result = _validate_recipients(emails)
+        assert result == ["good@example.com"]
+
+    def test_empty_list(self):
+        assert _validate_recipients([]) == []

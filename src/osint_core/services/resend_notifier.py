@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from datetime import UTC, datetime
 
 import httpx
@@ -14,6 +15,18 @@ logger = structlog.get_logger()
 
 _RESEND_API_URL = "https://api.resend.com/emails"
 _DEFAULT_TIMEOUT = 30.0
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
+
+
+def _validate_recipients(recipients: list[str]) -> list[str]:
+    """Filter recipients to valid email addresses, logging warnings for invalid ones."""
+    valid: list[str] = []
+    for addr in recipients:
+        if _EMAIL_RE.match(addr):
+            valid.append(addr)
+        else:
+            logger.warning("resend_invalid_email", email=addr)
+    return valid
 
 
 class ResendNotifier:
@@ -44,6 +57,11 @@ class ResendNotifier:
 
         if not recipients:
             logger.warning("resend_no_recipients")
+            return False
+
+        recipients = _validate_recipients(recipients)
+        if not recipients:
+            logger.warning("resend_no_valid_recipients")
             return False
 
         now = datetime.now(UTC)
