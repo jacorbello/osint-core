@@ -199,7 +199,7 @@ class TestProspectingReportGenerator:
         assert result.lead_count == 1
 
     @pytest.mark.asyncio()
-    async def test_courtlistener_citations_included_in_report(self, generator):
+    async def test_courtlistener_citations_included_in_report(self):
         leads = [_make_lead()]
         db = _mock_db(leads)
 
@@ -222,8 +222,9 @@ class TestProspectingReportGenerator:
             ),
         ]
         mock_cl = AsyncMock()
+        mock_cl.api_key = "test-key"
         mock_cl.verify_citations = AsyncMock(return_value=mock_citations)
-        generator._courtlistener = mock_cl
+        generator = ProspectingReportGenerator(courtlistener=mock_cl)
 
         vllm_response = {
             "choices": [{
@@ -262,13 +263,14 @@ class TestProspectingReportGenerator:
         assert legal_cites[1]["verified"] is False
 
     @pytest.mark.asyncio()
-    async def test_report_succeeds_when_courtlistener_unavailable(self, generator):
+    async def test_report_succeeds_when_courtlistener_unavailable(self):
         leads = [_make_lead()]
         db = _mock_db(leads)
 
         mock_cl = AsyncMock()
+        mock_cl.api_key = "test-key"
         mock_cl.verify_citations = AsyncMock(side_effect=Exception("API down"))
-        generator._courtlistener = mock_cl
+        generator = ProspectingReportGenerator(courtlistener=mock_cl)
 
         with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
@@ -288,7 +290,7 @@ class TestProspectingReportGenerator:
         assert result.lead_count == 1
 
     @pytest.mark.asyncio()
-    async def test_unverified_citations_flagged(self, generator):
+    async def test_unverified_citations_flagged(self):
         leads = [_make_lead()]
         db = _mock_db(leads)
 
@@ -303,8 +305,9 @@ class TestProspectingReportGenerator:
             ),
         ]
         mock_cl = AsyncMock()
+        mock_cl.api_key = "test-key"
         mock_cl.verify_citations = AsyncMock(return_value=mock_citations)
-        generator._courtlistener = mock_cl
+        generator = ProspectingReportGenerator(courtlistener=mock_cl)
 
         with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \

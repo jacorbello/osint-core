@@ -165,9 +165,21 @@ class ProspectingReportGenerator:
 
             # Verify legal citations via CourtListener
             lead_legal_citations: list[dict[str, Any]] = []
-            narrative_text = " ".join(sections.values())
             try:
-                verified = await self._courtlistener.verify_citations(narrative_text)
+                narrative_text = " ".join(
+                    str(v) for v in sections.values() if v
+                )
+                if not self._courtlistener.api_key:
+                    logger.debug(
+                        "courtlistener_skipped_no_api_key",
+                        lead_id=str(lead.id),
+                    )
+                    verified: list[Any] = []
+                else:
+                    verified = await asyncio.wait_for(
+                        self._courtlistener.verify_citations(narrative_text),
+                        timeout=10.0,
+                    )
                 for vc in verified:
                     cite_dict: dict[str, Any] = {
                         "case_name": vc.case_name,
