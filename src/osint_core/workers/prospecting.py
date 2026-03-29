@@ -110,6 +110,7 @@ def match_leads_task(self: Any, event_ids: list[str], plan_id: str) -> dict[str,
 
 async def _generate_report_async() -> dict[str, Any]:
     """Generate a prospecting report and send it via email."""
+    from osint_core.config import settings
     from osint_core.services.prospecting_report import ProspectingReportGenerator
     from osint_core.services.resend_notifier import ResendNotifier
 
@@ -120,22 +121,16 @@ async def _generate_report_async() -> dict[str, Any]:
         result = await generator.generate_report(db)
 
     if result is None:
-        logger.info(
-            "prospecting_report_skipped",
-            reason="no_new_leads",
-        )
+        logger.info("prospecting_report_skipped: no new leads")
         return {"status": "skipped", "reason": "no_new_leads"}
-
-    # Read recipients from config — plan custom section or env
-    from osint_core.config import settings
 
     recipients_raw = getattr(settings, "resend_recipients", "") or ""
     recipients = [r.strip() for r in recipients_raw.split(",") if r.strip()]
 
     if not recipients:
         logger.warning(
-            "prospecting_report_no_recipients",
-            lead_count=result.lead_count,
+            "prospecting_report_no_recipients: lead_count=%d",
+            result.lead_count,
         )
         return {
             "status": "skipped",
@@ -144,7 +139,6 @@ async def _generate_report_async() -> dict[str, Any]:
         }
 
     notifier = ResendNotifier()
-    # Use the first lead's executive summary for email body
     executive_summary = f"Report generated with {result.lead_count} leads on {result.report_date}."
     sent = await notifier.send_report(
         pdf_bytes=result.pdf_bytes,
@@ -154,12 +148,10 @@ async def _generate_report_async() -> dict[str, Any]:
 
     elapsed = time.monotonic() - start
     logger.info(
-        "prospecting_report_complete",
-        lead_count=result.lead_count,
-        artifact_uri=result.artifact_uri,
-        email_sent=sent,
-        recipients_count=len(recipients),
-        elapsed_seconds=round(elapsed, 2),
+        "prospecting_report_complete: lead_count=%d artifact_uri=%s "
+        "email_sent=%s recipients=%d elapsed=%.2fs",
+        result.lead_count, result.artifact_uri, sent,
+        len(recipients), elapsed,
     )
 
     return {
@@ -175,7 +167,7 @@ async def _generate_report_async() -> dict[str, Any]:
 def generate_prospecting_report_task(self: Any) -> dict[str, Any]:
     """Generate a prospecting report and email it via Resend.
 
-    Scheduled via Celery beat at 8 AM and 3 PM CST (13:00, 20:00 UTC).
+    Scheduled via Celery beat at 8 AM and 3 PM America/Chicago time.
     Gracefully skips if no new leads exist or no recipients are configured.
     """
     loop = asyncio.new_event_loop()
@@ -199,29 +191,28 @@ async def _collect_sources_async(plan_id: str) -> dict[str, Any]:
         plan_version = await store.get_active(db, plan_id)
 
     if plan_version is None:
-        logger.warning("collect_sources_no_plan", plan_id=plan_id)
+        logger.warning("collect_sources_no_plan: plan_id=%s", plan_id)
         return {"status": "skipped", "reason": "no_active_plan"}
 
     content = plan_version.content or {}
     sources = content.get("sources", [])
 
     if not sources:
-        logger.warning("collect_sources_empty", plan_id=plan_id)
+        logger.warning("collect_sources_empty: plan_id=%s", plan_id)
         return {"status": "skipped", "reason": "no_sources"}
 
-    from osint_core.workers.ingest import ingest_source_task
+    from osint_core.workers.ingest import ingest_source
 
     dispatched = 0
     for source in sources:
         source_id = source.get("id")
         if source_id:
-            ingest_source_task.delay(plan_id=plan_id, source_id=source_id)
+            ingest_source.delay(plan_id=plan_id, source_id=source_id)
             dispatched += 1
 
     logger.info(
-        "collect_sources_dispatched",
-        plan_id=plan_id,
-        source_count=dispatched,
+        "collect_sources_dispatched: plan_id=%s source_count=%d",
+        plan_id, dispatched,
     )
 
     return {
@@ -235,7 +226,7 @@ async def _collect_sources_async(plan_id: str) -> dict[str, Any]:
 def collect_prospecting_sources_task(self: Any, plan_id: str = _CAL_PLAN_ID) -> dict[str, Any]:
     """Trigger ingest for all CAL prospecting sources.
 
-    Scheduled via Celery beat ~1 hour before report generation (12:00, 19:00 UTC).
+    Scheduled via Celery beat ~1 hour before report generation (7 AM / 2 PM America/Chicago).
     """
     loop = asyncio.new_event_loop()
     try:

@@ -33,7 +33,7 @@ class TestGenerateReportTask:
         mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "osint_core.workers.prospecting.ProspectingReportGenerator",
+            "osint_core.services.prospecting_report.ProspectingReportGenerator",
             autospec=True,
         ) as mock_gen_cls:
             mock_gen_cls.return_value.generate_report = AsyncMock(return_value=None)
@@ -55,10 +55,10 @@ class TestGenerateReportTask:
 
         with (
             patch(
-                "osint_core.workers.prospecting.ProspectingReportGenerator",
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
                 autospec=True,
             ) as mock_gen_cls,
-            patch("osint_core.workers.prospecting.settings") as mock_settings,
+            patch("osint_core.config.settings") as mock_settings,
         ):
             mock_gen_cls.return_value.generate_report = AsyncMock(
                 return_value=mock_report_result,
@@ -83,14 +83,14 @@ class TestGenerateReportTask:
 
         with (
             patch(
-                "osint_core.workers.prospecting.ProspectingReportGenerator",
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
                 autospec=True,
             ) as mock_gen_cls,
             patch(
-                "osint_core.workers.prospecting.ResendNotifier",
+                "osint_core.services.resend_notifier.ResendNotifier",
                 autospec=True,
             ) as mock_notifier_cls,
-            patch("osint_core.workers.prospecting.settings") as mock_settings,
+            patch("osint_core.config.settings") as mock_settings,
         ):
             mock_gen_cls.return_value.generate_report = AsyncMock(
                 return_value=mock_report_result,
@@ -134,14 +134,14 @@ class TestGenerateReportTask:
 
         with (
             patch(
-                "osint_core.workers.prospecting.ProspectingReportGenerator",
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
                 autospec=True,
             ) as mock_gen_cls,
             patch(
-                "osint_core.workers.prospecting.ResendNotifier",
+                "osint_core.services.resend_notifier.ResendNotifier",
                 autospec=True,
             ) as mock_notifier_cls,
-            patch("osint_core.workers.prospecting.settings") as mock_settings,
+            patch("osint_core.config.settings") as mock_settings,
         ):
             mock_gen_cls.return_value.generate_report = track_generate
             mock_notifier_cls.return_value.send_report = track_send
@@ -163,7 +163,7 @@ class TestCollectSourcesTask:
         mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "osint_core.workers.prospecting.PlanStore",
+            "osint_core.services.plan_store.PlanStore",
             autospec=True,
         ) as mock_store_cls:
             mock_store_cls.return_value.get_active = AsyncMock(return_value=None)
@@ -190,11 +190,11 @@ class TestCollectSourcesTask:
 
         with (
             patch(
-                "osint_core.workers.prospecting.PlanStore",
+                "osint_core.services.plan_store.PlanStore",
                 autospec=True,
             ) as mock_store_cls,
             patch(
-                "osint_core.workers.prospecting.ingest_source_task",
+                "osint_core.workers.ingest.ingest_source",
             ) as mock_ingest,
         ):
             mock_store_cls.return_value.get_active = AsyncMock(return_value=mock_plan)
@@ -215,7 +215,7 @@ class TestCollectSourcesTask:
         mock_plan.content = {"sources": []}
 
         with patch(
-            "osint_core.workers.prospecting.PlanStore",
+            "osint_core.services.plan_store.PlanStore",
             autospec=True,
         ) as mock_store_cls:
             mock_store_cls.return_value.get_active = AsyncMock(return_value=mock_plan)

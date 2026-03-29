@@ -67,17 +67,17 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=3, minute=0),  # daily at 03:00 America/Chicago
     },
     # Prospecting collection: 1 hour before report generation
-    # 12:00 / 19:00 UTC = ~7 AM / ~2 PM CST (note: CDT = UTC-5 during DST)
+    # Runs at 07:00 and 14:00 America/Chicago
     "collect-prospecting-sources": {
         "task": "osint.collect_prospecting_sources",
-        "schedule": crontab(hour="12,19", minute=0),
+        "schedule": crontab(hour="7,14", minute=0),
         "kwargs": {"plan_id": "cal-prospecting"},
     },
     # Prospecting report generation + email
-    # 13:00 / 20:00 UTC = 8 AM / 3 PM CST
+    # Runs at 08:00 and 15:00 America/Chicago
     "generate-prospecting-report": {
         "task": "osint.generate_prospecting_report",
-        "schedule": crontab(hour="13,20", minute=0),
+        "schedule": crontab(hour="8,15", minute=0),
     },
 }
 
