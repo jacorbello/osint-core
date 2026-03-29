@@ -301,3 +301,46 @@ notifications:
     result = engine.validate_yaml(yaml_str)
     assert result.is_valid, f"Errors: {result.errors}"
     assert result.parsed["sources"][0]["type"] == "reddit"
+
+
+def test_validate_cal_prospecting_yaml():
+    """cal-prospecting.yaml must pass validation."""
+    engine = PlanEngine()
+    plan_path = Path(__file__).resolve().parents[1] / "plans" / "cal-prospecting.yaml"
+    yaml_str = plan_path.read_text()
+    result = engine.validate_yaml(yaml_str)
+    assert result.is_valid, f"Errors: {result.errors}"
+    assert result.parsed["version"] == 2
+    assert result.parsed["plan_type"] == "child"
+    source_types = [s["type"] for s in result.parsed["sources"]]
+    assert "university_policy" in source_types
+    assert "xai_x_search" in source_types
+    assert "rss" in source_types
+
+
+def test_validate_v2_university_policy_source_type():
+    """v2 schema must accept 'university_policy' as a valid source type."""
+    engine = PlanEngine()
+    yaml_str = """
+version: 2
+plan_id: univ-test-v2
+plan_type: child
+retention_class: standard
+sources:
+  - id: univ_uc
+    type: university_policy
+    schedule_cron: "0 8 * * 1"
+scoring:
+  recency_half_life_hours: 168
+  source_reputation:
+    univ_uc: 0.95
+  ioc_match_boost: 1.5
+notifications:
+  routes:
+    - name: alerts
+      channels:
+        - type: gotify
+"""
+    result = engine.validate_yaml(yaml_str)
+    assert result.is_valid, f"Errors: {result.errors}"
+    assert result.parsed["sources"][0]["type"] == "university_policy"

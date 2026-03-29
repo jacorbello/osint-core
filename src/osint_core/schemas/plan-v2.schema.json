@@ -266,12 +266,7 @@
         "mission": { "type": "string" },
         "classify_relevance": { "type": "boolean", "default": true },
         "extract_entities": { "type": "boolean", "default": true },
-        "generate_summaries": { "type": "boolean", "default": true },
-        "constitutional_classification": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable constitutional rights classification for prospecting plans."
-        }
+        "generate_summaries": { "type": "boolean", "default": true }
       }
     },
     "notifications": {
