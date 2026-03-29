@@ -64,7 +64,9 @@
               "abusech_feodotracker",
               "acled_api",
               "nws_alerts",
-              "reddit"
+              "reddit",
+              "university_policy",
+              "xai_x_search"
             ],
             "description": "Source collector type."
           },

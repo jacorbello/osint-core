@@ -344,3 +344,55 @@ notifications:
     result = engine.validate_yaml(yaml_str)
     assert result.is_valid, f"Errors: {result.errors}"
     assert result.parsed["sources"][0]["type"] == "university_policy"
+
+
+def test_validate_v1_xai_x_search_source_type():
+    """v1 schema must accept 'xai_x_search' as a valid source type."""
+    engine = PlanEngine()
+    yaml_str = """
+version: 1
+plan_id: xai-test-v1
+sources:
+  - id: xai_search
+    type: xai_x_search
+    schedule_cron: "0 */6 * * *"
+scoring:
+  recency_half_life_hours: 24
+  source_reputation:
+    xai_search: 0.7
+  ioc_match_boost: 1.0
+notifications:
+  routes:
+    - name: alerts
+      channels:
+        - type: gotify
+"""
+    result = engine.validate_yaml(yaml_str)
+    assert result.is_valid, f"Errors: {result.errors}"
+    assert result.parsed["sources"][0]["type"] == "xai_x_search"
+
+
+def test_validate_v1_university_policy_source_type():
+    """v1 schema must accept 'university_policy' as a valid source type."""
+    engine = PlanEngine()
+    yaml_str = """
+version: 1
+plan_id: univ-test-v1
+sources:
+  - id: univ_policy
+    type: university_policy
+    schedule_cron: "0 8 * * 1"
+scoring:
+  recency_half_life_hours: 168
+  source_reputation:
+    univ_policy: 0.95
+  ioc_match_boost: 1.5
+notifications:
+  routes:
+    - name: alerts
+      channels:
+        - type: gotify
+"""
+    result = engine.validate_yaml(yaml_str)
+    assert result.is_valid, f"Errors: {result.errors}"
+    assert result.parsed["sources"][0]["type"] == "university_policy"

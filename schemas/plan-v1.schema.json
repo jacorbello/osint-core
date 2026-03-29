@@ -56,7 +56,8 @@
               "urlhaus_api",
               "threatfox_api",
               "github_releases",
-              "university_policy"
+              "university_policy",
+              "xai_x_search"
             ],
             "description": "Source collector type."
           },
