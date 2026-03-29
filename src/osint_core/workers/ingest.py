@@ -27,9 +27,12 @@ from osint_core.workers.celery_app import celery_app
 from osint_core.workers.enrich import correlate_event_task, vectorize_event_task
 from osint_core.workers.k8s_dispatch import enrich_entities_task
 from osint_core.workers.nlp_enrich import nlp_enrich_task
+from osint_core.workers.prospecting import match_leads_task
 from osint_core.workers.score import score_event_task
 
 logger = logging.getLogger(__name__)
+
+_CAL_PROSPECTING_PLAN_ID = "cal-prospecting"
 
 _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 
@@ -239,6 +242,25 @@ async def _ingest_source_async(
         dispatched, len(new_event_ids), source_id, plan_id,
     )
 
+    # Step 6b: Dispatch lead matching for CAL prospecting plans
+    lead_match_dispatched = False
+    if plan_id == _CAL_PROSPECTING_PLAN_ID and new_event_ids:
+        try:
+            match_leads_task.apply_async(
+                args=[new_event_ids, plan_id],
+                countdown=30,  # allow enrichment chains to complete first
+            )
+            lead_match_dispatched = True
+            logger.info(
+                "Dispatched match_leads_task for %d events (plan=%s)",
+                len(new_event_ids), plan_id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to dispatch match_leads_task for %s (plan=%s)",
+                source_id, plan_id,
+            )
+
     # Step 7: Record Job
     dispatch_failures = len(new_event_ids) - dispatched
     if errors > 0 and ingested > 0:
@@ -268,6 +290,7 @@ async def _ingest_source_async(
         "errors": errors,
         "dispatched": dispatched,
         "dispatch_failures": dispatch_failures,
+        "lead_match_dispatched": lead_match_dispatched,
     }
 
 
