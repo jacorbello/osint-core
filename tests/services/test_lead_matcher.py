@@ -10,7 +10,10 @@ from osint_core.services.lead_matcher import (
     LeadMatcher,
     LeadMatcherConfig,
     _entity_completeness,
+    _extract_source_citations,
+    _merge_citations,
     _normalize_severity,
+    _normalize_source_citations,
     _source_type,
     compute_confidence,
     compute_fingerprint,
@@ -30,6 +33,7 @@ def _make_event(
     summary: str | None = "A professor was terminated.",
     severity: str | None = "medium",
     metadata: dict | None = None,
+    raw_excerpt: str | None = None,
 ) -> MagicMock:
     event = MagicMock()
     event.id = uuid.uuid4()
@@ -39,6 +43,7 @@ def _make_event(
     event.severity = severity
     event.nlp_summary = None
     event.nlp_relevance = "relevant"
+    event.raw_excerpt = raw_excerpt
     if metadata is None:
         metadata = {
             "lead_type": "incident",
@@ -58,6 +63,7 @@ def _make_lead(
     constitutional_basis: list | None = None,
     severity: str | None = "low",
     confidence: float = 0.5,
+    citations: dict | None = None,
 ) -> MagicMock:
     lead = MagicMock()
     lead.id = uuid.uuid4()
@@ -66,6 +72,7 @@ def _make_lead(
     lead.constitutional_basis = constitutional_basis or ["1A-free-speech"]
     lead.severity = severity
     lead.confidence = confidence
+    lead.citations = citations
     lead.last_updated_at = datetime.now(UTC)
     return lead
 
@@ -417,3 +424,256 @@ class TestMatchEventToLead:
         lead = await matcher.match_event_to_lead(event, db)
         assert lead is not None
         assert lead.jurisdiction is None
+
+
+# ---------------------------------------------------------------------------
+# Citation extraction tests
+# ---------------------------------------------------------------------------
+
+
+class TestExtractSourceCitations:
+    def test_xai_event_returns_tweet_url(self):
+        event = _make_event(
+            source_id="x_cal_california",
+            metadata={
+                "tweet_url": "https://x.com/user/status/123",
+                "author": "@journalist",
+                "text": "Breaking news",
+            },
+        )
+        citations = _extract_source_citations(event)
+        assert len(citations) == 1
+        assert citations[0]["url"] == "https://x.com/user/status/123"
+        assert citations[0]["source_type"] == "xai_x_search"
+        assert "@journalist" in citations[0]["title"]
+
+    def test_university_policy_event_returns_document_url(self):
+        event = _make_event(
+            source_id="univ_uc_policy",
+            metadata={
+                "url": "https://policy.ucop.edu/doc/123",
+                "title": "DEI Compliance Policy",
+                "institution": "UC System",
+            },
+        )
+        citations = _extract_source_citations(event)
+        assert len(citations) == 1
+        assert citations[0]["url"] == "https://policy.ucop.edu/doc/123"
+        assert citations[0]["source_type"] == "university_policy"
+        assert citations[0]["title"] == "DEI Compliance Policy"
+
+    def test_fallback_to_raw_excerpt(self):
+        event = _make_event(
+            source_id="rss_fire",
+            metadata={"lead_type": "incident"},
+            raw_excerpt="https://example.com/article/123",
+        )
+        citations = _extract_source_citations(event)
+        assert len(citations) == 1
+        assert citations[0]["url"] == "https://example.com/article/123"
+
+    def test_raw_excerpt_non_url_ignored(self):
+        """Non-URL raw_excerpt should not be used as a citation URL."""
+        event = _make_event(
+            source_id="rss_fire",
+            metadata={"lead_type": "incident"},
+            raw_excerpt="This is just some text, not a URL",
+        )
+        citations = _extract_source_citations(event)
+        assert citations == []
+
+    def test_empty_metadata_no_raw_excerpt(self):
+        event = _make_event(
+            source_id="rss_fire",
+            metadata={},
+            raw_excerpt=None,
+        )
+        citations = _extract_source_citations(event)
+        assert citations == []
+
+
+class TestMergeCitations:
+    def test_deduplicates_by_url(self):
+        existing = [{"url": "https://x.com/status/1", "title": "A", "source_type": "xai_x_search"}]
+        new = [{"url": "https://x.com/status/1", "title": "A dup", "source_type": "xai_x_search"}]
+        merged = _merge_citations(existing, new)
+        assert len(merged) == 1
+
+    def test_deduplicates_string_existing_against_dict_new(self):
+        """Normalized string citations should deduplicate against new dicts."""
+        existing = ["X post by @a (https://x.com/status/1)"]
+        new = [
+            {"url": "https://x.com/status/1", "title": "X post by @a",
+             "source_type": "xai_x_search"},
+        ]
+        merged = _merge_citations(existing, new)
+        assert len(merged) == 1
+
+    def test_appends_new_urls(self):
+        existing = [{"url": "https://x.com/status/1", "title": "A", "source_type": "xai_x_search"}]
+        new = [{"url": "https://x.com/status/2", "title": "B", "source_type": "xai_x_search"}]
+        merged = _merge_citations(existing, new)
+        assert len(merged) == 2
+
+    def test_empty_existing(self):
+        new = [{"url": "https://a.com", "title": "A", "source_type": "rss"}]
+        merged = _merge_citations([], new)
+        assert len(merged) == 1
+
+
+class TestNormalizeSourceCitations:
+    def test_dict_with_title_and_url(self):
+        citations = [{"url": "https://x.com/1", "title": "Post A", "source_type": "xai"}]
+        result = _normalize_source_citations(citations)
+        assert result == ["Post A (https://x.com/1)"]
+
+    def test_dict_with_url_only(self):
+        citations = [{"url": "https://x.com/1", "source_type": "xai"}]
+        result = _normalize_source_citations(citations)
+        assert result == ["https://x.com/1"]
+
+    def test_string_passthrough(self):
+        citations = ["https://example.com/article"]
+        result = _normalize_source_citations(citations)
+        assert result == ["https://example.com/article"]
+
+    def test_empty_list(self):
+        assert _normalize_source_citations([]) == []
+
+
+# ---------------------------------------------------------------------------
+# Lead creation / update citation integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestLeadCitations:
+    @pytest.fixture()
+    def config(self):
+        return LeadMatcherConfig(
+            plan_id="cal-prospecting",
+            confidence_threshold=0.3,
+            source_reputation={"rss_fire": 0.9, "x_cal_california": 0.4},
+        )
+
+    @pytest.fixture()
+    def matcher(self, config):
+        return LeadMatcher(config)
+
+    @pytest.mark.asyncio()
+    async def test_create_lead_from_xai_has_tweet_citation(self, matcher):
+        event = _make_event(
+            source_id="x_cal_california",
+            metadata={
+                "lead_type": "incident",
+                "institution": "UC Berkeley",
+                "jurisdiction": "CA",
+                "constitutional_basis": ["1A-free-speech"],
+                "affected_person": "Dr. Smith",
+                "tweet_url": "https://x.com/reporter/status/999",
+                "author": "@reporter",
+                "text": "Breaking: professor fired",
+            },
+        )
+        db = _mock_db(existing_lead=None)
+
+        lead = await matcher.match_event_to_lead(event, db)
+
+        assert lead is not None
+        assert lead.citations is not None
+        sources = lead.citations["sources"]
+        assert len(sources) == 1
+        assert "https://x.com/reporter/status/999" in sources[0]
+        assert "@reporter" in sources[0]
+
+    @pytest.mark.asyncio()
+    async def test_create_lead_from_university_has_document_citation(self, matcher):
+        event = _make_event(
+            source_id="univ_uc_policy",
+            metadata={
+                "lead_type": "policy",
+                "institution": "UC System",
+                "jurisdiction": "CA",
+                "constitutional_basis": ["1A-free-speech"],
+                "policy_name": "DEI Policy",
+                "url": "https://policy.ucop.edu/doc/456",
+                "title": "DEI Compliance Policy",
+            },
+        )
+        db = _mock_db(existing_lead=None)
+
+        lead = await matcher.match_event_to_lead(event, db)
+
+        assert lead is not None
+        assert lead.citations is not None
+        sources = lead.citations["sources"]
+        assert len(sources) == 1
+        assert "https://policy.ucop.edu/doc/456" in sources[0]
+        assert "DEI Compliance Policy" in sources[0]
+
+    @pytest.mark.asyncio()
+    async def test_merge_events_deduplicates_citations(self, matcher):
+        """Merging a second event with the same tweet URL should not duplicate."""
+        tweet_url = "https://x.com/reporter/status/999"
+        existing_source = "X post by @reporter (https://x.com/reporter/status/999)"
+        existing = _make_lead(
+            fingerprint=compute_fingerprint(
+                "incident", "UC Berkeley", "Dr. Smith",
+                plan_id="cal-prospecting",
+            ),
+            citations={"sources": [existing_source]},
+        )
+        event = _make_event(
+            source_id="x_cal_california",
+            metadata={
+                "lead_type": "incident",
+                "institution": "UC Berkeley",
+                "jurisdiction": "CA",
+                "constitutional_basis": ["1A-free-speech"],
+                "affected_person": "Dr. Smith",
+                "tweet_url": tweet_url,
+                "author": "@reporter",
+            },
+        )
+        db = _mock_db(existing_lead=existing)
+
+        lead = await matcher.match_event_to_lead(event, db)
+
+        assert lead is existing
+        # set_committed_value updates the attribute on the mock; verify
+        # that deduplication kept the count at 1.
+        sources = lead.citations["sources"]
+        assert len(sources) == 1
+        assert tweet_url in sources[0]
+
+    @pytest.mark.asyncio()
+    async def test_merge_events_appends_new_citation(self, matcher):
+        """Merging a second event with a different URL should add it."""
+        existing_source = "X post by @a (https://x.com/a/status/1)"
+        existing = _make_lead(
+            fingerprint=compute_fingerprint(
+                "incident", "UC Berkeley", "Dr. Smith",
+                plan_id="cal-prospecting",
+            ),
+            citations={"sources": [existing_source]},
+        )
+        event = _make_event(
+            source_id="x_cal_california",
+            metadata={
+                "lead_type": "incident",
+                "institution": "UC Berkeley",
+                "jurisdiction": "CA",
+                "constitutional_basis": ["1A-free-speech"],
+                "affected_person": "Dr. Smith",
+                "tweet_url": "https://x.com/b/status/2",
+                "author": "@b",
+            },
+        )
+        db = _mock_db(existing_lead=existing)
+
+        lead = await matcher.match_event_to_lead(event, db)
+
+        assert lead is existing
+        sources = lead.citations["sources"]
+        assert len(sources) == 2
+        assert "https://x.com/a/status/1" in sources[0]
+        assert "https://x.com/b/status/2" in sources[1]
