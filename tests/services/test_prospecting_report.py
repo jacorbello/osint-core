@@ -10,6 +10,7 @@ import pytest
 from osint_core.services.courtlistener import VerifiedCitation
 from osint_core.services.prospecting_report import (
     ProspectingReportGenerator,
+    _archive_pdf,
     _fallback_narrative,
     _select_reportable_leads,
 )
@@ -353,3 +354,20 @@ class TestProspectingReportGenerator:
         legal_cites = ctx.get("all_legal_citations") or []
         assert len(legal_cites) == 1
         assert legal_cites[0]["relevance"] == "not independently verified"
+
+
+class TestArchivePdf:
+    """Tests for the _archive_pdf helper."""
+
+    @pytest.mark.asyncio()
+    async def test_passes_evidentiary_retention_class(self):
+        """_archive_pdf uploads with retention_class='evidentiary'."""
+        mock_upload = MagicMock(return_value="minio://osint-reports/prospecting/test.pdf")
+
+        with patch(f"{_MOD}.upload_pdf_to_minio", mock_upload):
+            uri = await _archive_pdf(b"%PDF-data", datetime.now(UTC))
+
+        assert uri == "minio://osint-reports/prospecting/test.pdf"
+        mock_upload.assert_called_once()
+        call_kwargs = mock_upload.call_args
+        assert call_kwargs.kwargs.get("retention_class") == "evidentiary"

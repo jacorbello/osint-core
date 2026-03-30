@@ -298,7 +298,11 @@ async def _archive_pdf(pdf_bytes: bytes, timestamp: datetime) -> str:
 
     try:
         uri = await asyncio.to_thread(
-            upload_pdf_to_minio, pdf_bytes, object_name, bucket=_REPORT_BUCKET
+            upload_pdf_to_minio,
+            pdf_bytes,
+            object_name,
+            bucket=_REPORT_BUCKET,
+            retention_class="evidentiary",
         )
         return uri
     except Exception as exc:

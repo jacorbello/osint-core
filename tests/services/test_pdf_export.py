@@ -166,6 +166,36 @@ class TestUploadPdfToMinio:
         assert uri == "minio://custom-bucket/key.pdf"
         mock_client.bucket_exists.assert_called_once_with("custom-bucket")
 
+    @patch("osint_core.services.pdf_export.Minio")
+    def test_retention_class_metadata_included(self, mock_minio_cls: MagicMock):
+        """Upload with retention_class sets x-amz-meta-retention-class metadata."""
+        mock_client = MagicMock()
+        mock_client.bucket_exists.return_value = True
+        mock_minio_cls.return_value = mock_client
+
+        upload_pdf_to_minio(
+            b"%PDF", "reports/test.pdf", retention_class="evidentiary"
+        )
+
+        call_args = mock_client.put_object.call_args
+        assert call_args[1]["metadata"] == {
+            "x-amz-meta-retention-class": "evidentiary",
+        }
+
+    @patch("osint_core.services.pdf_export.Minio")
+    def test_default_retention_class_is_standard(self, mock_minio_cls: MagicMock):
+        """Default retention_class is 'standard' for backward compatibility."""
+        mock_client = MagicMock()
+        mock_client.bucket_exists.return_value = True
+        mock_minio_cls.return_value = mock_client
+
+        upload_pdf_to_minio(b"%PDF", "briefs/test.pdf")
+
+        call_args = mock_client.put_object.call_args
+        assert call_args[1]["metadata"] == {
+            "x-amz-meta-retention-class": "standard",
+        }
+
 
 # ---------------------------------------------------------------------------
 # generate_and_upload_pdf (integration of render + upload)
