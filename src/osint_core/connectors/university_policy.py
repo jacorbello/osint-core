@@ -26,6 +26,8 @@ from osint_core.connectors.base import BaseConnector, RawItem
 logger = structlog.get_logger()
 
 _MAX_RETRIES = 3
+_MAX_REDIRECTS = 10
+_REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 _ARTIFACT_BUCKET = "osint-artifacts"
 
@@ -79,11 +81,46 @@ class UniversityPolicyConnector(BaseConnector):
         self._institutions: list[dict[str, str]] = extra.get(
             "institutions", DEFAULT_INSTITUTIONS
         )
-        self._allowed_domain_suffixes: tuple[str, ...] = tuple(
-            extra.get("allowed_domain_suffixes", _DEFAULT_ALLOWED_DOMAIN_SUFFIXES)
+        # Validate and normalize allowed domain suffixes (SSRF allowlist)
+        raw_suffixes = extra.get(
+            "allowed_domain_suffixes", _DEFAULT_ALLOWED_DOMAIN_SUFFIXES
         )
+        if isinstance(raw_suffixes, str):
+            raise TypeError(
+                "UniversityPolicyConnector.extra['allowed_domain_suffixes'] must be a "
+                "sequence of strings (e.g. ['.edu', '.gov']), not a single string."
+            )
+        try:
+            suffix_iterable = list(raw_suffixes)
+        except TypeError as exc:
+            raise TypeError(
+                "UniversityPolicyConnector.extra['allowed_domain_suffixes'] must be an "
+                "iterable of strings (e.g. ['.edu', '.gov'])."
+            ) from exc
+        normalized_suffixes: list[str] = []
+        for suffix in suffix_iterable:
+            if not isinstance(suffix, str):
+                raise TypeError(
+                    "UniversityPolicyConnector.extra['allowed_domain_suffixes'] elements "
+                    "must all be strings."
+                )
+            normalized = suffix.strip().lower()
+            if not normalized:
+                raise ValueError(
+                    "UniversityPolicyConnector.extra['allowed_domain_suffixes'] contains "
+                    "an empty or whitespace-only string."
+                )
+            normalized_suffixes.append(normalized)
+        self._allowed_domain_suffixes: tuple[str, ...] = tuple(normalized_suffixes)
+
+        # Normalize allowed domains to lowercase hostnames for case-insensitive matching
+        raw_allowed_domains = extra.get("allowed_domains", ())
+        if isinstance(raw_allowed_domains, str):
+            raw_allowed_domains = [raw_allowed_domains]
         self._allowed_domains: frozenset[str] = frozenset(
-            extra.get("allowed_domains", ())
+            d.strip().lower()
+            for d in raw_allowed_domains
+            if isinstance(d, str) and d.strip()
         )
         self._validate_selectors()
         self._validate_urls()
@@ -145,10 +182,12 @@ class UniversityPolicyConnector(BaseConnector):
         if hostname in _PRIVATE_HOSTNAMES:
             return False
 
-        # Reject private/reserved IP addresses
+        # Reject non-global IP addresses (private, loopback, reserved, link-local, etc.)
         try:
             addr = ipaddress.ip_address(hostname)
-            if addr.is_private or addr.is_loopback or addr.is_reserved:
+            # For IPv6, consider IPv4-mapped addresses if present
+            effective_addr = getattr(addr, "ipv4_mapped", None) or addr
+            if not effective_addr.is_global:
                 return False
         except ValueError:
             pass  # Not an IP address — proceed with domain checks
@@ -162,7 +201,9 @@ class UniversityPolicyConnector(BaseConnector):
 
     async def fetch(self) -> list[RawItem]:
         items: list[RawItem] = []
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=30, follow_redirects=False
+        ) as client:
             for institution in self._institutions:
                 inst_items = await self._fetch_institution(client, institution)
                 items.extend(inst_items)
@@ -189,7 +230,11 @@ class UniversityPolicyConnector(BaseConnector):
             url=policy_url,
         )
 
-        resp = await self._fetch_with_retries(client, policy_url)
+        try:
+            resp = await self._fetch_with_validated_redirects(client, policy_url)
+        except ValueError:
+            # Redirect to disallowed host — already logged by the method
+            return []
         if resp is None:
             return []
 
@@ -273,6 +318,55 @@ class UniversityPolicyConnector(BaseConnector):
         )
         return None
 
+    async def _fetch_with_validated_redirects(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+    ) -> httpx.Response | None:
+        """Fetch a URL, manually following redirects while validating each target.
+
+        Prevents SSRF bypass where an allowed domain redirects to an internal host.
+        Raises ``ValueError`` if a redirect target fails the domain allowlist check.
+        """
+        current_url = url
+        for _ in range(_MAX_REDIRECTS):
+            resp = await self._fetch_with_retries(client, current_url)
+            if resp is None:
+                return None
+
+            if resp.status_code not in _REDIRECT_STATUS_CODES:
+                return resp
+
+            location = resp.headers.get("Location")
+            if not location:
+                return resp
+
+            # Resolve relative redirect targets
+            redirect_url = urljoin(current_url, location)
+
+            if not self._is_url_allowed(redirect_url):
+                logger.warning(
+                    "university_policy_redirect_blocked",
+                    source_id=self.config.id,
+                    original_url=url,
+                    redirect_url=redirect_url,
+                    reason="redirect target not in domain allowlist",
+                )
+                raise ValueError(
+                    f"Redirect from {current_url!r} to disallowed URL "
+                    f"{redirect_url!r} blocked (SSRF mitigation)"
+                )
+
+            current_url = redirect_url
+
+        logger.error(
+            "university_policy_too_many_redirects",
+            source_id=self.config.id,
+            url=url,
+            max_redirects=_MAX_REDIRECTS,
+        )
+        return None
+
     # ------------------------------------------------------------------
     # Parsing helpers
     # ------------------------------------------------------------------
@@ -328,7 +422,11 @@ class UniversityPolicyConnector(BaseConnector):
             )
             return None
 
-        resp = await self._fetch_with_retries(client, url)
+        try:
+            resp = await self._fetch_with_validated_redirects(client, url)
+        except ValueError:
+            # Redirect to disallowed host — already logged by the method
+            return None
         if resp is None:
             return None
 
