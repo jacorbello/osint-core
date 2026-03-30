@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from osint_core.workers.prospecting import (
+    _EMAIL_MAX_RETRIES,
     _collect_sources_async,
     _generate_report_async,
     _resolve_recipients,
@@ -236,6 +237,110 @@ class TestGenerateReportTask:
             await _generate_report_async()
 
         assert call_order == ["generate", "send"]
+
+    @pytest.mark.asyncio()
+    @patch("osint_core.workers.prospecting.asyncio.sleep", new_callable=AsyncMock)
+    @patch("osint_core.workers.prospecting.async_session")
+    async def test_retries_email_on_first_failure_succeeds_on_second(
+        self,
+        mock_session: MagicMock,
+        mock_sleep: AsyncMock,
+        mock_report_result: MagicMock,
+    ) -> None:
+        """Email delivery is retried when send_report returns False, and
+        succeeds on the second attempt without regenerating the PDF."""
+        mock_db = AsyncMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
+                autospec=True,
+            ) as mock_gen_cls,
+            patch(
+                "osint_core.services.resend_notifier.ResendNotifier",
+                autospec=True,
+            ) as mock_notifier_cls,
+            patch(
+                "osint_core.services.plan_store.PlanStore",
+                autospec=True,
+            ) as mock_store_cls,
+            patch("osint_core.config.settings") as mock_settings,
+        ):
+            mock_gen_cls.return_value.generate_report = AsyncMock(
+                return_value=mock_report_result,
+            )
+            # First call returns False (failure), second returns True (success)
+            mock_notifier_cls.return_value.send_report = AsyncMock(
+                side_effect=[False, True],
+            )
+            mock_store_cls.return_value.get_active = AsyncMock(return_value=None)
+            mock_settings.resend_recipients = "test@example.com"
+
+            result = await _generate_report_async()
+
+        assert result["status"] == "completed"
+        assert result["email_sent"] is True
+        # PDF generation called only once (no regeneration on email retry)
+        mock_gen_cls.return_value.generate_report.assert_awaited_once()
+        # send_report called twice (first fail, second success)
+        assert mock_notifier_cls.return_value.send_report.await_count == 2
+        # Backoff sleep was called once between attempts
+        mock_sleep.assert_awaited_once()
+
+    @pytest.mark.asyncio()
+    @patch("osint_core.workers.prospecting.asyncio.sleep", new_callable=AsyncMock)
+    @patch("osint_core.workers.prospecting.async_session")
+    async def test_email_exhaustion_emits_alert_event(
+        self,
+        mock_session: MagicMock,
+        mock_sleep: AsyncMock,
+        mock_report_result: MagicMock,
+    ) -> None:
+        """After all email retries are exhausted, a report_email_exhausted
+        log event is emitted and the result has email_sent=False."""
+        mock_db = AsyncMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
+                autospec=True,
+            ) as mock_gen_cls,
+            patch(
+                "osint_core.services.resend_notifier.ResendNotifier",
+                autospec=True,
+            ) as mock_notifier_cls,
+            patch(
+                "osint_core.services.plan_store.PlanStore",
+                autospec=True,
+            ) as mock_store_cls,
+            patch("osint_core.config.settings") as mock_settings,
+            patch("osint_core.workers.prospecting.logger") as mock_logger,
+        ):
+            mock_gen_cls.return_value.generate_report = AsyncMock(
+                return_value=mock_report_result,
+            )
+            # All attempts return False
+            mock_notifier_cls.return_value.send_report = AsyncMock(return_value=False)
+            mock_store_cls.return_value.get_active = AsyncMock(return_value=None)
+            mock_settings.resend_recipients = "test@example.com"
+
+            result = await _generate_report_async()
+
+        assert result["status"] == "completed"
+        assert result["email_sent"] is False
+        # send_report called exactly _EMAIL_MAX_RETRIES times
+        assert mock_notifier_cls.return_value.send_report.await_count == _EMAIL_MAX_RETRIES
+        # Verify the exhaustion alert was logged
+        exhaustion_calls = [
+            call
+            for call in mock_logger.error.call_args_list
+            if "report_email_exhausted" in str(call)
+        ]
+        assert len(exhaustion_calls) == 1
 
 
 class TestResolveRecipients:

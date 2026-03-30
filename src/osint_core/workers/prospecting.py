@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 _CAL_PLAN_ID = "cal-prospecting"
 
+# Email delivery retry settings
+_EMAIL_MAX_RETRIES = 3
+_EMAIL_BACKOFF_BASE = 2  # seconds; delay = base ** attempt (1-indexed)
+
 # Pipeline completion guard settings
 _MATCH_LEADS_TASK_NAME = "osint.match_leads"
 _GUARD_MAX_DEFERRALS = 5
@@ -257,36 +261,69 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
             "lead_count": result.lead_count,
         }
 
-    # Attempt email delivery separately so PDF/lead work is never lost
-    try:
-        notifier = ResendNotifier()
-        executive_summary = (
-            f"Report generated with {result.lead_count} leads "
-            f"on {result.report_date}."
-        )
-        sent = await notifier.send_report(
-            pdf_bytes=result.pdf_bytes,
-            executive_summary=executive_summary,
-            recipients=recipients,
-        )
-    except Exception as email_exc:
+    # Attempt email delivery with retry — PDF is already archived, so only
+    # the send is retried (not the full report generation).
+    notifier = ResendNotifier()
+    executive_summary = (
+        f"Report generated with {result.lead_count} leads "
+        f"on {result.report_date}."
+    )
+
+    sent = False
+    for email_attempt in range(1, _EMAIL_MAX_RETRIES + 1):
+        try:
+            sent = await notifier.send_report(
+                pdf_bytes=result.pdf_bytes,
+                executive_summary=executive_summary,
+                recipients=recipients,
+            )
+        except Exception:
+            logger.exception(
+                "report_delivery_error: plan_id=%s "
+                "email_attempt=%d/%d lead_count=%d artifact_uri=%s",
+                _CAL_PLAN_ID,
+                email_attempt,
+                _EMAIL_MAX_RETRIES,
+                result.lead_count,
+                result.artifact_uri,
+            )
+            sent = False
+
+        if sent:
+            break
+
+        if email_attempt < _EMAIL_MAX_RETRIES:
+            backoff = _EMAIL_BACKOFF_BASE ** email_attempt
+            logger.warning(
+                "report_delivery_retry: plan_id=%s email_attempt=%d/%d "
+                "backoff=%ds lead_count=%d artifact_uri=%s",
+                _CAL_PLAN_ID,
+                email_attempt,
+                _EMAIL_MAX_RETRIES,
+                backoff,
+                result.lead_count,
+                result.artifact_uri,
+            )
+            await asyncio.sleep(backoff)
+
+    if not sent:
         logger.error(
-            "report_delivery_failed: plan_id=%s error=%s attempt=%d "
-            "lead_count=%d artifact_uri=%s",
+            "report_email_exhausted: plan_id=%s email_attempts=%d "
+            "lead_count=%d artifact_uri=%s recipients=%d task_attempt=%d",
             _CAL_PLAN_ID,
-            str(email_exc),
-            attempt + 1,
+            _EMAIL_MAX_RETRIES,
             result.lead_count,
             result.artifact_uri,
+            len(recipients),
+            attempt,
         )
-        raise
 
     elapsed = time.monotonic() - start
     logger.info(
         "prospecting_report_complete: lead_count=%d artifact_uri=%s "
-        "email_sent=%s recipients=%d elapsed=%.2fs",
+        "email_sent=%s recipients=%d elapsed=%.2fs task_attempt=%d",
         result.lead_count, result.artifact_uri, sent,
-        len(recipients), elapsed,
+        len(recipients), elapsed, attempt,
     )
 
     return {
