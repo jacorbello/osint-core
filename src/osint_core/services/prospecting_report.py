@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import structlog
 from jinja2 import Environment, FileSystemLoader
-from sqlalchemy import or_, select
+from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.config import settings
@@ -54,12 +54,24 @@ async def _select_reportable_leads(db: AsyncSession) -> list[Lead]:
 
     Criteria: status='new' OR (status='reviewing' AND last_updated_at > reported_at)
     """
-    stmt = select(Lead).where(
-        Lead.plan_id == _CAL_PLAN_ID,
-        or_(
-            Lead.status == "new",
-            (Lead.status == "reviewing") & (Lead.last_updated_at > Lead.reported_at),
-        ),
+    severity_order = case(
+        (Lead.severity == "critical", 0),
+        (Lead.severity == "high", 1),
+        (Lead.severity == "medium", 2),
+        (Lead.severity == "low", 3),
+        else_=4,
+    )
+    stmt = (
+        select(Lead)
+        .where(
+            Lead.plan_id == _CAL_PLAN_ID,
+            or_(
+                Lead.status == "new",
+                (Lead.status == "reviewing")
+                & (Lead.last_updated_at > Lead.reported_at),
+            ),
+        )
+        .order_by(severity_order, Lead.confidence.desc())
     )
     result = await db.execute(stmt)
     return list(result.scalars().all())
