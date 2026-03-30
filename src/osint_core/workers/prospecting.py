@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 
 _CAL_PLAN_ID = "cal-prospecting"
 
+# Pipeline completion guard settings
+_MATCH_LEADS_TASK_NAME = "osint.match_leads"
+_GUARD_MAX_DEFERRALS = 5
+_GUARD_BACKOFF_BASE = 120  # seconds; delay = base * (attempt + 1), capped at 600
+
 
 def _build_matcher_config(plan_content: dict[str, Any], plan_id: str) -> LeadMatcherConfig:
     """Build a LeadMatcherConfig from plan content."""
@@ -187,6 +192,30 @@ def _resolve_recipients(plan_content: dict[str, Any] | None) -> list[str]:
     return [r.strip() for r in recipients_raw.split(",") if r.strip()]
 
 
+def _has_pending_match_leads_tasks() -> bool:
+    """Check whether any match_leads tasks are active or reserved.
+
+    Uses Celery's control.inspect() to query all workers for tasks that are
+    currently executing (active) or waiting to execute (reserved).  Returns
+    ``True`` if any ``osint.match_leads`` tasks are found, ``False`` otherwise.
+
+    If the broker or all workers are unreachable (inspect returns ``None``),
+    we treat that as "no pending tasks" so the report is not blocked
+    indefinitely by infrastructure outages.
+    """
+    inspector = celery_app.control.inspect(timeout=5.0)
+
+    for task_map in (inspector.active(), inspector.reserved()):
+        if task_map is None:
+            continue
+        for _worker, tasks in task_map.items():
+            for task in tasks:
+                if task.get("name") == _MATCH_LEADS_TASK_NAME:
+                    return True
+
+    return False
+
+
 async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
     """Generate a prospecting report and send it via email.
 
@@ -269,14 +298,78 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
     }
 
 
-@celery_app.task(bind=True, name="osint.generate_prospecting_report", max_retries=3)  # type: ignore[untyped-decorator]
+class PipelineGuardResult:
+    """Result of the pipeline completion guard check."""
+
+    __slots__ = ("should_defer", "deferrals", "countdown")
+
+    def __init__(self, *, should_defer: bool, deferrals: int, countdown: int = 0) -> None:
+        self.should_defer = should_defer
+        self.deferrals = deferrals
+        self.countdown = countdown
+
+
+def _check_pipeline_guard(headers: dict[str, Any] | None) -> PipelineGuardResult:
+    """Evaluate whether report generation should be deferred.
+
+    Reads the ``x_guard_deferrals`` counter from *headers* and checks whether
+    any ``match_leads`` tasks are still running.  Returns a
+    :class:`PipelineGuardResult` indicating whether to defer (and the
+    recommended countdown) or proceed.
+    """
+    deferrals: int = (headers or {}).get("x_guard_deferrals", 0)
+
+    if not _has_pending_match_leads_tasks():
+        return PipelineGuardResult(should_defer=False, deferrals=deferrals)
+
+    if deferrals >= _GUARD_MAX_DEFERRALS:
+        logger.warning(
+            "pipeline_guard_exhausted: proceeding despite pending "
+            "match_leads tasks after %d deferrals",
+            deferrals,
+        )
+        return PipelineGuardResult(should_defer=False, deferrals=deferrals)
+
+    countdown = min(_GUARD_BACKOFF_BASE * (deferrals + 1), 600)
+    logger.info(
+        "pipeline_guard_deferred: pending match_leads tasks "
+        "detected, deferring report generation "
+        "deferral=%d/%d countdown=%ds",
+        deferrals + 1,
+        _GUARD_MAX_DEFERRALS,
+        countdown,
+    )
+    return PipelineGuardResult(
+        should_defer=True, deferrals=deferrals + 1, countdown=countdown,
+    )
+
+
+@celery_app.task(  # type: ignore[untyped-decorator]
+    bind=True,
+    name="osint.generate_prospecting_report",
+    max_retries=3 + _GUARD_MAX_DEFERRALS,
+)
 def generate_prospecting_report_task(self: Any) -> dict[str, Any]:
     """Generate a prospecting report and email it via Resend.
 
     Scheduled via Celery beat at 8 AM and 3 PM America/Chicago time.
     Gracefully skips if no new leads exist or no recipients are configured.
-    Retries up to 3 times with exponential backoff (60s, 120s, 240s, capped at 300s).
+
+    Before generating, checks for in-progress match_leads tasks and defers
+    (up to ``_GUARD_MAX_DEFERRALS`` times) to avoid reporting on incomplete
+    pipeline data.  After the guard passes, retries up to 3 more times with
+    exponential backoff for genuine failures.
     """
+    # --- Pipeline completion guard ---
+    guard = _check_pipeline_guard(self.request.headers)
+
+    if guard.should_defer:
+        raise self.retry(
+            countdown=guard.countdown,
+            headers={"x_guard_deferrals": guard.deferrals},
+        )
+
+    # --- Report generation ---
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(
@@ -285,7 +378,9 @@ def generate_prospecting_report_task(self: Any) -> dict[str, Any]:
     except Exception as exc:
         logger.exception("Prospecting report generation failed")
         raise self.retry(
-            exc=exc, countdown=min(2 ** self.request.retries * 60, 300),
+            exc=exc,
+            countdown=min(2 ** self.request.retries * 60, 300),
+            headers={"x_guard_deferrals": guard.deferrals},
         ) from exc
     finally:
         loop.close()
