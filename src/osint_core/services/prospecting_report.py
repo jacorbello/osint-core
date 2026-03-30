@@ -252,13 +252,13 @@ class ProspectingReportGenerator:
                 url_fetcher=_blocked_url_fetcher,
             ).write_pdf()
         except Exception as exc:
-            logger.error(
+            logger.exception(
                 "weasyprint_pdf_rendering_failed",
                 error=str(exc),
                 lead_count=len(leads),
             )
             raise RuntimeError(
-                f"PDF rendering failed: {exc}"
+                "PDF rendering failed"
             ) from exc
 
         # Archive to MinIO

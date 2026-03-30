@@ -217,7 +217,11 @@ class TestCourtListenerClient:
     @pytest.mark.asyncio()
     async def test_empty_api_key_sends_unauthenticated_request(self):
         """When API key is empty string, requests are sent without auth header."""
-        client = CourtListenerClient(api_key="")
+        # Patch settings to have a non-empty API key so we verify that an explicit
+        # empty string does NOT fall back to the configured key.
+        with patch("osint_core.services.courtlistener.settings") as mock_settings:
+            mock_settings.courtlistener_api_key = "configured-key"
+            client = CourtListenerClient(api_key="")
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.raise_for_status = MagicMock()

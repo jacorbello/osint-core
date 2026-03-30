@@ -297,7 +297,7 @@ class TestProspectingReportGenerator:
 
         with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"), \
-             patch(f"{_MOD}.weasyprint") as mock_wp:
+             patch("weasyprint.HTML") as mock_html:
             mock_client = AsyncMock()
             mock_resp = MagicMock()
             mock_resp.raise_for_status = MagicMock()
@@ -307,7 +307,7 @@ class TestProspectingReportGenerator:
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_cls.return_value = mock_client
 
-            mock_wp.HTML.return_value.write_pdf.side_effect = OSError(
+            mock_html.return_value.write_pdf.side_effect = OSError(
                 "cairo surface error"
             )
 
