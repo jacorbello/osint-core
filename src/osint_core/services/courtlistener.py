@@ -55,7 +55,7 @@ class CourtListenerClient:
     """Async client for CourtListener's Citation Lookup API."""
 
     def __init__(self, *, api_key: str | None = None) -> None:
-        self.api_key = api_key or settings.courtlistener_api_key
+        self.api_key = api_key if api_key is not None else settings.courtlistener_api_key
         self._rate_limiter = _RateLimiter()
 
     async def verify_citations(self, text: str) -> list[VerifiedCitation]:

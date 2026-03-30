@@ -290,6 +290,31 @@ class TestProspectingReportGenerator:
         assert result.lead_count == 1
 
     @pytest.mark.asyncio()
+    async def test_weasyprint_failure_raises_runtime_error(self, generator):
+        """WeasyPrint rendering errors are caught, logged, and re-raised."""
+        leads = [_make_lead()]
+        db = _mock_db(leads)
+
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"), \
+             patch("weasyprint.HTML") as mock_html:
+            mock_client = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            mock_html.return_value.write_pdf.side_effect = OSError(
+                "cairo surface error"
+            )
+
+            with pytest.raises(RuntimeError, match="PDF rendering failed"):
+                await generator.generate_report(db)
+
+    @pytest.mark.asyncio()
     async def test_unverified_citations_flagged(self):
         leads = [_make_lead()]
         db = _mock_db(leads)

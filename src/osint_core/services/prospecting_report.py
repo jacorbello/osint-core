@@ -246,10 +246,20 @@ class ProspectingReportGenerator:
             """Disable external URL fetching to prevent SSRF via embedded resources."""
             return {"string": "", "mime_type": "text/plain"}
 
-        pdf_bytes = weasyprint.HTML(
-            string=html,
-            url_fetcher=_blocked_url_fetcher,
-        ).write_pdf()
+        try:
+            pdf_bytes = weasyprint.HTML(
+                string=html,
+                url_fetcher=_blocked_url_fetcher,
+            ).write_pdf()
+        except Exception as exc:
+            logger.exception(
+                "weasyprint_pdf_rendering_failed",
+                error=str(exc),
+                lead_count=len(leads),
+            )
+            raise RuntimeError(
+                "PDF rendering failed"
+            ) from exc
 
         # Archive to MinIO
         artifact_uri = await _archive_pdf(pdf_bytes, now)
