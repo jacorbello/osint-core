@@ -705,3 +705,435 @@ class TestCSSSelectorValidation:
         # Should not raise — default selectors are all valid
         connector = UniversityPolicyConnector(config)
         assert connector is not None
+
+
+# --- Domain allowlist validation ---
+
+
+class TestDomainAllowlistValidation:
+    """URL domain validation against allowlist (SSRF mitigation)."""
+
+    def test_valid_edu_url_accepted(self):
+        """A .edu policy URL is accepted by default allowlist."""
+        config = SourceConfig(
+            id="test-edu",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Example University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        connector = UniversityPolicyConnector(config)
+        assert connector is not None
+
+    def test_localhost_rejected_at_init(self):
+        """Internal URL (localhost) is rejected at init."""
+        config = SourceConfig(
+            id="test-localhost",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Bad Institution",
+                        "policy_url": "http://localhost:9000/internal",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="Bad Institution"):
+            UniversityPolicyConnector(config)
+
+    def test_private_ip_10_rejected_at_init(self):
+        """Internal URL (10.x.x.x) is rejected at init."""
+        config = SourceConfig(
+            id="test-private-10",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Private Net",
+                        "policy_url": "http://10.0.0.1:8080/admin",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="Private Net"):
+            UniversityPolicyConnector(config)
+
+    def test_private_ip_127_rejected_at_init(self):
+        """Loopback IP (127.0.0.1) is rejected at init."""
+        config = SourceConfig(
+            id="test-loopback",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Loopback",
+                        "policy_url": "http://127.0.0.1:5432/db",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="Loopback"):
+            UniversityPolicyConnector(config)
+
+    def test_private_ip_192_168_rejected_at_init(self):
+        """Private IP (192.168.x.x) is rejected at init."""
+        config = SourceConfig(
+            id="test-192",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Home Net",
+                        "policy_url": "http://192.168.1.1/config",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="Home Net"):
+            UniversityPolicyConnector(config)
+
+    def test_private_ip_172_16_rejected_at_init(self):
+        """Private IP (172.16.x.x) is rejected at init."""
+        config = SourceConfig(
+            id="test-172",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Docker Net",
+                        "policy_url": "http://172.16.0.1/service",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="Docker Net"):
+            UniversityPolicyConnector(config)
+
+    def test_non_edu_url_rejected_without_custom_allowlist(self):
+        """Non-.edu URL is rejected unless in custom allowlist."""
+        config = SourceConfig(
+            id="test-non-edu",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Evil Corp",
+                        "policy_url": "https://evil.example.com/policies",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="Evil Corp"):
+            UniversityPolicyConnector(config)
+
+    def test_non_edu_url_accepted_with_custom_allowlist(self):
+        """Non-.edu URL is accepted if in custom allowed_domains."""
+        config = SourceConfig(
+            id="test-custom",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Gov Institution",
+                        "policy_url": "https://policies.state.gov/index.html",
+                        "selector": "a.policy-link",
+                    },
+                ],
+                "allowed_domains": ["policies.state.gov"],
+            },
+        )
+        connector = UniversityPolicyConnector(config)
+        assert connector is not None
+
+    def test_custom_domain_suffix_accepted(self):
+        """Custom allowed_domain_suffixes extend the default .edu suffix."""
+        config = SourceConfig(
+            id="test-suffix",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Gov Institution",
+                        "policy_url": "https://policies.example.gov/index.html",
+                        "selector": "a.policy-link",
+                    },
+                ],
+                "allowed_domain_suffixes": [".edu", ".gov"],
+            },
+        )
+        connector = UniversityPolicyConnector(config)
+        assert connector is not None
+
+    def test_default_institutions_have_valid_urls(self):
+        """All default institution URLs pass domain validation."""
+        config = SourceConfig(
+            id="test-defaults-urls",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra=None,
+        )
+        connector = UniversityPolicyConnector(config)
+        assert connector is not None
+
+    def test_error_message_includes_url(self):
+        """Error message includes the rejected URL."""
+        config = SourceConfig(
+            id="test-msg",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Bad Place",
+                        "policy_url": "http://internal-db:5432/dump",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="internal-db:5432"):
+            UniversityPolicyConnector(config)
+
+    @pytest.mark.asyncio
+    async def test_extracted_url_rejected_at_fetch(self, respx_mock):
+        """Extracted document URLs are validated before fetch."""
+        config = SourceConfig(
+            id="test-extract",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Example University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        connector = UniversityPolicyConnector(config)
+
+        # Index page contains a link to an internal URL
+        malicious_index = """<html><body>
+        <a class="policy-link" href="http://localhost:9000/secret">Secret</a>
+        <a class="policy-link" href="https://policy.example.edu/ok.html">OK</a>
+        </body></html>"""
+
+        respx_mock.get("https://policy.example.edu/index.html").mock(
+            return_value=httpx.Response(200, content=malicious_index)
+        )
+        respx_mock.get("https://policy.example.edu/ok.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=SAMPLE_POLICY_HTML,
+                headers={"content-type": "text/html"},
+            )
+        )
+
+        items = await connector.fetch()
+        # Only the allowed URL should produce a RawItem
+        assert len(items) == 1
+        assert "ok.html" in items[0].url
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_internal_host_blocked(self, respx_mock):
+        """Redirects from allowed domains to internal hosts are blocked."""
+        config = SourceConfig(
+            id="test-redirect-internal",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Example University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        connector = UniversityPolicyConnector(config)
+
+        # Index page links to a document on an allowed domain
+        index_html = """<html><body>
+        <a class="policy-link" href="https://policy.example.edu/redirect-me.html">Doc</a>
+        </body></html>"""
+
+        respx_mock.get("https://policy.example.edu/index.html").mock(
+            return_value=httpx.Response(200, content=index_html)
+        )
+
+        # Allowed URL responds with a redirect to an internal host
+        respx_mock.get("https://policy.example.edu/redirect-me.html").mock(
+            return_value=httpx.Response(
+                302,
+                headers={"Location": "http://localhost:9000/secret"},
+            )
+        )
+
+        # The connector should reject the redirect target and return no items
+        items = await connector.fetch()
+        assert len(items) == 0
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_allowed_domain_succeeds(self, respx_mock):
+        """Redirects from allowed domains to other allowed domains succeed."""
+        config = SourceConfig(
+            id="test-redirect-ok",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Example University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        connector = UniversityPolicyConnector(config)
+
+        index_html = """<html><body>
+        <a class="policy-link" href="https://policy.example.edu/old.html">Doc</a>
+        </body></html>"""
+
+        respx_mock.get("https://policy.example.edu/index.html").mock(
+            return_value=httpx.Response(200, content=index_html)
+        )
+
+        # Redirect to another allowed .edu domain
+        respx_mock.get("https://policy.example.edu/old.html").mock(
+            return_value=httpx.Response(
+                301,
+                headers={"Location": "https://new-policy.example.edu/doc.html"},
+            )
+        )
+        respx_mock.get("https://new-policy.example.edu/doc.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=SAMPLE_POLICY_HTML,
+                headers={"content-type": "text/html"},
+            )
+        )
+
+        items = await connector.fetch()
+        assert len(items) == 1
+
+    def test_string_suffix_raises_type_error(self):
+        """Passing a bare string for allowed_domain_suffixes raises TypeError."""
+        config = SourceConfig(
+            id="test-string-suffix",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Example University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "a.policy-link",
+                    },
+                ],
+                "allowed_domain_suffixes": ".gov",
+            },
+        )
+        with pytest.raises(TypeError, match="not a single string"):
+            UniversityPolicyConnector(config)
+
+    def test_non_string_suffix_element_raises_type_error(self):
+        """Non-string elements in allowed_domain_suffixes raises TypeError."""
+        config = SourceConfig(
+            id="test-bad-suffix",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Example University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "a.policy-link",
+                    },
+                ],
+                "allowed_domain_suffixes": [".edu", 123],
+            },
+        )
+        with pytest.raises(TypeError, match="must all be strings"):
+            UniversityPolicyConnector(config)
+
+    def test_link_local_ip_rejected(self):
+        """Link-local IP (169.254.x.x) is rejected at init."""
+        config = SourceConfig(
+            id="test-link-local",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Link Local",
+                        "policy_url": "http://169.254.169.254/metadata",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="Link Local"):
+            UniversityPolicyConnector(config)
+
+    def test_zero_ip_rejected(self):
+        """Unspecified IP (0.0.0.0) is rejected at init."""
+        config = SourceConfig(
+            id="test-zero",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Zero IP",
+                        "policy_url": "http://0.0.0.0/admin",
+                        "selector": "a.policy-link",
+                    },
+                ],
+            },
+        )
+        with pytest.raises(ValueError, match="Zero IP"):
+            UniversityPolicyConnector(config)
