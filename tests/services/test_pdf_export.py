@@ -168,7 +168,7 @@ class TestUploadPdfToMinio:
 
     @patch("osint_core.services.pdf_export.Minio")
     def test_retention_class_metadata_included(self, mock_minio_cls: MagicMock):
-        """Upload with retention_class sets x-amz-meta-retention-class metadata."""
+        """Upload with retention_class sets retention-class metadata."""
         mock_client = MagicMock()
         mock_client.bucket_exists.return_value = True
         mock_minio_cls.return_value = mock_client
@@ -179,7 +179,7 @@ class TestUploadPdfToMinio:
 
         call_args = mock_client.put_object.call_args
         assert call_args[1]["metadata"] == {
-            "x-amz-meta-retention-class": "evidentiary",
+            "retention-class": "evidentiary",
         }
 
     @patch("osint_core.services.pdf_export.Minio")
@@ -193,7 +193,7 @@ class TestUploadPdfToMinio:
 
         call_args = mock_client.put_object.call_args
         assert call_args[1]["metadata"] == {
-            "x-amz-meta-retention-class": "standard",
+            "retention-class": "standard",
         }
 
 

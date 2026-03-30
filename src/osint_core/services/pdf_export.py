@@ -191,7 +191,7 @@ def upload_pdf_to_minio(
             if exc.code != "BucketAlreadyOwnedByYou":
                 raise
 
-    metadata = {"x-amz-meta-retention-class": retention_class}
+    metadata = {"retention-class": retention_class}
 
     data = io.BytesIO(pdf_bytes)
     client.put_object(
