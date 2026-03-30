@@ -25,6 +25,8 @@ keywords:
   - speech code
   - bias response team
   - pronoun policy
+  - misgendering
+  - gender identity policy
   - drag queen story hour
   - curriculum objection
   - vaccine mandate
@@ -44,7 +46,7 @@ sources:
       searches:
         - "(\"free speech\" OR \"First Amendment\" OR \"viewpoint discrimination\") (UC OR UCLA OR Berkeley OR USC OR Stanford OR \"Cal State\") lang:en"
         - "(\"Title IX\" OR \"due process\" OR \"campus speech code\") California university lang:en"
-        - "(\"religious liberty\" OR \"compelled speech\" OR \"pronoun policy\") California school lang:en"
+        - "(\"religious liberty\" OR \"compelled speech\" OR \"pronoun policy\" OR \"misgendering\" OR \"gender identity policy\") California school lang:en"
         - "student or professor punished for speech or beliefs at California university"
       geo_terms: "California"
       mission: >-
