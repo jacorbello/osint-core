@@ -83,7 +83,7 @@ class ConnectorRegistry:
     def has(self, source_type: str) -> bool
 ```
 
-All 18 connectors are registered at import time in `src/osint_core/connectors/__init__.py`. The singleton `registry` is the global instance used by the ingest pipeline.
+All 19 connectors are registered at import time in `src/osint_core/connectors/__init__.py`. The singleton `registry` is the global instance used by the ingest pipeline.
 
 ### Adding a New Connector
 

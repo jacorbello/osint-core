@@ -1,6 +1,6 @@
 # API Reference
 
-All endpoints are served under the `/api/v1` prefix (configurable via the `OSINT_API_PREFIX` environment variable). The OpenAPI spec is available at `/api/v1/openapi.json` and the interactive docs at `/api/v1/docs`.
+Most endpoints are served under the `/api/v1` prefix (configurable via the `OSINT_API_PREFIX` environment variable). The exceptions are `/healthz`, `/readyz`, and `/metrics`, which are mounted at the root without a prefix. The OpenAPI spec is available at `/api/v1/openapi.json` and the interactive docs at `/api/v1/docs`.
 
 Source: `src/osint_core/main.py`
 
@@ -12,10 +12,10 @@ Authentication uses **Keycloak OIDC** with RS256-signed JWT bearer tokens. Inclu
 
 | Setting | Default | Description |
 |---|---|---|
-| `AUTH_DISABLED` | `True` | When true, all authenticated endpoints return a default admin user without checking tokens. Intended for dev/test environments. |
-| `KEYCLOAK_URL` | -- | Base URL of the Keycloak server. |
-| `KEYCLOAK_REALM` | -- | Keycloak realm name. |
-| `KEYCLOAK_CLIENT_ID` | -- | Expected `aud` claim in the JWT. |
+| `OSINT_AUTH_DISABLED` | `True` | When true, all authenticated endpoints return a default admin user without checking tokens. Intended for dev/test environments. |
+| `OSINT_KEYCLOAK_URL` | -- | Base URL of the Keycloak server. |
+| `OSINT_KEYCLOAK_REALM` | -- | Keycloak realm name. |
+| `OSINT_KEYCLOAK_CLIENT_ID` | -- | Expected `aud` claim in the JWT. |
 
 The dependency `get_current_user` (defined in `src/osint_core/api/deps.py`) extracts a `UserInfo` object with fields `sub`, `username`, and `roles`. Certain endpoints use `require_role("admin")` to restrict access by realm role.
 
@@ -31,9 +31,9 @@ A Redis-backed fixed-window rate limiter is applied as middleware to all request
 
 | Setting | Default | Description |
 |---|---|---|
-| `RATE_LIMIT_PER_IP` | `100` | Max requests per IP per 60-second window. |
-| `RATE_LIMIT_PER_USER` | `300` | Max requests per authenticated user per 60-second window. |
-| `RATE_LIMIT_TRUST_PROXY` | `True` | When true, reads client IP from the `X-Forwarded-For` header. |
+| `OSINT_RATE_LIMIT_PER_IP` | `100` | Max requests per IP per 60-second window. |
+| `OSINT_RATE_LIMIT_PER_USER` | `300` | Max requests per authenticated user per 60-second window. |
+| `OSINT_RATE_LIMIT_TRUST_PROXY` | `True` | When true, reads client IP from the `X-Forwarded-For` header. |
 
 **Behavior:**
 - When a limit is exceeded the API returns `429 Too Many Requests` with a `Retry-After` header.
