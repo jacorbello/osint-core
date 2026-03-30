@@ -162,6 +162,7 @@ def upload_pdf_to_minio(
     object_name: str,
     *,
     bucket: str = BRIEF_PDF_BUCKET,
+    retention_class: str = "standard",
 ) -> str:
     """Upload PDF bytes to MinIO and return the object URI.
 
@@ -169,6 +170,8 @@ def upload_pdf_to_minio(
         pdf_bytes: PDF file content.
         object_name: Object key in the bucket (e.g. ``"briefs/<uuid>.pdf"``).
         bucket: MinIO bucket name.
+        retention_class: Retention classification stored as object metadata
+            (e.g. ``"standard"``, ``"evidentiary"``).
 
     Returns:
         MinIO URI string in the form ``minio://<bucket>/<object_name>``.
@@ -188,6 +191,10 @@ def upload_pdf_to_minio(
             if exc.code != "BucketAlreadyOwnedByYou":
                 raise
 
+    metadata: dict[str, str | list[str] | tuple[str]] = {
+        "retention-class": retention_class,
+    }
+
     data = io.BytesIO(pdf_bytes)
     client.put_object(
         bucket,
@@ -195,6 +202,7 @@ def upload_pdf_to_minio(
         data,
         length=len(pdf_bytes),
         content_type="application/pdf",
+        metadata=metadata,
     )
 
     uri = f"minio://{bucket}/{object_name}"
