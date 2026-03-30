@@ -277,12 +277,11 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
                 executive_summary=executive_summary,
                 recipients=recipients,
             )
-        except Exception as email_exc:
-            logger.error(
-                "report_delivery_error: plan_id=%s error=%s "
+        except Exception:
+            logger.exception(
+                "report_delivery_error: plan_id=%s "
                 "email_attempt=%d/%d lead_count=%d artifact_uri=%s",
                 _CAL_PLAN_ID,
-                str(email_exc),
                 email_attempt,
                 _EMAIL_MAX_RETRIES,
                 result.lead_count,
@@ -310,20 +309,21 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
     if not sent:
         logger.error(
             "report_email_exhausted: plan_id=%s email_attempts=%d "
-            "lead_count=%d artifact_uri=%s recipients=%d",
+            "lead_count=%d artifact_uri=%s recipients=%d task_attempt=%d",
             _CAL_PLAN_ID,
             _EMAIL_MAX_RETRIES,
             result.lead_count,
             result.artifact_uri,
             len(recipients),
+            attempt,
         )
 
     elapsed = time.monotonic() - start
     logger.info(
         "prospecting_report_complete: lead_count=%d artifact_uri=%s "
-        "email_sent=%s recipients=%d elapsed=%.2fs",
+        "email_sent=%s recipients=%d elapsed=%.2fs task_attempt=%d",
         result.lead_count, result.artifact_uri, sent,
-        len(recipients), elapsed,
+        len(recipients), elapsed, attempt,
     )
 
     return {
