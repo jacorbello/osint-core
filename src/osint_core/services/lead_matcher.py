@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import select
@@ -328,7 +329,7 @@ class LeadMatcher:
             existing_sources = existing_citations.get("sources", [])
             merged_sources = _merge_citations(existing_sources, new_citations)
             existing_citations["sources"] = _normalize_source_citations(merged_sources)
-            set_committed_value(lead, "citations", existing_citations)
+            lead.citations = existing_citations
 
         lead.last_updated_at = datetime.now(UTC)
         return lead
@@ -450,7 +451,7 @@ def _extract_url_from_string(value: str, seen: set[str]) -> None:
 
 
 def _normalize_source_citations(
-    citations: list[dict[str, Any] | str],
+    citations: Sequence[dict[str, Any] | str],
 ) -> list[str]:
     """Normalize citation dicts to strings for downstream consumers.
 
