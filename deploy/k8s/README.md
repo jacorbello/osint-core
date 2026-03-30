@@ -19,7 +19,7 @@ kubectl -n osint delete job osint-migrate --ignore-not-found
 
 # Apply with the desired image tag (Job pod templates are immutable, so
 # the image must be set before creation)
-sed "s|harbor.corbello.io/osint/osint-core-api:latest|harbor.corbello.io/osint/osint-core-api:<SHA>|" \
+sed "s|harbor.corbello.io/osint/osint-core:latest|harbor.corbello.io/osint/osint-core:<SHA>|" \
   migration-job.yaml | kubectl -n osint apply -f -
 
 kubectl -n osint wait --for=condition=complete --timeout=120s job/osint-migrate

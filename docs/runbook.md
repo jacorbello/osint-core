@@ -5,7 +5,7 @@
 | Task | Command |
 |------|---------|
 | Start dev stack | `docker compose -f docker-compose.dev.yaml up -d` |
-| Sync plans | `curl -s -X POST http://localhost:8000/api/v1/plan/sync \| jq .` |
+| Sync plans | `curl -s -X POST http://localhost:8000/api/v1/plans:sync-from-disk \| jq .` |
 | Trigger ingest | `curl -s -X POST "http://localhost:8000/api/v1/ingest/source/{source_id}/run?plan_id={plan_id}" \| jq .` |
 | Check jobs | `curl -s http://localhost:8000/api/v1/jobs?limit=10 \| jq .` |
 | View worker logs | `docker compose -f docker-compose.dev.yaml logs worker --tail=100` |
@@ -31,7 +31,7 @@ docker compose -f docker-compose.dev.yaml up -d
 # Wait for postgres to initialize, then run migrations
 docker compose -f docker-compose.dev.yaml exec api alembic upgrade head
 # Sync plans
-curl -s -X POST http://localhost:8000/api/v1/plan/sync | jq .
+curl -s -X POST http://localhost:8000/api/v1/plans:sync-from-disk | jq .
 ```
 
 ### Checking Pipeline Health
@@ -41,10 +41,18 @@ curl -s -X POST http://localhost:8000/api/v1/plan/sync | jq .
 3. **Worker**: `docker compose -f docker-compose.dev.yaml logs worker --tail=20`
 4. **Beat**: `docker compose -f docker-compose.dev.yaml logs beat --tail=20`
 
-### Retrying a Failed Job
+### Inspecting a Failed Job
+
+There is no retry endpoint. To inspect a failed job, query it directly and check its error:
 
 ```bash
-curl -s -X POST http://localhost:8000/api/v1/jobs/{job_id}/retry | jq .
+curl -s http://localhost:8000/api/v1/jobs/{job_id} | jq '{status, result, error}'
+```
+
+To re-run the same ingest, dispatch a new task via the ingest endpoint:
+
+```bash
+curl -s -X POST "http://localhost:8000/api/v1/ingest/source/{source_id}/run?plan_id={plan_id}" | jq .
 ```
 
 ## CI/CD Database Migrations
