@@ -1,11 +1,12 @@
 """End-to-end integration test for the CAL prospecting pipeline.
 
-Exercises the full chain: NLP enrichment (CAL mode) -> lead matching ->
-report generation -> email notification.
+Exercises the main chain: NLP enrichment (CAL mode) -> lead matching ->
+report generation (HTML/template rendering) -> email notification.
 
-External services (vLLM, CourtListener, MinIO, Resend) are mocked, but
-all internal logic (validation, fingerprinting, confidence scoring,
-template rendering, PDF generation) runs for real.
+External services used by the pipeline (LLM for enrichment, email delivery)
+are mocked, but all internal logic (validation, fingerprinting, confidence
+scoring, and HTML report rendering) runs for real. This test does not
+exercise CourtListener/MinIO integrations or real PDF rendering.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -26,6 +28,7 @@ from osint_core.services.lead_matcher import (
 )
 from osint_core.services.resend_notifier import ResendNotifier
 from osint_core.workers.nlp_enrich import _validate_constitutional_fields
+from osint_core.workers.prospecting import _build_matcher_config
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,24 +65,6 @@ def _make_vllm_cal_response(
         "lead_type": lead_type,
         "institution": institution,
         "jurisdiction": jurisdiction,
-    }
-
-
-def _make_narrative_response(lead_title: str) -> dict:
-    """Build a realistic vLLM narrative generation response."""
-    return {
-        "executive_summary": (
-            f"Investigation into constitutional rights violation: {lead_title}"
-        ),
-        "constitutional_analysis": "First Amendment free speech protections apply.",
-        "recommendation": "Recommend further investigation and potential outreach.",
-        "parties": "Dr. Smith (affected), UC Berkeley (institution)",
-        "evidence": "Public statements, termination records",
-        "jurisdiction_analysis": "California state jurisdiction applies.",
-        "time_sensitivity": "Moderate — statute of limitations consideration.",
-        "affected_population": "Faculty members at UC Berkeley.",
-        "policy_text": "N/A — incident-based lead.",
-        "precedents": "Garcetti v. Ceballos (2006)",
     }
 
 
@@ -178,12 +163,9 @@ async def test_prospecting_pipeline_end_to_end(respx_mock):
     assert event2.metadata_["institution"] == "UCLA"
 
     # ---- Stage 2: Lead Matching ----
-    # Use real LeadMatcher with a mock DB session
-    config = LeadMatcherConfig(
-        plan_id=_CAL_PLAN_ID,
-        confidence_threshold=0.3,
-        source_reputation={"rss_fire": 0.9, "x_cal_california": 1.2},
-    )
+    # Use _build_matcher_config (same helper the worker uses) to validate
+    # the plan-content -> matcher-config translation path.
+    config = _build_matcher_config(_PLAN_CONTENT, _CAL_PLAN_ID)
     matcher = LeadMatcher(config)
 
     # Mock DB session for lead matching
@@ -260,9 +242,11 @@ async def test_prospecting_pipeline_end_to_end(respx_mock):
     }
 
     now = datetime.now(UTC)
+    ct_now = now.astimezone(ZoneInfo("America/Chicago"))
+    tz_abbr = ct_now.strftime("%Z")
     report_context = {
-        "report_date": now.strftime("%B %d, %Y — %I:%M %p CST"),
-        "report_period": f"Through {now.strftime('%B %d, %Y')}",
+        "report_date": ct_now.strftime(f"%B %d, %Y — %I:%M %p {tz_abbr}"),
+        "report_period": f"Through {ct_now.strftime('%B %d, %Y')}",
         "summary": summary_stats,
         "leads": lead_contexts,
         "all_source_citations": None,
@@ -501,9 +485,11 @@ async def test_report_context_preserves_lead_data(respx_mock):
     }
 
     now = datetime.now(UTC)
+    ct_now = now.astimezone(ZoneInfo("America/Chicago"))
+    tz_abbr = ct_now.strftime("%Z")
     context = {
-        "report_date": now.strftime("%B %d, %Y — %I:%M %p CST"),
-        "report_period": f"Through {now.strftime('%B %d, %Y')}",
+        "report_date": ct_now.strftime(f"%B %d, %Y — %I:%M %p {tz_abbr}"),
+        "report_period": f"Through {ct_now.strftime('%B %d, %Y')}",
         "summary": {
             "total_leads": 1,
             "incidents": 1,
