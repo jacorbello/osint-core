@@ -9,9 +9,10 @@ import asyncio
 import contextlib
 import hashlib
 import io
+import ipaddress
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 import soupsieve
@@ -27,6 +28,12 @@ logger = structlog.get_logger()
 _MAX_RETRIES = 3
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 _ARTIFACT_BUCKET = "osint-artifacts"
+
+# Default trusted domain suffixes for URL validation (SSRF mitigation)
+_DEFAULT_ALLOWED_DOMAIN_SUFFIXES: tuple[str, ...] = (".edu",)
+
+# Private/internal network patterns that must always be rejected
+_PRIVATE_HOSTNAMES = {"localhost", "localhost.localdomain"}
 
 # Default institution configurations
 DEFAULT_INSTITUTIONS: list[dict[str, str]] = [
@@ -72,7 +79,14 @@ class UniversityPolicyConnector(BaseConnector):
         self._institutions: list[dict[str, str]] = extra.get(
             "institutions", DEFAULT_INSTITUTIONS
         )
+        self._allowed_domain_suffixes: tuple[str, ...] = tuple(
+            extra.get("allowed_domain_suffixes", _DEFAULT_ALLOWED_DOMAIN_SUFFIXES)
+        )
+        self._allowed_domains: frozenset[str] = frozenset(
+            extra.get("allowed_domains", ())
+        )
         self._validate_selectors()
+        self._validate_urls()
         self._archive_pdfs: bool = extra.get("archive_pdfs", True)
         # In-memory hash store; a production deployment would persist this.
         self._known_hashes: dict[str, str] = {}
@@ -94,6 +108,57 @@ class UniversityPolicyConnector(BaseConnector):
                     f"{selector!r} — {exc}"
                 )
                 raise ValueError(msg) from exc
+
+    def _validate_urls(self) -> None:
+        """Validate policy URLs for all institutions against the domain allowlist.
+
+        Rejects URLs pointing to internal/private addresses (SSRF mitigation)
+        and URLs whose domain does not match the allowlist.
+
+        Raises ``ValueError`` with the institution name and rejected URL.
+        """
+        for institution in self._institutions:
+            name = institution.get("name", "<unknown>")
+            url = institution.get("policy_url", "")
+            if not self._is_url_allowed(url):
+                msg = (
+                    f"Disallowed URL for institution {name!r}: "
+                    f"{url!r} — domain not in allowlist"
+                )
+                raise ValueError(msg)
+
+    def _is_url_allowed(self, url: str) -> bool:
+        """Check whether a URL's domain is in the allowlist.
+
+        Returns ``False`` for:
+        - Private/internal hostnames (localhost, etc.)
+        - Private/reserved IP addresses (127.x, 10.x, 172.16-31.x, 192.168.x, etc.)
+        - Domains not matching any allowed suffix or explicit allowed domain
+        """
+        parsed = urlparse(url)
+        hostname = (parsed.hostname or "").lower()
+
+        if not hostname:
+            return False
+
+        # Reject private hostnames
+        if hostname in _PRIVATE_HOSTNAMES:
+            return False
+
+        # Reject private/reserved IP addresses
+        try:
+            addr = ipaddress.ip_address(hostname)
+            if addr.is_private or addr.is_loopback or addr.is_reserved:
+                return False
+        except ValueError:
+            pass  # Not an IP address — proceed with domain checks
+
+        # Check explicit allowed domains
+        if hostname in self._allowed_domains:
+            return True
+
+        # Check allowed domain suffixes
+        return any(hostname.endswith(suffix) for suffix in self._allowed_domain_suffixes)
 
     async def fetch(self) -> list[RawItem]:
         items: list[RawItem] = []
@@ -253,6 +318,16 @@ class UniversityPolicyConnector(BaseConnector):
         url: str,
     ) -> RawItem | None:
         """Download a policy document and return a RawItem if new/changed."""
+        if not self._is_url_allowed(url):
+            logger.warning(
+                "university_policy_url_rejected",
+                source_id=self.config.id,
+                url=url,
+                institution=institution.get("name", "<unknown>"),
+                reason="domain not in allowlist",
+            )
+            return None
+
         resp = await self._fetch_with_retries(client, url)
         if resp is None:
             return None
