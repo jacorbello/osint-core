@@ -15,6 +15,8 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
+import redis.asyncio as aioredis
+import redis.exceptions
 import soupsieve
 import structlog
 from bs4 import BeautifulSoup
@@ -125,8 +127,12 @@ class UniversityPolicyConnector(BaseConnector):
         self._validate_selectors()
         self._validate_urls()
         self._archive_pdfs: bool = extra.get("archive_pdfs", True)
-        # In-memory hash store; a production deployment would persist this.
-        self._known_hashes: dict[str, str] = {}
+        # Redis-backed hash store keyed by source_id + URL.
+        # Falls back to in-memory dict when Redis is unavailable.
+        self._redis: aioredis.Redis | None = None
+        self._redis_available: bool = True
+        self._fallback_hashes: dict[str, str] = {}
+        self._redis_hash_key = f"policy_hashes:{self.config.id}"
 
     def _validate_selectors(self) -> None:
         """Validate CSS selectors for all institutions at init time.
@@ -198,6 +204,59 @@ class UniversityPolicyConnector(BaseConnector):
 
         # Check allowed domain suffixes
         return any(hostname.endswith(suffix) for suffix in self._allowed_domain_suffixes)
+
+    async def _get_redis(self) -> aioredis.Redis | None:
+        """Return a shared Redis connection, or ``None`` if unavailable."""
+        if not self._redis_available:
+            return None
+        if self._redis is not None:
+            return self._redis
+        try:
+            self._redis = aioredis.from_url(  # type: ignore[no-untyped-call]
+                settings.redis_url,
+                decode_responses=True,
+                socket_connect_timeout=2,
+            )
+            # Verify connectivity
+            await self._redis.ping()
+            return self._redis
+        except (redis.exceptions.RedisError, OSError):
+            logger.warning(
+                "university_policy_redis_unavailable",
+                source_id=self.config.id,
+                msg="Falling back to in-memory hash store",
+            )
+            self._redis_available = False
+            self._redis = None
+            return None
+
+    async def _get_hash(self, url: str) -> str | None:
+        """Look up the stored content hash for a URL."""
+        r = await self._get_redis()
+        if r is not None:
+            try:
+                return await r.hget(self._redis_hash_key, url)
+            except redis.exceptions.RedisError:
+                logger.warning(
+                    "university_policy_redis_read_error",
+                    source_id=self.config.id,
+                    url=url,
+                )
+        return self._fallback_hashes.get(url)
+
+    async def _set_hash(self, url: str, content_hash: str) -> None:
+        """Persist a content hash for a URL."""
+        self._fallback_hashes[url] = content_hash
+        r = await self._get_redis()
+        if r is not None:
+            try:
+                await r.hset(self._redis_hash_key, url, content_hash)
+            except redis.exceptions.RedisError:
+                logger.warning(
+                    "university_policy_redis_write_error",
+                    source_id=self.config.id,
+                    url=url,
+                )
 
     async def fetch(self) -> list[RawItem]:
         items: list[RawItem] = []
@@ -434,8 +493,7 @@ class UniversityPolicyConnector(BaseConnector):
         content_type = resp.headers.get("content-type", "")
         new_hash = self._content_hash(content_bytes)
 
-        hash_key = url
-        old_hash = self._known_hashes.get(hash_key)
+        old_hash = await self._get_hash(url)
 
         if old_hash == new_hash:
             logger.debug(
@@ -445,7 +503,7 @@ class UniversityPolicyConnector(BaseConnector):
             )
             return None
 
-        self._known_hashes[hash_key] = new_hash
+        await self._set_hash(url, new_hash)
 
         # Determine document type
         is_pdf = "application/pdf" in content_type or url.lower().endswith(".pdf")

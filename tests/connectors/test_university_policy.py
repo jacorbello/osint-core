@@ -9,6 +9,23 @@ import pytest
 from osint_core.connectors.base import RawItem, SourceConfig
 from osint_core.connectors.university_policy import UniversityPolicyConnector
 
+
+class FakeRedisHash:
+    """In-memory dict that mimics async Redis HSET/HGET for testing."""
+
+    def __init__(self):
+        self._data: dict[str, dict[str, str]] = {}
+
+    async def hget(self, name: str, key: str) -> str | None:
+        return self._data.get(name, {}).get(key)
+
+    async def hset(self, name: str, key: str, value: str) -> int:
+        self._data.setdefault(name, {})[key] = value
+        return 1
+
+    async def ping(self) -> bool:
+        return True
+
 SAMPLE_INDEX_PAGE = """<!DOCTYPE html>
 <html>
 <head><title>University Policies</title></head>
@@ -61,6 +78,22 @@ def config() -> SourceConfig:
             "archive_pdfs": False,
         },
     )
+
+
+@pytest.fixture()
+def fake_redis() -> FakeRedisHash:
+    """Shared fake Redis instance that persists across connector instances."""
+    return FakeRedisHash()
+
+
+@pytest.fixture(autouse=True)
+def _mock_redis(fake_redis):
+    """Prevent real Redis connections; inject fake Redis for all tests."""
+    with patch(
+        "redis.asyncio.from_url",
+        return_value=fake_redis,
+    ):
+        yield fake_redis
 
 
 @pytest.fixture()
@@ -1137,3 +1170,164 @@ class TestDomainAllowlistValidation:
         )
         with pytest.raises(ValueError, match="Zero IP"):
             UniversityPolicyConnector(config)
+
+
+# --- Redis hash persistence ---
+
+
+class TestRedisPersistence:
+    """Verify content hashes persist across connector instances via Redis."""
+
+    @pytest.mark.asyncio
+    async def test_hash_persists_across_instances(self, config, fake_redis, respx_mock):
+        """Hash stored by one connector instance is visible to a new instance."""
+        respx_mock.get("https://policy.example.edu/index.html").mock(
+            return_value=httpx.Response(200, content=SAMPLE_INDEX_PAGE)
+        )
+        respx_mock.get("https://policy.example.edu/policies/admissions.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=SAMPLE_POLICY_HTML,
+                headers={"content-type": "text/html"},
+            )
+        )
+        respx_mock.get("https://policy.example.edu/policies/tuition.pdf").mock(
+            return_value=httpx.Response(
+                200,
+                content=SAMPLE_PDF_BYTES,
+                headers={"content-type": "application/pdf"},
+            )
+        )
+        respx_mock.get("https://policy.example.edu/policies/conduct.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=SAMPLE_POLICY_HTML,
+                headers={"content-type": "text/html"},
+            )
+        )
+
+        # First connector instance: all policies are new
+        conn1 = UniversityPolicyConnector(config)
+        items1 = await conn1.fetch()
+        assert len(items1) == 3
+
+        # Second connector instance (simulates worker restart) with same Redis
+        conn2 = UniversityPolicyConnector(config)
+        items2 = await conn2.fetch()
+        assert len(items2) == 0, "Unchanged docs should be skipped after restart"
+
+    @pytest.mark.asyncio
+    async def test_unchanged_doc_detected_after_reinstantiation(
+        self, config, fake_redis, respx_mock
+    ):
+        """A specific document is recognized as unchanged by a new instance."""
+        respx_mock.get("https://policy.example.edu/index.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=(
+                    '<html><body>'
+                    '<a class="policy-link" href="/policies/single.html">Single</a>'
+                    '</body></html>'
+                ),
+            )
+        )
+        respx_mock.get("https://policy.example.edu/policies/single.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=SAMPLE_POLICY_HTML,
+                headers={"content-type": "text/html"},
+            )
+        )
+
+        # First instance processes the document
+        conn1 = UniversityPolicyConnector(config)
+        items1 = await conn1.fetch()
+        assert len(items1) == 1
+        assert items1[0].raw_data["change_type"] == "new"
+
+        # New instance sees same content as unchanged
+        conn2 = UniversityPolicyConnector(config)
+        items2 = await conn2.fetch()
+        assert len(items2) == 0
+
+    @pytest.mark.asyncio
+    async def test_hash_key_uses_source_id(self, fake_redis, respx_mock):
+        """Redis hash key incorporates source_id for namespace isolation."""
+        config_a = SourceConfig(
+            id="source-a",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Example University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "a.policy-link",
+                    },
+                ],
+                "archive_pdfs": False,
+            },
+        )
+        config_b = SourceConfig(
+            id="source-b",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [
+                    {
+                        "name": "Example University",
+                        "policy_url": "https://policy.example.edu/index.html",
+                        "selector": "a.policy-link",
+                    },
+                ],
+                "archive_pdfs": False,
+            },
+        )
+        conn_a = UniversityPolicyConnector(config_a)
+        conn_b = UniversityPolicyConnector(config_b)
+        assert conn_a._redis_hash_key == "policy_hashes:source-a"
+        assert conn_b._redis_hash_key == "policy_hashes:source-b"
+        assert conn_a._redis_hash_key != conn_b._redis_hash_key
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_memory_when_redis_unavailable(
+        self, config, respx_mock
+    ):
+        """Connector falls back to in-memory hashes when Redis is down."""
+        respx_mock.get("https://policy.example.edu/index.html").mock(
+            return_value=httpx.Response(200, content=SAMPLE_INDEX_PAGE)
+        )
+        respx_mock.get("https://policy.example.edu/policies/admissions.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=SAMPLE_POLICY_HTML,
+                headers={"content-type": "text/html"},
+            )
+        )
+        respx_mock.get("https://policy.example.edu/policies/tuition.pdf").mock(
+            return_value=httpx.Response(
+                200,
+                content=SAMPLE_PDF_BYTES,
+                headers={"content-type": "application/pdf"},
+            )
+        )
+        respx_mock.get("https://policy.example.edu/policies/conduct.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=SAMPLE_POLICY_HTML,
+                headers={"content-type": "text/html"},
+            )
+        )
+
+        conn = UniversityPolicyConnector(config)
+        # Simulate Redis being unavailable
+        conn._redis_available = False
+
+        items1 = await conn.fetch()
+        assert len(items1) == 3
+
+        # Same instance still uses fallback dict
+        items2 = await conn.fetch()
+        assert len(items2) == 0
