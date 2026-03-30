@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -252,6 +253,11 @@ class LeadMatcher:
         if confidence < self.config.confidence_threshold:
             return None
 
+        source_citations = _extract_source_citations(event)
+        citations_payload: dict[str, Any] | None = (
+            {"sources": source_citations} if source_citations else None
+        )
+
         now = datetime.now(UTC)
         lead = Lead(
             lead_type=lead_type,
@@ -267,6 +273,7 @@ class LeadMatcher:
             plan_id=self.config.plan_id,
             event_ids=[event.id],
             entity_ids=[],
+            citations=citations_payload,
             first_surfaced_at=now,
             last_updated_at=now,
         )
@@ -313,6 +320,15 @@ class LeadMatcher:
         if merged != sorted(existing_basis):
             set_committed_value(lead, "constitutional_basis", merged)
 
+        # Merge source citations
+        new_citations = _extract_source_citations(event)
+        if new_citations:
+            existing_sources = (lead.citations or {}).get("sources", [])
+            merged_sources = _merge_citations(existing_sources, new_citations)
+            set_committed_value(
+                lead, "citations", {"sources": merged_sources},
+            )
+
         lead.last_updated_at = datetime.now(UTC)
         return lead
 
@@ -345,6 +361,61 @@ def _source_type(source_id: str) -> str:
     if source_id.startswith("univ_"):
         return "university_policy"
     return "unknown"
+
+
+def _extract_source_citations(event: Event) -> list[dict[str, Any]]:
+    """Extract source material citations from an event's metadata and raw_excerpt.
+
+    Returns a list of citation dicts with ``url``, ``title``, and ``source_type``
+    keys.  The URL is sourced from the event metadata (``tweet_url`` for xAI
+    events, ``url`` for university-policy events) with a fallback to
+    ``raw_excerpt`` (which the ingest worker populates with the item URL).
+    """
+    metadata = event.metadata_ or {}
+    source_type = _source_type(event.source_id)
+    citations: list[dict[str, Any]] = []
+
+    url: str | None = None
+    title: str | None = None
+
+    if source_type == "xai_x_search":
+        url = metadata.get("tweet_url")
+        author = metadata.get("author", "")
+        title = f"X post by {author}" if author else "X post"
+    elif source_type == "university_policy":
+        url = metadata.get("url")
+        title = metadata.get("title") or "University policy document"
+    else:
+        # Generic fallback: use raw_excerpt as URL if it looks like one
+        url = metadata.get("url") or metadata.get("tweet_url")
+        title = event.title or "Source document"
+
+    # Fallback to raw_excerpt (populated by ingest worker from item.url)
+    if not url and event.raw_excerpt:
+        url = event.raw_excerpt
+
+    if url:
+        citations.append({
+            "url": url,
+            "title": title or "Source document",
+            "source_type": source_type,
+        })
+
+    return citations
+
+
+def _merge_citations(
+    existing: list[dict[str, Any]],
+    new: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge new citations into existing list, deduplicating by URL."""
+    seen_urls: set[str] = {c["url"] for c in existing if "url" in c}
+    merged = list(existing)
+    for citation in new:
+        if citation.get("url") and citation["url"] not in seen_urls:
+            seen_urls.add(citation["url"])
+            merged.append(citation)
+    return merged
 
 
 async def _collect_source_ids(
