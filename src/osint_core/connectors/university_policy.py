@@ -240,14 +240,14 @@ class UniversityPolicyConnector(BaseConnector):
         self._redis_available = False
         if self._redis is not None:
             with contextlib.suppress(Exception):
-                await self._redis.aclose()  # type: ignore[union-attr]
+                await self._redis.aclose()
             self._redis = None
 
     async def _close_redis(self) -> None:
         """Close the Redis client if one was created."""
         if self._redis is not None:
             with contextlib.suppress(Exception):
-                await self._redis.aclose()  # type: ignore[union-attr]
+                await self._redis.aclose()
             self._redis = None
 
     async def _get_hash(self, url: str) -> str | None:
@@ -255,7 +255,8 @@ class UniversityPolicyConnector(BaseConnector):
         r = await self._get_redis()
         if r is not None:
             try:
-                return await r.hget(self._redis_hash_key, url)
+                result: str | None = await r.hget(self._redis_hash_key, url)  # type: ignore[misc]
+                return result
             except redis.exceptions.RedisError:
                 logger.warning(
                     "university_policy_redis_read_error",
@@ -273,7 +274,7 @@ class UniversityPolicyConnector(BaseConnector):
         r = await self._get_redis()
         if r is not None:
             try:
-                await r.hset(self._redis_hash_key, url, content_hash)
+                await r.hset(self._redis_hash_key, url, content_hash)  # type: ignore[misc]
                 return
             except redis.exceptions.RedisError:
                 logger.warning(
