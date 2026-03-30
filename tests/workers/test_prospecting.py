@@ -7,8 +7,12 @@ import pytest
 
 from osint_core.services.lead_matcher import DEFAULT_CONFIDENCE_THRESHOLD
 from osint_core.workers.prospecting import (
+    _GUARD_BACKOFF_BASE,
+    _GUARD_MAX_DEFERRALS,
     _build_matcher_config,
+    _check_pipeline_guard,
     _generate_report_async,
+    _has_pending_match_leads_tasks,
     _match_leads_async,
 )
 
@@ -485,7 +489,140 @@ async def test_successful_report_delivery():
 
 
 def test_generate_report_task_max_retries():
-    """Task is configured with max_retries=3."""
+    """Task max_retries includes guard deferrals plus generation retries."""
     from osint_core.workers.prospecting import generate_prospecting_report_task
 
-    assert generate_prospecting_report_task.max_retries == 3
+    assert generate_prospecting_report_task.max_retries == 3 + _GUARD_MAX_DEFERRALS
+
+
+# ---------------------------------------------------------------------------
+# Pipeline completion guard tests
+# ---------------------------------------------------------------------------
+
+
+def test_has_pending_tasks_returns_true_when_active():
+    """Guard detects active match_leads tasks."""
+    mock_inspector = MagicMock()
+    mock_inspector.active.return_value = {
+        "worker1@host": [
+            {"name": "osint.match_leads", "id": "abc-123"},
+        ],
+    }
+    mock_inspector.reserved.return_value = {}
+
+    with patch("osint_core.workers.prospecting.celery_app") as mock_app:
+        mock_app.control.inspect.return_value = mock_inspector
+        assert _has_pending_match_leads_tasks() is True
+
+
+def test_has_pending_tasks_returns_true_when_reserved():
+    """Guard detects reserved (queued) match_leads tasks."""
+    mock_inspector = MagicMock()
+    mock_inspector.active.return_value = {}
+    mock_inspector.reserved.return_value = {
+        "worker2@host": [
+            {"name": "osint.match_leads", "id": "def-456"},
+        ],
+    }
+
+    with patch("osint_core.workers.prospecting.celery_app") as mock_app:
+        mock_app.control.inspect.return_value = mock_inspector
+        assert _has_pending_match_leads_tasks() is True
+
+
+def test_has_pending_tasks_returns_false_when_none_running():
+    """Guard returns False when no match_leads tasks are active or reserved."""
+    mock_inspector = MagicMock()
+    mock_inspector.active.return_value = {
+        "worker1@host": [
+            {"name": "osint.score_event", "id": "ghi-789"},
+        ],
+    }
+    mock_inspector.reserved.return_value = {}
+
+    with patch("osint_core.workers.prospecting.celery_app") as mock_app:
+        mock_app.control.inspect.return_value = mock_inspector
+        assert _has_pending_match_leads_tasks() is False
+
+
+def test_has_pending_tasks_returns_false_when_inspector_returns_none():
+    """Guard returns False when workers are unreachable (inspect returns None)."""
+    mock_inspector = MagicMock()
+    mock_inspector.active.return_value = None
+    mock_inspector.reserved.return_value = None
+
+    with patch("osint_core.workers.prospecting.celery_app") as mock_app:
+        mock_app.control.inspect.return_value = mock_inspector
+        assert _has_pending_match_leads_tasks() is False
+
+
+def test_report_deferred_when_match_leads_pending():
+    """Guard returns should_defer=True when match_leads tasks are still running."""
+    with patch(
+        "osint_core.workers.prospecting._has_pending_match_leads_tasks",
+        return_value=True,
+    ):
+        result = _check_pipeline_guard(headers=None)
+
+    assert result.should_defer is True
+    assert result.deferrals == 1
+    assert result.countdown == _GUARD_BACKOFF_BASE  # base * 1
+
+
+def test_report_deferred_increments_deferral_count():
+    """Guard increments deferral counter with increasing backoff."""
+    with patch(
+        "osint_core.workers.prospecting._has_pending_match_leads_tasks",
+        return_value=True,
+    ):
+        result = _check_pipeline_guard(headers={"x_guard_deferrals": 2})
+
+    assert result.should_defer is True
+    assert result.deferrals == 3
+    assert result.countdown == _GUARD_BACKOFF_BASE * 3
+
+
+def test_report_proceeds_when_no_pending_tasks():
+    """Guard returns should_defer=False when no match_leads tasks are pending."""
+    with patch(
+        "osint_core.workers.prospecting._has_pending_match_leads_tasks",
+        return_value=False,
+    ):
+        result = _check_pipeline_guard(headers=None)
+
+    assert result.should_defer is False
+    assert result.deferrals == 0
+
+
+def test_guard_exhausted_proceeds_with_warning():
+    """After max deferrals, guard returns should_defer=False despite pending tasks."""
+    with patch(
+        "osint_core.workers.prospecting._has_pending_match_leads_tasks",
+        return_value=True,
+    ), patch(
+        "osint_core.workers.prospecting.logger",
+    ) as mock_logger:
+        result = _check_pipeline_guard(
+            headers={"x_guard_deferrals": _GUARD_MAX_DEFERRALS},
+        )
+
+    assert result.should_defer is False
+    assert result.deferrals == _GUARD_MAX_DEFERRALS
+    # Warning log was emitted about guard exhaustion
+    mock_logger.warning.assert_called()
+    warn_msg = mock_logger.warning.call_args[0][0]
+    assert "pipeline_guard_exhausted" in warn_msg
+
+
+def test_guard_countdown_capped_at_600():
+    """Guard countdown is capped at 600 seconds."""
+    with patch(
+        "osint_core.workers.prospecting._has_pending_match_leads_tasks",
+        return_value=True,
+    ):
+        result = _check_pipeline_guard(
+            headers={"x_guard_deferrals": _GUARD_MAX_DEFERRALS - 1},
+        )
+
+    assert result.should_defer is True
+    assert result.countdown <= 600
