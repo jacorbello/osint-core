@@ -15,6 +15,7 @@ class FakeRedisHash:
 
     def __init__(self):
         self._data: dict[str, dict[str, str]] = {}
+        self.closed: bool = False
 
     async def hget(self, name: str, key: str) -> str | None:
         return self._data.get(name, {}).get(key)
@@ -25,6 +26,9 @@ class FakeRedisHash:
 
     async def ping(self) -> bool:
         return True
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 SAMPLE_INDEX_PAGE = """<!DOCTYPE html>
 <html>
@@ -1331,3 +1335,139 @@ class TestRedisPersistence:
         # Same instance still uses fallback dict
         items2 = await conn.fetch()
         assert len(items2) == 0
+
+    @pytest.mark.asyncio
+    async def test_redis_closed_after_fetch(self, config, fake_redis, respx_mock):
+        """Redis client is closed at the end of fetch() to prevent connection leaks."""
+        respx_mock.get("https://policy.example.edu/index.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=(
+                    '<html><body>'
+                    '<a class="policy-link" href="/policies/single.html">Single</a>'
+                    '</body></html>'
+                ),
+            )
+        )
+        respx_mock.get("https://policy.example.edu/policies/single.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=SAMPLE_POLICY_HTML,
+                headers={"content-type": "text/html"},
+            )
+        )
+
+        conn = UniversityPolicyConnector(config)
+        await conn.fetch()
+
+        # After fetch completes, the Redis client should be cleaned up
+        assert conn._redis is None
+        assert fake_redis.closed is True
+
+    @pytest.mark.asyncio
+    async def test_redis_read_error_triggers_fallback(self, config, respx_mock):
+        """A Redis read error disables Redis and switches to in-memory fallback."""
+        failing_redis = FakeRedisHash()
+
+        async def _hget_fail(name, key):
+            import redis.exceptions
+
+            raise redis.exceptions.RedisError("read failure")
+
+        failing_redis.hget = _hget_fail
+
+        with patch("redis.asyncio.from_url", return_value=failing_redis):
+            conn = UniversityPolicyConnector(config)
+
+            respx_mock.get("https://policy.example.edu/index.html").mock(
+                return_value=httpx.Response(
+                    200,
+                    content=(
+                        '<html><body>'
+                        '<a class="policy-link" href="/policies/single.html">Single</a>'
+                        '</body></html>'
+                    ),
+                )
+            )
+            respx_mock.get("https://policy.example.edu/policies/single.html").mock(
+                return_value=httpx.Response(
+                    200,
+                    content=SAMPLE_POLICY_HTML,
+                    headers={"content-type": "text/html"},
+                )
+            )
+
+            items = await conn.fetch()
+            assert len(items) == 1
+            # Redis should be marked unavailable after the read error
+            assert conn._redis_available is False
+
+    @pytest.mark.asyncio
+    async def test_redis_write_error_triggers_fallback(self, config, respx_mock):
+        """A Redis write error disables Redis and stores hash in memory."""
+        failing_redis = FakeRedisHash()
+
+        async def _hset_fail(name, key, value):
+            import redis.exceptions
+
+            raise redis.exceptions.RedisError("write failure")
+
+        failing_redis.hset = _hset_fail
+
+        with patch("redis.asyncio.from_url", return_value=failing_redis):
+            conn = UniversityPolicyConnector(config)
+
+            respx_mock.get("https://policy.example.edu/index.html").mock(
+                return_value=httpx.Response(
+                    200,
+                    content=(
+                        '<html><body>'
+                        '<a class="policy-link" href="/policies/single.html">Single</a>'
+                        '</body></html>'
+                    ),
+                )
+            )
+            respx_mock.get("https://policy.example.edu/policies/single.html").mock(
+                return_value=httpx.Response(
+                    200,
+                    content=SAMPLE_POLICY_HTML,
+                    headers={"content-type": "text/html"},
+                )
+            )
+
+            items = await conn.fetch()
+            assert len(items) == 1
+            # Redis should be marked unavailable after the write error
+            assert conn._redis_available is False
+            # The hash should have been stored in the fallback dict
+            assert len(conn._fallback_hashes) == 1
+
+    @pytest.mark.asyncio
+    async def test_fallback_hashes_not_populated_when_redis_healthy(
+        self, config, fake_redis, respx_mock
+    ):
+        """When Redis is healthy, _fallback_hashes stays empty."""
+        respx_mock.get("https://policy.example.edu/index.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=(
+                    '<html><body>'
+                    '<a class="policy-link" href="/policies/single.html">Single</a>'
+                    '</body></html>'
+                ),
+            )
+        )
+        respx_mock.get("https://policy.example.edu/policies/single.html").mock(
+            return_value=httpx.Response(
+                200,
+                content=SAMPLE_POLICY_HTML,
+                headers={"content-type": "text/html"},
+            )
+        )
+
+        conn = UniversityPolicyConnector(config)
+        await conn.fetch()
+
+        # Hash should be in Redis, not in the fallback dict
+        assert len(conn._fallback_hashes) == 0
+        assert len(fake_redis._data.get("policy_hashes:test-university", {})) == 1

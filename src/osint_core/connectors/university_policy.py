@@ -230,6 +230,26 @@ class UniversityPolicyConnector(BaseConnector):
             self._redis = None
             return None
 
+    async def _mark_redis_failed(self) -> None:
+        """Mark Redis as unavailable and close the client.
+
+        After the first read or write error, the connector switches to the
+        in-memory fallback for the remainder of its lifetime to avoid repeated
+        failures and warning noise.
+        """
+        self._redis_available = False
+        if self._redis is not None:
+            with contextlib.suppress(Exception):
+                await self._redis.aclose()  # type: ignore[union-attr]
+            self._redis = None
+
+    async def _close_redis(self) -> None:
+        """Close the Redis client if one was created."""
+        if self._redis is not None:
+            with contextlib.suppress(Exception):
+                await self._redis.aclose()  # type: ignore[union-attr]
+            self._redis = None
+
     async def _get_hash(self, url: str) -> str | None:
         """Look up the stored content hash for a URL."""
         r = await self._get_redis()
@@ -242,30 +262,40 @@ class UniversityPolicyConnector(BaseConnector):
                     source_id=self.config.id,
                     url=url,
                 )
+                await self._mark_redis_failed()
         return self._fallback_hashes.get(url)
 
     async def _set_hash(self, url: str, content_hash: str) -> None:
-        """Persist a content hash for a URL."""
-        self._fallback_hashes[url] = content_hash
+        """Persist a content hash for a URL.
+
+        Uses Redis when available; falls back to in-memory storage otherwise.
+        """
         r = await self._get_redis()
         if r is not None:
             try:
                 await r.hset(self._redis_hash_key, url, content_hash)
+                return
             except redis.exceptions.RedisError:
                 logger.warning(
                     "university_policy_redis_write_error",
                     source_id=self.config.id,
                     url=url,
                 )
+                await self._mark_redis_failed()
+        # Fallback path: Redis unavailable or write failed
+        self._fallback_hashes[url] = content_hash
 
     async def fetch(self) -> list[RawItem]:
         items: list[RawItem] = []
-        async with httpx.AsyncClient(
-            timeout=30, follow_redirects=False
-        ) as client:
-            for institution in self._institutions:
-                inst_items = await self._fetch_institution(client, institution)
-                items.extend(inst_items)
+        try:
+            async with httpx.AsyncClient(
+                timeout=30, follow_redirects=False
+            ) as client:
+                for institution in self._institutions:
+                    inst_items = await self._fetch_institution(client, institution)
+                    items.extend(inst_items)
+        finally:
+            await self._close_redis()
         return items
 
     # ------------------------------------------------------------------
