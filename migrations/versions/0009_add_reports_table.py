@@ -1,7 +1,7 @@
 """add reports table
 
 Revision ID: 0009
-Revises: dd493f3ccae5
+Revises: 0006b
 Create Date: 2026-03-30
 """
 
@@ -12,7 +12,7 @@ from alembic import context, op
 
 # revision identifiers, used by Alembic.
 revision: str = "0009"
-down_revision: str | None = "dd493f3ccae5"
+down_revision: str | None = "0006b"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -1,7 +1,7 @@
 """add leads table
 
-Revision ID: 0006
-Revises: 0005
+Revision ID: 0006b
+Revises: 0008
 Create Date: 2026-03-27
 """
 
@@ -12,8 +12,8 @@ from alembic import context, op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "0006"
-down_revision: str | None = "0005"
+revision: str = "0006b"
+down_revision: str | None = "0008"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
