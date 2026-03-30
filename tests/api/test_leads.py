@@ -351,8 +351,11 @@ def test_list_leads_with_plan_id_filter():
     assert len(result.items) == 1
     items_sql = _compiled_sql(db.execute.call_args_list[0][0][0])
     count_sql = _compiled_sql(db.execute.call_args_list[1][0][0])
-    assert "plan_id" in items_sql
-    assert "plan_id" in count_sql
+    # Ensure plan_id is actually used as a filter (in the WHERE clause)
+    items_where = items_sql.split("WHERE")[1] if "WHERE" in items_sql else ""
+    count_where = count_sql.split("WHERE")[1] if "WHERE" in count_sql else ""
+    assert "plan_id" in items_where
+    assert "plan_id" in count_where
 
 
 def test_list_leads_without_plan_id_returns_all():
@@ -377,9 +380,12 @@ def test_list_leads_without_plan_id_returns_all():
 
     assert len(result.items) == 3
     items_sql = _compiled_sql(db.execute.call_args_list[0][0][0])
+    count_sql = _compiled_sql(db.execute.call_args_list[1][0][0])
     # plan_id appears in SELECT columns but should NOT appear in WHERE clause
-    where_clause = items_sql.split("WHERE")[1] if "WHERE" in items_sql else ""
-    assert "plan_id" not in where_clause
+    items_where_clause = items_sql.split("WHERE")[1] if "WHERE" in items_sql else ""
+    count_where_clause = count_sql.split("WHERE")[1] if "WHERE" in count_sql else ""
+    assert "plan_id" not in items_where_clause
+    assert "plan_id" not in count_where_clause
 
 
 # ---------------------------------------------------------------------------
