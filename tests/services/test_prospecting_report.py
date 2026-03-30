@@ -54,7 +54,15 @@ def _mock_db(leads: list) -> AsyncMock:
     result.scalars.return_value = scalars
     db.execute = AsyncMock(return_value=result)
     db.add = MagicMock()  # session.add() is synchronous
-    db.flush = AsyncMock()
+
+    async def _flush_side_effect() -> None:
+        """Simulate DB flush populating server-side defaults (e.g. UUIDMixin.id)."""
+        for call in db.add.call_args_list:
+            obj = call.args[0]
+            if hasattr(obj, "id") and obj.id is None:
+                obj.id = uuid.uuid4()
+
+    db.flush = AsyncMock(side_effect=_flush_side_effect)
     db.commit = AsyncMock()
     return db
 
