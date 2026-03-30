@@ -23,6 +23,20 @@ class TestBuildHtmlBody:
         assert "libertycenter.org" in html
         assert "CAL Prospecting Report" in html
 
+    def test_script_tag_in_summary_is_escaped(self):
+        html = _build_html_body('<script>alert("xss")</script>')
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+        assert "&lt;/script&gt;" in html
+
+    def test_normal_markdown_content_renders_safely(self):
+        summary = "Found 3 leads & 2 events. Status: \"active\" < threshold."
+        html = _build_html_body(summary)
+        assert "&amp;" in html
+        assert "&quot;" in html
+        assert "&lt;" in html
+        assert "<script>" not in html
+
 
 class TestResendNotifier:
     @pytest.fixture()

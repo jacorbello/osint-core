@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import html as html_mod
 import re
 from datetime import UTC, datetime
 
@@ -130,7 +131,7 @@ def _build_html_body(executive_summary: str) -> str:
 The Center For American Liberty.</p>
 <h3 style="color: #1b3a5c;">Executive Summary</h3>
 <div style="background: #f0f4f8; padding: 16px; border-left: 4px solid #1b3a5c;">
-{executive_summary}
+{html_mod.escape(executive_summary)}
 </div>
 <hr style="border: none; border-top: 1px solid #ddd; margin: 24px 0;">
 <p style="font-size: 11px; color: #888;">
