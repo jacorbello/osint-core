@@ -380,22 +380,25 @@ async def test_resend_failure_still_archives_pdf():
         "osint_core.config.settings", mock_settings,
     ), patch(
         "osint_core.workers.prospecting.logger",
-    ) as mock_logger, pytest.raises(ConnectionError, match="Resend down"):
-        await _generate_report_async(0)
+    ) as mock_logger, patch(
+        "osint_core.workers.prospecting.asyncio.sleep",
+        new_callable=AsyncMock,
+    ):
+        result = await _generate_report_async(0)
 
     # generate_report was called (PDF generated, archived, leads updated)
     mock_generator.generate_report.assert_awaited_once_with(mock_db)
 
-    # Email delivery was attempted
-    mock_notifier.send_report.assert_awaited_once()
+    # Email delivery was retried 3 times (all failed with exception)
+    assert mock_notifier.send_report.await_count == 3
 
-    # Structured alert log was emitted
-    mock_logger.error.assert_called_once()
-    log_msg = mock_logger.error.call_args[0][0] % mock_logger.error.call_args[0][1:]
-    assert "report_delivery_failed" in log_msg
-    assert "plan_id=cal-prospecting" in log_msg
-    assert "attempt=1" in log_msg
-    assert "Resend down" in log_msg
+    # Exhaustion alert was emitted
+    error_calls = [c for c in mock_logger.error.call_args_list
+                   if "report_email_exhausted" in str(c)]
+    assert len(error_calls) == 1
+
+    # Report still completes (PDF archived, leads updated)
+    assert result["status"] == "completed"
 
 
 @pytest.mark.asyncio
@@ -436,11 +439,21 @@ async def test_report_delivery_failed_log_includes_attempt_count():
         "osint_core.config.settings", mock_settings,
     ), patch(
         "osint_core.workers.prospecting.logger",
-    ) as mock_logger, pytest.raises(TimeoutError):
+    ) as mock_logger, patch(
+        "osint_core.workers.prospecting.asyncio.sleep",
+        new_callable=AsyncMock,
+    ):
         await _generate_report_async(2)
 
-    log_msg = mock_logger.error.call_args[0][0] % mock_logger.error.call_args[0][1:]
-    assert "attempt=3" in log_msg
+    # All 3 retries exhausted
+    assert mock_notifier.send_report.await_count == 3
+
+    # Exhaustion log includes task_attempt=2 (the attempt value passed in)
+    error_calls = [c for c in mock_logger.error.call_args_list
+                   if "report_email_exhausted" in str(c)]
+    assert len(error_calls) == 1
+    log_msg = error_calls[0][0][0] % error_calls[0][0][1:]
+    assert "task_attempt=2" in log_msg
 
 
 @pytest.mark.asyncio
