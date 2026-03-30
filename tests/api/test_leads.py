@@ -93,6 +93,7 @@ def test_list_leads_returns_items():
             status=None,
             jurisdiction=None,
             lead_type=None,
+            plan_id=None,
             date_from=None,
             date_to=None,
             db=db,
@@ -117,6 +118,7 @@ def test_list_leads_empty():
             status=None,
             jurisdiction=None,
             lead_type=None,
+            plan_id=None,
             date_from=None,
             date_to=None,
             db=db,
@@ -141,6 +143,7 @@ def test_list_leads_with_status_filter():
             status="reviewing",
             jurisdiction=None,
             lead_type=None,
+            plan_id=None,
             date_from=None,
             date_to=None,
             db=db,
@@ -171,6 +174,7 @@ def test_list_leads_with_jurisdiction_filter():
             status=None,
             jurisdiction="Texas",
             lead_type=None,
+            plan_id=None,
             date_from=None,
             date_to=None,
             db=db,
@@ -197,6 +201,7 @@ def test_list_leads_with_lead_type_filter():
             status=None,
             jurisdiction=None,
             lead_type="policy",
+            plan_id=None,
             date_from=None,
             date_to=None,
             db=db,
@@ -223,6 +228,7 @@ def test_list_leads_with_date_filters():
             status=None,
             jurisdiction=None,
             lead_type=None,
+            plan_id=None,
             date_from=datetime(2026, 2, 1, tzinfo=UTC),
             date_to=datetime(2026, 3, 1, tzinfo=UTC),
             db=db,
@@ -254,6 +260,7 @@ def test_list_leads_with_all_filters():
             status="qualified",
             jurisdiction="California",
             lead_type="incident",
+            plan_id=None,
             date_from=datetime(2026, 2, 1, tzinfo=UTC),
             date_to=datetime(2026, 3, 1, tzinfo=UTC),
             db=db,
@@ -281,6 +288,7 @@ def test_list_leads_pagination_has_more():
             status=None,
             jurisdiction=None,
             lead_type=None,
+            plan_id=None,
             date_from=None,
             date_to=None,
             db=db,
@@ -306,6 +314,7 @@ def test_list_leads_pagination_last_page():
             status=None,
             jurisdiction=None,
             lead_type=None,
+            plan_id=None,
             date_from=None,
             date_to=None,
             db=db,
@@ -316,6 +325,61 @@ def test_list_leads_pagination_last_page():
     assert result.page.total == 15
     assert result.page.has_more is False
     assert result.page.offset == 10
+
+
+def test_list_leads_with_plan_id_filter():
+    """Filters by plan_id when provided."""
+    lead = _make_lead()
+    lead.plan_id = "cal-prospecting"
+    db = _make_list_db([lead], total=1)
+
+    result = run_async(
+        list_leads(
+            limit=50,
+            offset=0,
+            status=None,
+            jurisdiction=None,
+            lead_type=None,
+            plan_id="cal-prospecting",
+            date_from=None,
+            date_to=None,
+            db=db,
+            current_user=make_user(),
+        )
+    )
+
+    assert len(result.items) == 1
+    items_sql = _compiled_sql(db.execute.call_args_list[0][0][0])
+    count_sql = _compiled_sql(db.execute.call_args_list[1][0][0])
+    assert "plan_id" in items_sql
+    assert "plan_id" in count_sql
+
+
+def test_list_leads_without_plan_id_returns_all():
+    """Omitting plan_id returns all leads (backward compatible)."""
+    leads = [_make_lead() for _ in range(3)]
+    db = _make_list_db(leads, total=3)
+
+    result = run_async(
+        list_leads(
+            limit=50,
+            offset=0,
+            status=None,
+            jurisdiction=None,
+            lead_type=None,
+            plan_id=None,
+            date_from=None,
+            date_to=None,
+            db=db,
+            current_user=make_user(),
+        )
+    )
+
+    assert len(result.items) == 3
+    items_sql = _compiled_sql(db.execute.call_args_list[0][0][0])
+    # plan_id appears in SELECT columns but should NOT appear in WHERE clause
+    where_clause = items_sql.split("WHERE")[1] if "WHERE" in items_sql else ""
+    assert "plan_id" not in where_clause
 
 
 # ---------------------------------------------------------------------------
