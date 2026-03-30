@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
 
-from osint_core.api.routes.leads import get_lead, list_leads, update_lead
+from osint_core.api.routes.leads import get_lead, list_leads, router, update_lead
 from osint_core.models.lead import LeadStatusEnum
 from osint_core.schemas.lead import LeadListResponse, LeadUpdateRequest
 from tests.helpers import make_request, make_user, run_async
@@ -586,3 +588,39 @@ def test_update_lead_not_found():
     body = json.loads(result.body)
     assert body["code"] == "not_found"
     assert body["detail"] == "Lead not found"
+
+
+# ---------------------------------------------------------------------------
+# Auth enforcement -- unauthenticated requests when auth_disabled=False
+# ---------------------------------------------------------------------------
+
+
+def _make_auth_app() -> FastAPI:
+    """Build a minimal FastAPI app with the leads router for auth testing."""
+    app = FastAPI()
+    app.include_router(router)
+    return app
+
+
+def test_unauthenticated_list_leads_returns_401():
+    """GET /api/v1/leads without token returns 401 when auth is enabled."""
+    with patch("osint_core.api.middleware.auth.settings") as mock_settings:
+        mock_settings.auth_disabled = False
+        app = _make_auth_app()
+        client = TestClient(app)
+        resp = client.get("/api/v1/leads")
+        assert resp.status_code == 401
+
+
+def test_unauthenticated_update_lead_returns_401():
+    """PATCH /api/v1/leads/{id} without token returns 401 when auth is enabled."""
+    lead_id = uuid.uuid4()
+    with patch("osint_core.api.middleware.auth.settings") as mock_settings:
+        mock_settings.auth_disabled = False
+        app = _make_auth_app()
+        client = TestClient(app)
+        resp = client.patch(
+            f"/api/v1/leads/{lead_id}",
+            json={"status": "reviewing"},
+        )
+        assert resp.status_code == 401
