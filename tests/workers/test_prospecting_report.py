@@ -49,6 +49,8 @@ class TestGenerateReportTask:
 
         assert result["status"] == "skipped"
         assert result["reason"] == "no_new_leads"
+        # PlanStore should not be called when there are no leads (early return)
+        mock_store_cls.return_value.get_active.assert_not_awaited()
 
     @pytest.mark.asyncio()
     @patch("osint_core.workers.prospecting.async_session")
@@ -297,6 +299,56 @@ class TestResolveRecipients:
         }
         result = _resolve_recipients(plan_content)
         assert result == ["a@example.com"]
+
+    def test_expands_env_var_placeholders(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CAL_REPORT_RECIPIENT_1", "alice@example.com")
+        monkeypatch.setenv("CAL_REPORT_RECIPIENT_2", "bob@example.com")
+        plan_content = {
+            "custom": {
+                "resend": {
+                    "recipients": [
+                        "${CAL_REPORT_RECIPIENT_1}",
+                        "${CAL_REPORT_RECIPIENT_2}",
+                    ],
+                },
+            },
+        }
+        result = _resolve_recipients(plan_content)
+        assert result == ["alice@example.com", "bob@example.com"]
+
+    def test_env_var_with_comma_separated_recipients(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("RECIPIENTS", "a@example.com,b@example.com, c@example.com")
+        plan_content = {
+            "custom": {
+                "resend": {
+                    "recipients": ["${RECIPIENTS}"],
+                },
+            },
+        }
+        result = _resolve_recipients(plan_content)
+        assert result == ["a@example.com", "b@example.com", "c@example.com"]
+
+    def test_unset_env_vars_fall_back_to_global(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("CAL_REPORT_RECIPIENT_1", raising=False)
+        monkeypatch.delenv("CAL_REPORT_RECIPIENT_2", raising=False)
+        plan_content = {
+            "custom": {
+                "resend": {
+                    "recipients": [
+                        "${CAL_REPORT_RECIPIENT_1}",
+                        "${CAL_REPORT_RECIPIENT_2}",
+                    ],
+                },
+            },
+        }
+        with patch("osint_core.config.settings") as mock_settings:
+            mock_settings.resend_recipients = "fallback@example.com"
+            result = _resolve_recipients(plan_content)
+        assert result == ["fallback@example.com"]
 
     def test_returns_empty_when_no_plan_and_no_global(self) -> None:
         with patch("osint_core.config.settings") as mock_settings:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
 import time
 import uuid as uuid_mod
 from typing import Any
@@ -134,11 +136,30 @@ def match_leads_task(self: Any, event_ids: list[str], plan_id: str) -> dict[str,
         loop.close()
 
 
+_ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
+
+
+def _expand_env_vars(value: str) -> str:
+    """Expand ``${VAR}`` placeholders from ``os.environ``.
+
+    Returns the expanded string, or an empty string if the referenced
+    environment variable is unset/empty.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        return os.environ.get(match.group(1), "")
+
+    return _ENV_VAR_RE.sub(_replace, value)
+
+
 def _resolve_recipients(plan_content: dict[str, Any] | None) -> list[str]:
     """Return recipients from plan YAML, falling back to global settings.
 
     Checks ``plan_content["custom"]["resend"]["recipients"]`` first.
-    If that list is empty or missing, falls back to the comma-separated
+    Each entry may contain ``${VAR}`` placeholders that are expanded from
+    environment variables.  A single env var value may contain multiple
+    comma-separated addresses.  If the resolved list is empty (e.g. all
+    env vars are unset), falls back to the comma-separated
     ``settings.resend_recipients`` value.
     """
     from osint_core.config import settings
@@ -148,9 +169,18 @@ def _resolve_recipients(plan_content: dict[str, Any] | None) -> list[str]:
         plan_recipients_raw: list[str] = (
             plan_content.get("custom", {}).get("resend", {}).get("recipients", [])
         )
-        plan_recipients = [r.strip() for r in plan_recipients_raw if r and r.strip()]
-        if plan_recipients:
-            return plan_recipients
+        resolved: list[str] = []
+        for raw in plan_recipients_raw:
+            if not raw:
+                continue
+            expanded = _expand_env_vars(raw)
+            # Support comma-separated values within a single env var
+            for part in expanded.split(","):
+                addr = part.strip()
+                if addr:
+                    resolved.append(addr)
+        if resolved:
+            return resolved
 
     # Fallback to global config
     recipients_raw = getattr(settings, "resend_recipients", "") or ""
@@ -174,14 +204,14 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
         generator = ProspectingReportGenerator()
         result = await generator.generate_report(db)
 
+        if result is None:
+            logger.info("prospecting_report_skipped: no new leads")
+            return {"status": "skipped", "reason": "no_new_leads"}
+
         # Load plan content for per-plan recipients
         store = PlanStore()
         plan_version = await store.get_active(db, _CAL_PLAN_ID)
         plan_content = plan_version.content if plan_version else None
-
-    if result is None:
-        logger.info("prospecting_report_skipped: no new leads")
-        return {"status": "skipped", "reason": "no_new_leads"}
 
     # --- PDF generated & archived, lead statuses updated at this point ---
 
