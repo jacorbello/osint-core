@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.config import settings
 from osint_core.models.lead import Lead
+from osint_core.models.report import Report
 from osint_core.services.courtlistener import CourtListenerClient
 from osint_core.services.pdf_export import upload_pdf_to_minio
 
@@ -266,9 +267,20 @@ class ProspectingReportGenerator:
         if not artifact_uri:
             raise RuntimeError("PDF archival to MinIO failed; aborting report cycle")
 
-        # Update lead statuses only after successful archival
+        # Create Report record and flush to populate UUIDMixin-generated id
+        report = Report(
+            artifact_uri=artifact_uri,
+            generated_at=now,
+            lead_count=len(leads),
+            plan_id=_CAL_PLAN_ID,
+        )
+        db.add(report)
+        await db.flush()
+
+        # Update lead statuses and link to report
         for lead in leads:
             lead.reported_at = now
+            lead.report_id = report.id
             if lead.status == "new":
                 lead.status = "reviewing"
         await db.commit()

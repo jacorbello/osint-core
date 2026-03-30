@@ -53,6 +53,16 @@ def _mock_db(leads: list) -> AsyncMock:
     scalars.all.return_value = leads
     result.scalars.return_value = scalars
     db.execute = AsyncMock(return_value=result)
+    db.add = MagicMock()  # session.add() is synchronous
+
+    async def _flush_side_effect() -> None:
+        """Simulate DB flush populating server-side defaults (e.g. UUIDMixin.id)."""
+        for call in db.add.call_args_list:
+            obj = call.args[0]
+            if hasattr(obj, "id") and obj.id is None:
+                obj.id = uuid.uuid4()
+
+    db.flush = AsyncMock(side_effect=_flush_side_effect)
     db.commit = AsyncMock()
     return db
 
@@ -354,6 +364,73 @@ class TestProspectingReportGenerator:
         legal_cites = ctx.get("all_legal_citations") or []
         assert len(legal_cites) == 1
         assert legal_cites[0]["relevance"] == "not independently verified"
+
+
+    @pytest.mark.asyncio()
+    async def test_creates_report_record_with_correct_artifact_uri(self, generator):
+        """generate_report creates a Report record with the correct artifact_uri."""
+        leads = [_make_lead()]
+        db = _mock_db(leads)
+
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://bucket/report.pdf"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            mock_client = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            await generator.generate_report(db)
+
+        # Verify db.add was called with a Report instance (check call_args_list
+        # for resilience if additional objects are ever added in the future)
+        report_adds = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if type(call.args[0]).__name__ == "Report"
+        ]
+        assert len(report_adds) == 1, "Expected exactly one Report to be added"
+        report = report_adds[0]
+        assert report.artifact_uri == "minio://bucket/report.pdf"
+        assert report.lead_count == 1
+        assert report.plan_id == "cal-prospecting"
+
+    @pytest.mark.asyncio()
+    async def test_leads_have_report_id_set(self, generator):
+        """Leads included in the report have report_id set to the Report's ID."""
+        lead1 = _make_lead(status="new")
+        lead2 = _make_lead(status="new", lead_type="policy")
+        db = _mock_db([lead1, lead2])
+
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            mock_client = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            await generator.generate_report(db)
+
+        # Both leads should have report_id set to the same Report ID
+        report_adds = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if type(call.args[0]).__name__ == "Report"
+        ]
+        assert len(report_adds) == 1
+        report = report_adds[0]
+        assert lead1.report_id == report.id
+        assert lead2.report_id == report.id
+        assert lead1.report_id is not None
 
 
 class TestArchivePdf:
