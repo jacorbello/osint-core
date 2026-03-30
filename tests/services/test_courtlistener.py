@@ -213,3 +213,52 @@ class TestCourtListenerClient:
         call_kwargs = mock_client.post.call_args
         sent_text = call_kwargs.kwargs["data"]["text"]
         assert len(sent_text) == 64_000
+
+    @pytest.mark.asyncio()
+    async def test_empty_api_key_sends_unauthenticated_request(self):
+        """When API key is empty string, requests are sent without auth header."""
+        client = CourtListenerClient(api_key="")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = []
+
+        with patch("osint_core.services.courtlistener.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            result = await client.verify_citations("See Tinker v. Des Moines")
+
+        assert result == []
+        call_kwargs = mock_client.post.call_args
+        headers = call_kwargs.kwargs.get("headers", {})
+        assert "Authorization" not in headers
+
+    @pytest.mark.asyncio()
+    async def test_none_api_key_sends_unauthenticated_request(self):
+        """When API key is None, requests are sent without auth header."""
+        with patch("osint_core.services.courtlistener.settings") as mock_settings:
+            mock_settings.courtlistener_api_key = ""
+            client = CourtListenerClient(api_key=None)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = []
+
+        with patch("osint_core.services.courtlistener.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            result = await client.verify_citations("Some legal text")
+
+        assert result == []
+        call_kwargs = mock_client.post.call_args
+        headers = call_kwargs.kwargs.get("headers", {})
+        assert "Authorization" not in headers

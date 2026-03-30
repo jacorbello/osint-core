@@ -268,6 +268,31 @@ def test_build_matcher_config_string_threshold_cast_to_float():
 
 
 @pytest.mark.asyncio
+async def test_match_leads_no_plan_version_uses_defaults():
+    """When no events have a plan_version, matcher uses default config."""
+    event = _make_event()
+    # Remove plan_version so the loop falls through without finding one
+    event.plan_version = None
+
+    ctx, db = _mock_db_context([event])
+
+    with patch("osint_core.workers.prospecting.async_session", return_value=ctx), \
+         patch("osint_core.workers.prospecting.LeadMatcher") as mock_matcher_cls:
+        mock_matcher = MagicMock()
+        mock_matcher.match_event_to_lead = AsyncMock(return_value=None)
+        mock_matcher_cls.return_value = mock_matcher
+
+        result = await _match_leads_async([str(event.id)], "cal-prospecting")
+
+    assert result["status"] == "completed"
+    # Verify matcher was constructed with default config (empty plan_content)
+    config_arg = mock_matcher_cls.call_args[0][0]
+    assert config_arg.plan_id == "cal-prospecting"
+    assert config_arg.confidence_threshold == DEFAULT_CONFIDENCE_THRESHOLD
+    assert config_arg.source_reputation == {}
+
+
+@pytest.mark.asyncio
 async def test_custom_threshold_passed_to_lead_matcher():
     """Plan-specified threshold is forwarded to LeadMatcher via config."""
     event = _make_event(
