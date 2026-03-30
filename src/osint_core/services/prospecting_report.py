@@ -124,7 +124,7 @@ def _render_pdf_html(context: dict[str, Any]) -> str:
         importlib.resources.files("osint_core") / "templates"
     )
     env = Environment(loader=FileSystemLoader(template_dir), autoescape=True)
-    template = env.get_template("prospecting_report.html.j2")
+    template = env.get_template("prospecting_report.html")
     return template.render(**context)
 
 
