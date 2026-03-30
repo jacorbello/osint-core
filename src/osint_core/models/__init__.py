@@ -11,6 +11,7 @@ from osint_core.models.indicator import Indicator
 from osint_core.models.job import Job
 from osint_core.models.lead import Lead, LeadStatusEnum, LeadTypeEnum
 from osint_core.models.plan import PlanVersion
+from osint_core.models.report import Report
 from osint_core.models.user_preference import UserPreference
 from osint_core.models.watch import Watch, watch_events
 
@@ -28,6 +29,7 @@ __all__ = [
     "LeadStatusEnum",
     "LeadTypeEnum",
     "PlanVersion",
+    "Report",
     "UserPreference",
     "Watch",
     "event_artifacts",
