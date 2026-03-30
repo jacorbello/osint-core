@@ -254,8 +254,9 @@ class LeadMatcher:
             return None
 
         source_citations = _extract_source_citations(event)
+        normalized_sources = _normalize_source_citations(source_citations)
         citations_payload: dict[str, Any] | None = (
-            {"sources": source_citations} if source_citations else None
+            {"sources": normalized_sources} if normalized_sources else None
         )
 
         now = datetime.now(UTC)
@@ -320,14 +321,14 @@ class LeadMatcher:
         if merged != sorted(existing_basis):
             set_committed_value(lead, "constitutional_basis", merged)
 
-        # Merge source citations
+        # Merge source citations (preserve any existing non-sources keys)
         new_citations = _extract_source_citations(event)
         if new_citations:
-            existing_sources = (lead.citations or {}).get("sources", [])
+            existing_citations = dict(lead.citations or {})
+            existing_sources = existing_citations.get("sources", [])
             merged_sources = _merge_citations(existing_sources, new_citations)
-            set_committed_value(
-                lead, "citations", {"sources": merged_sources},
-            )
+            existing_citations["sources"] = _normalize_source_citations(merged_sources)
+            set_committed_value(lead, "citations", existing_citations)
 
         lead.last_updated_at = datetime.now(UTC)
         return lead
@@ -386,13 +387,16 @@ def _extract_source_citations(event: Event) -> list[dict[str, Any]]:
         url = metadata.get("url")
         title = metadata.get("title") or "University policy document"
     else:
-        # Generic fallback: use raw_excerpt as URL if it looks like one
+        # Generic fallback: use metadata URL if present
         url = metadata.get("url") or metadata.get("tweet_url")
         title = event.title or "Source document"
 
-    # Fallback to raw_excerpt (populated by ingest worker from item.url)
+    # Fallback to raw_excerpt (populated by ingest worker from item.url).
+    # Only use it as URL if it looks like one (simple http/https check).
     if not url and event.raw_excerpt:
-        url = event.raw_excerpt
+        candidate = event.raw_excerpt.strip()
+        if candidate.startswith(("http://", "https://")):
+            url = candidate
 
     if url:
         citations.append({
@@ -405,17 +409,70 @@ def _extract_source_citations(event: Event) -> list[dict[str, Any]]:
 
 
 def _merge_citations(
-    existing: list[dict[str, Any]],
+    existing: list[dict[str, Any] | str],
     new: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Merge new citations into existing list, deduplicating by URL."""
-    seen_urls: set[str] = {c["url"] for c in existing if "url" in c}
-    merged = list(existing)
+) -> list[dict[str, Any] | str]:
+    """Merge new citations into existing list, deduplicating by URL.
+
+    Existing entries may be dicts (with a ``url`` key) or normalized strings
+    (``"Title (url)"`` or bare URLs).  New entries are always dicts.  The
+    deduplication extracts URLs from both formats to prevent duplicates.
+    """
+    seen_urls: set[str] = set()
+    for c in existing:
+        if isinstance(c, dict) and "url" in c:
+            seen_urls.add(c["url"])
+        elif isinstance(c, str):
+            # Normalized strings may be "Title (url)" or bare URLs.
+            _extract_url_from_string(c, seen_urls)
+    merged: list[dict[str, Any] | str] = list(existing)
     for citation in new:
         if citation.get("url") and citation["url"] not in seen_urls:
             seen_urls.add(citation["url"])
             merged.append(citation)
     return merged
+
+
+def _extract_url_from_string(value: str, seen: set[str]) -> None:
+    """Extract a URL from a normalized citation string into the seen set."""
+    # Check for "Title (url)" pattern
+    if value.endswith(")") and " (" in value:
+        url_part = value.rsplit(" (", 1)[-1][:-1]
+        if url_part.startswith(("http://", "https://")):
+            seen.add(url_part)
+            return
+    # Bare URL
+    if value.startswith(("http://", "https://")):
+        seen.add(value)
+        return
+    # Unrecognised format -- add the whole string so it won't duplicate itself
+    seen.add(value)
+
+
+def _normalize_source_citations(
+    citations: list[dict[str, Any] | str],
+) -> list[str]:
+    """Normalize citation dicts to strings for downstream consumers.
+
+    The report template and generator treat ``citations["sources"]`` as a
+    ``list[str]``, rendering each item directly.  This helper converts the
+    internal dict representation (with ``url``, ``title``, ``source_type``
+    keys) into human-readable strings.
+    """
+    normalized: list[str] = []
+    for citation in citations:
+        if isinstance(citation, dict):
+            url = citation.get("url")
+            title = citation.get("title")
+            if title and url:
+                normalized.append(f"{title} ({url})")
+            elif url:
+                normalized.append(str(url))
+            else:
+                normalized.append(str(citation))
+        else:
+            normalized.append(str(citation))
+    return normalized
 
 
 async def _collect_source_ids(
