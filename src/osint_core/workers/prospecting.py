@@ -134,8 +134,13 @@ def match_leads_task(self: Any, event_ids: list[str], plan_id: str) -> dict[str,
         loop.close()
 
 
-async def _generate_report_async() -> dict[str, Any]:
-    """Generate a prospecting report and send it via email."""
+async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
+    """Generate a prospecting report and send it via email.
+
+    PDF generation and archival are separated from email delivery so that
+    a Resend failure does not discard the already-archived PDF or undo
+    the lead-status updates performed inside ``generate_report``.
+    """
     from osint_core.config import settings
     from osint_core.services.prospecting_report import ProspectingReportGenerator
     from osint_core.services.resend_notifier import ResendNotifier
@@ -149,6 +154,8 @@ async def _generate_report_async() -> dict[str, Any]:
     if result is None:
         logger.info("prospecting_report_skipped: no new leads")
         return {"status": "skipped", "reason": "no_new_leads"}
+
+    # --- PDF generated & archived, lead statuses updated at this point ---
 
     recipients_raw = getattr(settings, "resend_recipients", "") or ""
     recipients = [r.strip() for r in recipients_raw.split(",") if r.strip()]
@@ -164,13 +171,29 @@ async def _generate_report_async() -> dict[str, Any]:
             "lead_count": result.lead_count,
         }
 
-    notifier = ResendNotifier()
-    executive_summary = f"Report generated with {result.lead_count} leads on {result.report_date}."
-    sent = await notifier.send_report(
-        pdf_bytes=result.pdf_bytes,
-        executive_summary=executive_summary,
-        recipients=recipients,
-    )
+    # Attempt email delivery separately so PDF/lead work is never lost
+    try:
+        notifier = ResendNotifier()
+        executive_summary = (
+            f"Report generated with {result.lead_count} leads "
+            f"on {result.report_date}."
+        )
+        sent = await notifier.send_report(
+            pdf_bytes=result.pdf_bytes,
+            executive_summary=executive_summary,
+            recipients=recipients,
+        )
+    except Exception as email_exc:
+        logger.error(
+            "report_delivery_failed: plan_id=%s error=%s attempt=%d "
+            "lead_count=%d artifact_uri=%s",
+            _CAL_PLAN_ID,
+            str(email_exc),
+            attempt + 1,
+            result.lead_count,
+            result.artifact_uri,
+        )
+        raise
 
     elapsed = time.monotonic() - start
     logger.info(
@@ -189,16 +212,19 @@ async def _generate_report_async() -> dict[str, Any]:
     }
 
 
-@celery_app.task(bind=True, name="osint.generate_prospecting_report", max_retries=1)  # type: ignore[untyped-decorator]
+@celery_app.task(bind=True, name="osint.generate_prospecting_report", max_retries=3)  # type: ignore[untyped-decorator]
 def generate_prospecting_report_task(self: Any) -> dict[str, Any]:
     """Generate a prospecting report and email it via Resend.
 
     Scheduled via Celery beat at 8 AM and 3 PM America/Chicago time.
     Gracefully skips if no new leads exist or no recipients are configured.
+    Retries up to 3 times with exponential backoff (60s, 120s, 240s, capped at 300s).
     """
     loop = asyncio.new_event_loop()
     try:
-        return loop.run_until_complete(_generate_report_async())
+        return loop.run_until_complete(
+            _generate_report_async(attempt=self.request.retries),
+        )
     except Exception as exc:
         logger.exception("Prospecting report generation failed")
         raise self.retry(

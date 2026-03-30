@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from osint_core.services.lead_matcher import DEFAULT_CONFIDENCE_THRESHOLD
-from osint_core.workers.prospecting import _build_matcher_config, _match_leads_async
+from osint_core.workers.prospecting import (
+    _build_matcher_config,
+    _generate_report_async,
+    _match_leads_async,
+)
 
 
 def _make_event(
@@ -315,3 +319,155 @@ async def test_custom_threshold_passed_to_lead_matcher():
     # Verify LeadMatcher was constructed with the custom threshold
     config_arg = mock_matcher_cls.call_args[0][0]
     assert config_arg.confidence_threshold == 0.8
+
+
+# ---------------------------------------------------------------------------
+# Report generation / delivery tests
+# ---------------------------------------------------------------------------
+
+
+def _make_report_result(*, lead_count: int = 3) -> MagicMock:
+    """Create a mock ReportResult returned by ProspectingReportGenerator."""
+    result = MagicMock()
+    result.pdf_bytes = b"%PDF-fake"
+    result.lead_count = lead_count
+    result.artifact_uri = "s3://osint-reports/prospecting/2026/03/30/report-080000.pdf"
+    result.report_date = "March 30, 2026 — 08:00 AM CDT"
+    return result
+
+
+@pytest.mark.asyncio
+async def test_resend_failure_still_archives_pdf():
+    """If PDF generation succeeds but email fails, PDF is still archived and
+    lead statuses are updated (done inside generate_report), while the email
+    error propagates so the task can retry."""
+    report_result = _make_report_result()
+
+    mock_generator = MagicMock()
+    mock_generator.generate_report = AsyncMock(return_value=report_result)
+
+    mock_notifier = MagicMock()
+    mock_notifier.send_report = AsyncMock(side_effect=ConnectionError("Resend down"))
+
+    mock_settings = MagicMock()
+    mock_settings.resend_recipients = "ops@example.com"
+
+    mock_session_ctx = AsyncMock()
+    mock_db = AsyncMock()
+    mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    with patch(
+        "osint_core.workers.prospecting.async_session",
+        return_value=mock_session_ctx,
+    ), patch(
+        "osint_core.services.prospecting_report.ProspectingReportGenerator",
+        return_value=mock_generator,
+    ), patch(
+        "osint_core.services.resend_notifier.ResendNotifier",
+        return_value=mock_notifier,
+    ), patch(
+        "osint_core.config.settings", mock_settings,
+    ), patch(
+        "osint_core.workers.prospecting.logger",
+    ) as mock_logger, pytest.raises(ConnectionError, match="Resend down"):
+        await _generate_report_async(0)
+
+    # generate_report was called (PDF generated, archived, leads updated)
+    mock_generator.generate_report.assert_awaited_once_with(mock_db)
+
+    # Email delivery was attempted
+    mock_notifier.send_report.assert_awaited_once()
+
+    # Structured alert log was emitted
+    mock_logger.error.assert_called_once()
+    log_msg = mock_logger.error.call_args[0][0] % mock_logger.error.call_args[0][1:]
+    assert "report_delivery_failed" in log_msg
+    assert "plan_id=cal-prospecting" in log_msg
+    assert "attempt=1" in log_msg
+    assert "Resend down" in log_msg
+
+
+@pytest.mark.asyncio
+async def test_report_delivery_failed_log_includes_attempt_count():
+    """The report_delivery_failed log event includes the correct attempt number."""
+    report_result = _make_report_result()
+
+    mock_generator = MagicMock()
+    mock_generator.generate_report = AsyncMock(return_value=report_result)
+
+    mock_notifier = MagicMock()
+    mock_notifier.send_report = AsyncMock(side_effect=TimeoutError("timeout"))
+
+    mock_settings = MagicMock()
+    mock_settings.resend_recipients = "ops@example.com"
+
+    mock_session_ctx = AsyncMock()
+    mock_db = AsyncMock()
+    mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    with patch(
+        "osint_core.workers.prospecting.async_session",
+        return_value=mock_session_ctx,
+    ), patch(
+        "osint_core.services.prospecting_report.ProspectingReportGenerator",
+        return_value=mock_generator,
+    ), patch(
+        "osint_core.services.resend_notifier.ResendNotifier",
+        return_value=mock_notifier,
+    ), patch(
+        "osint_core.config.settings", mock_settings,
+    ), patch(
+        "osint_core.workers.prospecting.logger",
+    ) as mock_logger, pytest.raises(TimeoutError):
+        await _generate_report_async(2)
+
+    log_msg = mock_logger.error.call_args[0][0] % mock_logger.error.call_args[0][1:]
+    assert "attempt=3" in log_msg
+
+
+@pytest.mark.asyncio
+async def test_successful_report_delivery():
+    """Happy path: PDF generated, archived, email sent successfully."""
+    report_result = _make_report_result(lead_count=5)
+
+    mock_generator = MagicMock()
+    mock_generator.generate_report = AsyncMock(return_value=report_result)
+
+    mock_notifier = MagicMock()
+    mock_notifier.send_report = AsyncMock(return_value=True)
+
+    mock_settings = MagicMock()
+    mock_settings.resend_recipients = "ops@example.com,lead@example.com"
+
+    mock_session_ctx = AsyncMock()
+    mock_db = AsyncMock()
+    mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    with patch(
+        "osint_core.workers.prospecting.async_session",
+        return_value=mock_session_ctx,
+    ), patch(
+        "osint_core.services.prospecting_report.ProspectingReportGenerator",
+        return_value=mock_generator,
+    ), patch(
+        "osint_core.services.resend_notifier.ResendNotifier",
+        return_value=mock_notifier,
+    ), patch(
+        "osint_core.config.settings", mock_settings,
+    ):
+        result = await _generate_report_async()
+
+    assert result["status"] == "completed"
+    assert result["lead_count"] == 5
+    assert result["email_sent"] is True
+    assert result["artifact_uri"] == report_result.artifact_uri
+
+
+def test_generate_report_task_max_retries():
+    """Task is configured with max_retries=3."""
+    from osint_core.workers.prospecting import generate_prospecting_report_task
+
+    assert generate_prospecting_report_task.max_retries == 3
