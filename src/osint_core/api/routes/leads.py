@@ -53,6 +53,7 @@ async def list_leads(
     status: str | None = Query(default=None),
     jurisdiction: str | None = Query(default=None),
     lead_type: str | None = Query(default=None),
+    plan_id: str | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
@@ -71,6 +72,9 @@ async def list_leads(
     if lead_type is not None:
         stmt = stmt.where(Lead.lead_type == lead_type)
         count_stmt = count_stmt.where(Lead.lead_type == lead_type)
+    if plan_id is not None:
+        stmt = stmt.where(Lead.plan_id == plan_id)
+        count_stmt = count_stmt.where(Lead.plan_id == plan_id)
     if date_from is not None:
         stmt = stmt.where(Lead.first_surfaced_at >= date_from)
         count_stmt = count_stmt.where(Lead.first_surfaced_at >= date_from)
