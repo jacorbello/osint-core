@@ -5,7 +5,7 @@ This document describes how to verify that the OSINT-Core ingest pipeline is wor
 ## Prerequisites
 
 - Docker Compose stack running (`docker compose -f docker-compose.dev.yaml up -d`)
-- An active plan synced to the database (`POST /api/v1/plan/sync`)
+- An active plan synced to the database (`POST /api/v1/plans:sync-from-disk`)
 - `curl` and `jq` installed on the host machine
 
 ## Pipeline Overview
@@ -31,7 +31,7 @@ Run the verification script from the project root:
 ./scripts/verify_ingest.sh [SOURCE_ID] [PLAN_ID]
 ```
 
-Defaults: `SOURCE_ID=cisa_kev`, `PLAN_ID=libertycenter-osint`.
+Defaults: `SOURCE_ID=cisa_kev`, `PLAN_ID=libertycenter-osint` (the example plan). For production-like verification, use `cyber-threat-intel` as the plan ID.
 
 ### Environment Variables
 
@@ -48,9 +48,9 @@ Defaults: `SOURCE_ID=cisa_kev`, `PLAN_ID=libertycenter-osint`.
 | 0 | API health | `/healthz` returns 200 |
 | 1 | Dispatch ingest | `POST /api/v1/ingest/source/{id}/run` returns `status: dispatched` |
 | 2 | Job completion | Job status = `succeeded` or `partial_success` |
-| 3 | Events in DB | `GET /api/v1/events?source_id={id}` returns `total > 0` |
-| 4 | Indicators extracted | `GET /api/v1/indicators` returns `total > 0` |
-| 5 | Job output | Job `output.ingested > 0` |
+| 3 | Events in DB | `GET /api/v1/events?source_id={id}` returns `page.total > 0` |
+| 4 | Indicators extracted | `GET /api/v1/indicators` returns items matching source |
+| 5 | Job output | Job `result.ingested > 0` |
 
 ## Manual Verification Steps
 
@@ -71,17 +71,17 @@ curl -s http://localhost:8000/healthz | jq .
 
 ```bash
 # Sync plan files from disk into the database
-curl -s -X POST http://localhost:8000/api/v1/plan/sync | jq .
+curl -s -X POST http://localhost:8000/api/v1/plans:sync-from-disk | jq .
 
 # Verify an active plan exists
-curl -s http://localhost:8000/api/v1/plan/active?plan_id=libertycenter-osint | jq .
+curl -s http://localhost:8000/api/v1/plans/cyber-threat-intel/active-version | jq .
 ```
 
 ### 3. Trigger Manual Ingest
 
 ```bash
 curl -s -X POST \
-  "http://localhost:8000/api/v1/ingest/source/cisa_kev/run?plan_id=libertycenter-osint" \
+  "http://localhost:8000/api/v1/ingest/source/cisa_kev/run?plan_id=cyber-threat-intel" \
   | jq .
 ```
 
@@ -91,7 +91,7 @@ Expected response:
 {
   "task_id": "abc123-...",
   "source_id": "cisa_kev",
-  "plan_id": "libertycenter-osint",
+  "plan_id": "cyber-threat-intel",
   "status": "dispatched"
 }
 ```
@@ -101,16 +101,16 @@ Expected response:
 Poll the jobs endpoint until the job completes:
 
 ```bash
-curl -s "http://localhost:8000/api/v1/jobs?limit=5" | jq '.items[] | select(.input_params.source_id == "cisa_kev") | {id, status, output, error}'
+curl -s "http://localhost:8000/api/v1/jobs?limit=5" | jq '.items[] | select(.input.source_id == "cisa_kev") | {id, status, result, error}'
 ```
 
-Expected: `status` should be `succeeded`. The `output` field contains counts:
+Expected: `status` should be `succeeded`. The `result` field contains counts:
 
 ```json
 {
   "id": "...",
   "status": "succeeded",
-  "output": {
+  "result": {
     "ingested": 25,
     "skipped": 3,
     "errors": 0
@@ -122,18 +122,18 @@ Expected: `status` should be `succeeded`. The `output` field contains counts:
 ### 5. Verify Events
 
 ```bash
-curl -s "http://localhost:8000/api/v1/events?source_id=cisa_kev&limit=5" | jq '{total, sample: .items[0].title}'
+curl -s "http://localhost:8000/api/v1/events?source_id=cisa_kev&limit=5" | jq '{total: .page.total, sample: .items[0].title}'
 ```
 
-Expected: `total > 0` with meaningful event titles.
+Expected: `page.total > 0` with meaningful event titles.
 
 ### 6. Verify Indicators
 
 ```bash
-curl -s "http://localhost:8000/api/v1/indicators?limit=10" | jq '{total, types: [.items[].indicator_type] | unique}'
+curl -s "http://localhost:8000/api/v1/indicators?limit=10" | jq '{total: .page.total, types: [.items[].indicator_type] | unique}'
 ```
 
-Expected: `total > 0` with indicator types such as `cve`, `ip`, `url`, `domain`, or `hash`.
+Expected: `page.total > 0` with indicator types such as `cve`, `ip`, `url`, `domain`, or `hash`.
 
 ## Troubleshooting
 
@@ -150,7 +150,7 @@ curl -s "http://localhost:8000/api/v1/jobs/{job_id}" | jq '.error'
 ```
 
 Common causes:
-- No active plan version in the database — run `POST /api/v1/plan/sync` then `POST /api/v1/plan/activate/{version_id}`
+- No active plan version in the database — run `POST /api/v1/plans:sync-from-disk` (auto-activates changed versions)
 - External source is unreachable — check network and source URL
 - Connector error — check worker logs: `docker compose -f docker-compose.dev.yaml logs worker`
 
@@ -179,14 +179,14 @@ The script works with any configured source. Examples:
 
 ```bash
 # CISA Known Exploited Vulnerabilities
-./scripts/verify_ingest.sh cisa_kev libertycenter-osint
+./scripts/verify_ingest.sh cisa_kev cyber-threat-intel
 
 # URLhaus malware URLs
-./scripts/verify_ingest.sh urlhaus_recent libertycenter-osint
+./scripts/verify_ingest.sh urlhaus_recent cyber-threat-intel
 
 # ThreatFox IOC feed
-./scripts/verify_ingest.sh threatfox_iocs libertycenter-osint
+./scripts/verify_ingest.sh threatfox_iocs cyber-threat-intel
 
 # NVD CVE feed
-./scripts/verify_ingest.sh nvd_feeds_recent libertycenter-osint
+./scripts/verify_ingest.sh nvd_feeds_recent cyber-threat-intel
 ```

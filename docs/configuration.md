@@ -51,14 +51,16 @@ This page documents the `OSINT_` variables that are loaded by `src/osint_core/co
 | `OSINT_MINIO_SECRET_KEY` | Yes* | `""` | MinIO secret key. Required for object storage operations. |
 | `OSINT_MINIO_SECURE` | No | `false` | Use HTTPS for MinIO connections. |
 
-### Gotify & Notifications (Push Notifications)
+### Gotify (Push Notifications)
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `OSINT_GOTIFY_URL` | No | `http://gotify/message` | Gotify message endpoint URL. |
 | `OSINT_GOTIFY_TOKEN` | Yes* | `""` | Gotify application token. Required for push notifications. |
-| `OSINT_NOTIFY_THRESHOLD` | No | `medium` | Minimum event severity required to send notifications (for example: `low`, `medium`, `high`). |
-| `OSINT_SLACK_WEBHOOK_URL` | No | `""` | Slack Incoming Webhook URL. When set, enables Slack notifications. |
+
+> Additional notification variables (`OSINT_NOTIFY_THRESHOLD`, `OSINT_SLACK_WEBHOOK_URL`) are read
+> directly by `src/osint_core/workers/notify.py` via `os.environ` and are not part of the Settings class.
+> Refer to that module for details.
 
 ### SMTP (Email Notifications)
 
@@ -154,4 +156,4 @@ The following variables are examples of secrets and should be managed through In
 - `OSINT_RESEND_API_KEY`
 - `OSINT_SHODAN_API_KEY`
 - `OSINT_TELEGRAM_BOT_TOKEN`
-- `OSINT_SLACK_WEBHOOK_URL`
+- `OSINT_SLACK_WEBHOOK_URL` (read by `notify.py`, not in Settings)

@@ -39,7 +39,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: migrate
-          image: harbor.corbello.io/osint/osint-core-api:latest  # overridden by kustomize
+          image: harbor.corbello.io/osint/osint-core:latest  # overridden by kustomize
           command: ["alembic", "upgrade", "head"]
           resources:
             requests:
