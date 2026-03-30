@@ -357,6 +357,9 @@ async def test_resend_failure_still_archives_pdf():
     mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_db)
     mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
 
+    mock_store = MagicMock()
+    mock_store.get_active = AsyncMock(return_value=None)
+
     with patch(
         "osint_core.workers.prospecting.async_session",
         return_value=mock_session_ctx,
@@ -366,6 +369,9 @@ async def test_resend_failure_still_archives_pdf():
     ), patch(
         "osint_core.services.resend_notifier.ResendNotifier",
         return_value=mock_notifier,
+    ), patch(
+        "osint_core.services.plan_store.PlanStore",
+        return_value=mock_store,
     ), patch(
         "osint_core.config.settings", mock_settings,
     ), patch(
@@ -407,6 +413,9 @@ async def test_report_delivery_failed_log_includes_attempt_count():
     mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_db)
     mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
 
+    mock_store = MagicMock()
+    mock_store.get_active = AsyncMock(return_value=None)
+
     with patch(
         "osint_core.workers.prospecting.async_session",
         return_value=mock_session_ctx,
@@ -416,6 +425,9 @@ async def test_report_delivery_failed_log_includes_attempt_count():
     ), patch(
         "osint_core.services.resend_notifier.ResendNotifier",
         return_value=mock_notifier,
+    ), patch(
+        "osint_core.services.plan_store.PlanStore",
+        return_value=mock_store,
     ), patch(
         "osint_core.config.settings", mock_settings,
     ), patch(
@@ -446,6 +458,9 @@ async def test_successful_report_delivery():
     mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_db)
     mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
 
+    mock_store = MagicMock()
+    mock_store.get_active = AsyncMock(return_value=None)
+
     with patch(
         "osint_core.workers.prospecting.async_session",
         return_value=mock_session_ctx,
@@ -455,6 +470,9 @@ async def test_successful_report_delivery():
     ), patch(
         "osint_core.services.resend_notifier.ResendNotifier",
         return_value=mock_notifier,
+    ), patch(
+        "osint_core.services.plan_store.PlanStore",
+        return_value=mock_store,
     ), patch(
         "osint_core.config.settings", mock_settings,
     ):
