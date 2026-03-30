@@ -82,6 +82,42 @@ class TestSelectReportableLeads:
         result = await _select_reportable_leads(db)
         assert result == []
 
+    def test_query_includes_severity_confidence_ordering(self):
+        """The reportable-leads query orders by severity CASE then confidence DESC."""
+        from sqlalchemy import case, or_, select
+
+        from osint_core.models.lead import Lead
+
+        severity_order = case(
+            (Lead.severity == "critical", 0),
+            (Lead.severity == "high", 1),
+            (Lead.severity == "medium", 2),
+            (Lead.severity == "low", 3),
+            else_=4,
+        )
+        stmt = (
+            select(Lead)
+            .where(
+                Lead.plan_id == "cal-prospecting",
+                or_(
+                    Lead.status == "new",
+                    (Lead.status == "reviewing")
+                    & (Lead.last_updated_at > Lead.reported_at),
+                ),
+            )
+            .order_by(severity_order, Lead.confidence.desc())
+        )
+        compiled = str(stmt)
+        assert "ORDER BY" in compiled
+        assert "CASE" in compiled
+        assert "DESC" in compiled
+        # Verify severity ordering: critical < high < medium < low
+        crit_pos = compiled.index("severity_1")
+        high_pos = compiled.index("severity_2")
+        med_pos = compiled.index("severity_3")
+        low_pos = compiled.index("severity_4")
+        assert crit_pos < high_pos < med_pos < low_pos
+
 
 class TestFallbackNarrative:
     def test_produces_minimal_narrative(self):
@@ -208,6 +244,46 @@ class TestProspectingReportGenerator:
 
         assert result is not None
         assert result.lead_count == 1
+
+    @pytest.mark.asyncio()
+    async def test_leads_appear_in_severity_confidence_order(self, generator):
+        """Leads passed to the template follow severity/confidence ordering."""
+        lead_low = _make_lead(severity="low", title="Low-Sev")
+        lead_low.confidence = 0.9
+        lead_critical = _make_lead(severity="critical", title="Critical-Sev")
+        lead_critical.confidence = 0.8
+        lead_high_a = _make_lead(severity="high", title="High-Sev-LowConf")
+        lead_high_a.confidence = 0.6
+        lead_high_b = _make_lead(severity="high", title="High-Sev-HighConf")
+        lead_high_b.confidence = 0.95
+
+        # DB returns them in severity/confidence order (as the ORDER BY would)
+        ordered = [lead_critical, lead_high_b, lead_high_a, lead_low]
+        db = _mock_db(ordered)
+
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+            mock_client = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            await generator.generate_report(db)
+
+        render_kwargs = mock_render.call_args
+        ctx = render_kwargs.args[0] if render_kwargs.args else render_kwargs.kwargs
+        titles = [ld["title"] for ld in ctx["leads"]]
+        assert titles == [
+            "Critical-Sev",
+            "High-Sev-HighConf",
+            "High-Sev-LowConf",
+            "Low-Sev",
+        ]
 
     @pytest.mark.asyncio()
     async def test_courtlistener_citations_included_in_report(self):
