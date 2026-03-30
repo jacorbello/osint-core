@@ -69,8 +69,40 @@ def upgrade() -> None:
             schema="osint",
         )
 
+    if _table_exists(bind, "osint", "leads"):
+        op.create_index(
+            "ix_leads_report_id",
+            "leads",
+            ["report_id"],
+            schema="osint",
+        )
+        op.create_foreign_key(
+            "fk_leads_report_id_reports",
+            "leads",
+            "reports",
+            ["report_id"],
+            ["id"],
+            source_schema="osint",
+            referent_schema="osint",
+        )
+
 
 def downgrade() -> None:
+    bind = None if context.is_offline_mode() else op.get_bind()
+
+    if _table_exists(bind, "osint", "leads"):
+        op.drop_constraint(
+            "fk_leads_report_id_reports",
+            "leads",
+            schema="osint",
+            type_="foreignkey",
+        )
+        op.drop_index(
+            "ix_leads_report_id",
+            table_name="leads",
+            schema="osint",
+        )
+
     op.drop_index(
         "ix_reports_generated_at", table_name="reports", schema="osint"
     )

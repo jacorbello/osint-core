@@ -53,6 +53,8 @@ def _mock_db(leads: list) -> AsyncMock:
     scalars.all.return_value = leads
     result.scalars.return_value = scalars
     db.execute = AsyncMock(return_value=result)
+    db.add = MagicMock()  # session.add() is synchronous
+    db.flush = AsyncMock()
     db.commit = AsyncMock()
     return db
 
@@ -376,15 +378,18 @@ class TestProspectingReportGenerator:
 
             await generator.generate_report(db)
 
-        # Verify db.add was called with a Report instance
-        db.add.assert_called_once()
-        report = db.add.call_args[0][0]
-        from osint_core.models.report import Report
-        assert isinstance(report, Report)
+        # Verify db.add was called with a Report instance (check call_args_list
+        # for resilience if additional objects are ever added in the future)
+        report_adds = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if type(call.args[0]).__name__ == "Report"
+        ]
+        assert len(report_adds) == 1, "Expected exactly one Report to be added"
+        report = report_adds[0]
         assert report.artifact_uri == "minio://bucket/report.pdf"
         assert report.lead_count == 1
         assert report.plan_id == "cal-prospecting"
-        assert report.id is not None
 
     @pytest.mark.asyncio()
     async def test_leads_have_report_id_set(self, generator):
@@ -408,7 +413,13 @@ class TestProspectingReportGenerator:
             await generator.generate_report(db)
 
         # Both leads should have report_id set to the same Report ID
-        report = db.add.call_args[0][0]
+        report_adds = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if type(call.args[0]).__name__ == "Report"
+        ]
+        assert len(report_adds) == 1
+        report = report_adds[0]
         assert lead1.report_id == report.id
         assert lead2.report_id == report.id
         assert lead1.report_id is not None

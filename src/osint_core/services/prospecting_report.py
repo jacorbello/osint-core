@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import importlib.resources
 import json
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -268,16 +267,15 @@ class ProspectingReportGenerator:
         if not artifact_uri:
             raise RuntimeError("PDF archival to MinIO failed; aborting report cycle")
 
-        # Create Report record
-        report_id = uuid.uuid4()
+        # Create Report record and flush to populate UUIDMixin-generated id
         report = Report(
-            id=report_id,
             artifact_uri=artifact_uri,
             generated_at=now,
             lead_count=len(leads),
             plan_id=_CAL_PLAN_ID,
         )
         db.add(report)
+        await db.flush()
 
         # Update lead statuses and link to report
         for lead in leads:
