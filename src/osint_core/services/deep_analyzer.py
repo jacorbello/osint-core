@@ -274,7 +274,8 @@ class DeepAnalyzer:
                 response_format={"type": "json_object"},
                 json_schema=_INCIDENT_ANALYSIS_SCHEMA,
             )
-            return json.loads(response)
+            result: dict[str, Any] = json.loads(response)
+            return result
         except Exception as exc:
             logger.warning(
                 "deep_analysis_llm_failed",
@@ -348,7 +349,7 @@ class DeepAnalyzer:
     @staticmethod
     def _get_document_type(metadata: dict[str, Any], minio_uri: str) -> str:
         """Determine document type from metadata or URI."""
-        doc_type = metadata.get("document_type", "")
+        doc_type: str = metadata.get("document_type", "")
         if doc_type in ("pdf", "html"):
             return doc_type
         if minio_uri.lower().endswith(".pdf"):

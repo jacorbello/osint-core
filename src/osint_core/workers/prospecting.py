@@ -79,7 +79,8 @@ def _is_deep_analysis_enabled(plan_content: dict[str, Any] | None = None) -> boo
 
 def _get_precedent_map(plan_content: dict[str, Any]) -> dict[str, dict[str, list[dict[str, str]]]]:
     """Extract precedent map from plan content."""
-    return plan_content.get("custom", {}).get("precedent_map", {})
+    custom: dict[str, Any] = plan_content.get("custom", {})
+    return custom.get("precedent_map", {})
 
 
 async def _match_leads_async(event_ids: list[str], plan_id: str) -> dict[str, Any]:
@@ -234,7 +235,10 @@ async def _analyze_leads_async(plan_id: str) -> dict[str, Any]:
             try:
                 result = await analyzer.analyze_lead(lead, event)
             except Exception as exc:
-                logger.warning("deep_analysis_failed", lead_id=str(lead.id), error=str(exc))
+                logger.warning(
+                    "deep_analysis_failed lead_id=%s error=%s",
+                    str(lead.id), str(exc),
+                )
                 lead.analysis_status = "failed"
                 failed += 1
                 continue
