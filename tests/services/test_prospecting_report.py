@@ -228,6 +228,30 @@ class TestProspectingReportGenerator:
                 await generator.generate_report(db)
 
     @pytest.mark.asyncio()
+    async def test_fallback_on_non_json_response_body(self, generator):
+        """When vLLM returns a non-JSON body (e.g. HTML error), fallback is used."""
+        leads = [_make_lead()]
+        db = _mock_db(leads)
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.side_effect = json.JSONDecodeError("Expecting value", "", 0)
+
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            result = await generator.generate_report(db)
+
+        assert result is not None
+        assert result.lead_count == 1
+
+    @pytest.mark.asyncio()
     async def test_fallback_on_vllm_failure(self, generator):
         leads = [_make_lead()]
         db = _mock_db(leads)
@@ -632,3 +656,20 @@ class TestExtractJson:
     def test_handles_nested_braces(self):
         data = {"summary": "test {nested} braces", "key": "value"}
         assert _extract_json(json.dumps(data)) == data
+
+    def test_multiple_json_blocks_returns_first_valid(self):
+        """When prose contains multiple brace blocks, the first valid dict wins."""
+        content = (
+            'Some text with {invalid json} in the middle.\n'
+            f'Then the real payload: {json.dumps(self._VALID)}\n'
+            'And more text.'
+        )
+        assert _extract_json(content) == self._VALID
+
+    def test_skips_non_dict_brace_block(self):
+        """Brace blocks that aren't dicts are skipped."""
+        content = (
+            'Not JSON: {just some braces}\n'
+            f'{json.dumps(self._VALID)}'
+        )
+        assert _extract_json(content) == self._VALID

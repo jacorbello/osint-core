@@ -79,7 +79,7 @@ async def _select_reportable_leads(db: AsyncSession) -> list[Lead]:
     return list(result.scalars().all())
 
 
-async def _generate_narrative(lead: Lead) -> dict[str, str]:
+async def _generate_narrative(lead: Lead) -> dict[str, Any]:
     """Generate narrative sections for a lead via vLLM."""
     lead_data = {
         "title": lead.title,
@@ -126,7 +126,7 @@ async def _generate_narrative(lead: Lead) -> dict[str, str]:
             )
             return _fallback_narrative(lead)
         return result
-    except (KeyError, IndexError) as exc:
+    except (json.JSONDecodeError, ValueError, KeyError, IndexError) as exc:
         logger.warning("narrative_parse_failed", lead_id=str(lead.id), error=str(exc))
         return _fallback_narrative(lead)
 
@@ -165,17 +165,48 @@ def _extract_json(content: str) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             pass
 
-    # 3. Find first { ... } block in prose
-    brace_start = text.find("{")
-    if brace_start != -1:
-        brace_end = text.rfind("}")
-        if brace_end > brace_start:
+    # 3. Scan for balanced { ... } blocks in prose and try each as JSON
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escape = False
+        end = None
+
+        for i in range(start, len(text)):
+            ch = text[i]
+
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+
+            if ch == '"':
+                in_string = True
+                continue
+
+            if ch == "{":
+                depth += 1
+            elif ch == "}" and depth > 0:
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+
+        if end is not None:
+            candidate = text[start : end + 1]
             try:
-                parsed = json.loads(text[brace_start : brace_end + 1])
+                parsed = json.loads(candidate)
                 if isinstance(parsed, dict):
                     return parsed
             except json.JSONDecodeError:
                 pass
+
+        start = text.find("{", start + 1)
 
     return None
 
