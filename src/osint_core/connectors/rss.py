@@ -2,10 +2,13 @@
 
 import asyncio
 import hashlib
+import ipaddress
+import socket
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from time import struct_time
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import feedparser
 import httpx
@@ -16,15 +19,41 @@ from osint_core.connectors.base import BaseConnector, RawItem
 logger = structlog.get_logger()
 
 _MAX_RETRIES = 3
+_MAX_REDIRECTS = 5
+_REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def _is_safe_redirect_target(url: str) -> bool:
+    """Return True if the URL is safe to follow (not private/loopback, HTTP(S) only)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False
+
+    # Resolve hostname and check all addresses against private/loopback ranges
+    try:
+        addrinfos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False
+
+    for _family, _type, _proto, _canonname, sockaddr in addrinfos:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+
+    return True
 
 
 class RssConnector(BaseConnector):
     """Fetches and parses RSS/Atom feeds into RawItems."""
 
     async def fetch(self) -> list[RawItem]:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await self._fetch_with_retries(client)
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            resp = await self._fetch_with_safe_redirects(client)
 
         if resp is None:
             return []
@@ -37,16 +66,61 @@ class RssConnector(BaseConnector):
 
         return items
 
-    async def _fetch_with_retries(self, client: httpx.AsyncClient) -> httpx.Response | None:
-        """Fetch the feed URL with retry logic for transient HTTP errors."""
+    async def _fetch_with_safe_redirects(
+        self, client: httpx.AsyncClient
+    ) -> httpx.Response | None:
+        """Fetch the feed, manually following redirects with SSRF protection.
+
+        Blocks redirects to private/loopback IPs and non-HTTP(S) schemes,
+        and caps the redirect chain length.
+        """
+        current_url = self.config.url
+        for _ in range(_MAX_REDIRECTS):
+            resp = await self._fetch_with_retries(client, current_url)
+            if resp is None:
+                return None
+
+            if resp.status_code not in _REDIRECT_STATUS_CODES:
+                return resp
+
+            location = resp.headers.get("Location")
+            if not location:
+                return resp
+
+            redirect_url = urljoin(current_url, location)
+
+            if not _is_safe_redirect_target(redirect_url):
+                logger.warning(
+                    "rss_redirect_blocked",
+                    source_id=self.config.id,
+                    original_url=self.config.url,
+                    redirect_url=redirect_url,
+                    reason="redirect target is private, loopback, or non-HTTP(S)",
+                )
+                return None
+
+            current_url = redirect_url
+
+        logger.error(
+            "rss_too_many_redirects",
+            source_id=self.config.id,
+            url=self.config.url,
+            max_redirects=_MAX_REDIRECTS,
+        )
+        return None
+
+    async def _fetch_with_retries(
+        self, client: httpx.AsyncClient, url: str
+    ) -> httpx.Response | None:
+        """Fetch a URL with retry logic for transient HTTP errors."""
         for attempt in range(_MAX_RETRIES):
             try:
-                resp = await client.get(self.config.url)
+                resp = await client.get(url)
             except httpx.TransportError as exc:
                 logger.warning(
                     "rss_transport_error",
                     source_id=self.config.id,
-                    url=self.config.url,
+                    url=url,
                     error=str(exc),
                     attempt=attempt + 1,
                 )
@@ -66,7 +140,7 @@ class RssConnector(BaseConnector):
                 logger.warning(
                     "rss_retryable_http_error",
                     source_id=self.config.id,
-                    url=self.config.url,
+                    url=url,
                     status=resp.status_code,
                     retry_after=delay,
                     attempt=attempt + 1,
@@ -79,7 +153,7 @@ class RssConnector(BaseConnector):
                 logger.error(
                     "rss_http_error",
                     source_id=self.config.id,
-                    url=self.config.url,
+                    url=url,
                     status=resp.status_code,
                 )
                 return None
@@ -89,7 +163,7 @@ class RssConnector(BaseConnector):
         logger.error(
             "rss_max_retries_exceeded",
             source_id=self.config.id,
-            url=self.config.url,
+            url=url,
             attempts=_MAX_RETRIES,
         )
         return None
