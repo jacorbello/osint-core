@@ -36,6 +36,7 @@ dependencies = [
   "markdown>=3.5.0",
   "minio>=7.2.0",
   "beautifulsoup4>=4.12.0",
+  "PyMuPDF>=1.24.0",
 ]
 
 [project.optional-dependencies]
@@ -110,6 +111,8 @@ module = [
     "bs4.*",
     "tldextract",
     "tldextract.*",
+    "fitz",
+    "fitz.*",
 ]
 ignore_missing_imports = true
 

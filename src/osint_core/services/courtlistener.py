@@ -111,6 +111,73 @@ class CourtListenerClient:
         return _parse_response(body)
 
 
+    def match_precedent(
+        self,
+        constitutional_basis: str,
+        constitutional_issue: str,
+        precedent_map: dict[str, dict[str, list[dict[str, str]]]],
+    ) -> list[dict[str, str]]:
+        """Match a constitutional issue to landmark cases from the precedent map.
+
+        Searches sub-categories under the given basis for keyword overlap
+        with the issue description. Returns matching case entries.
+        """
+        basis_map = precedent_map.get(constitutional_basis, {})
+        if not basis_map:
+            return []
+
+        issue_lower = constitutional_issue.lower()
+        matched: list[dict[str, str]] = []
+
+        for sub_category, cases in basis_map.items():
+            keywords = sub_category.replace("_", " ").split()
+            if any(kw in issue_lower for kw in keywords):
+                matched.extend(cases)
+
+        if not matched and "general" in basis_map:
+            matched.extend(basis_map["general"])
+
+        return matched[:3]
+
+    async def lookup_precedent(
+        self,
+        constitutional_basis: str,
+        constitutional_issue: str,
+        precedent_map: dict[str, dict[str, list[dict[str, str]]]],
+    ) -> list[VerifiedCitation]:
+        """Match precedent from the map and verify each via CourtListener API."""
+        matches = self.match_precedent(
+            constitutional_basis, constitutional_issue, precedent_map
+        )
+        if not matches:
+            return []
+
+        citation_text = " ".join(m["citation"] for m in matches)
+        verified = await self.verify_citations(citation_text)
+
+        verified_by_name: dict[str, VerifiedCitation] = {}
+        for v in verified:
+            verified_by_name[v.case_name.lower()] = v
+
+        results: list[VerifiedCitation] = []
+        for m in matches:
+            case_lower = m["case"].lower()
+            if case_lower in verified_by_name:
+                vc = verified_by_name[case_lower]
+                vc.relevance = f"Landmark — {constitutional_basis}"
+                results.append(vc)
+            else:
+                results.append(VerifiedCitation(
+                    case_name=m["case"],
+                    citation=m["citation"],
+                    courtlistener_url="",
+                    verified=False,
+                    relevance=f"Landmark — {constitutional_basis}",
+                ))
+
+        return results
+
+
 def _parse_response(data: list[object] | dict[str, object]) -> list[VerifiedCitation]:
     """Parse the CourtListener citation-lookup response into VerifiedCitation objects."""
     citations: list[VerifiedCitation] = []

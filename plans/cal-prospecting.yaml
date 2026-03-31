@@ -383,6 +383,58 @@ custom:
       - "${CAL_REPORT_RECIPIENT_1}"
       - "${CAL_REPORT_RECIPIENT_2}"
     subject_prefix: "CAL Prospecting Report"
+  deep_analysis_enabled: true
+  deep_analysis_relevance_gate: false
+  precedent_map:
+    1A-free-speech:
+      compelled_speech:
+        - case: "West Virginia State Board of Education v. Barnette"
+          citation: "319 U.S. 624 (1943)"
+        - case: "Janus v. AFSCME"
+          citation: "585 U.S. 878 (2018)"
+        - case: "303 Creative LLC v. Elenis"
+          citation: "600 U.S. 570 (2023)"
+      speech_codes:
+        - case: "Tinker v. Des Moines Independent Community School District"
+          citation: "393 U.S. 503 (1969)"
+        - case: "Healy v. James"
+          citation: "408 U.S. 169 (1972)"
+        - case: "Papish v. Board of Curators of the University of Missouri"
+          citation: "410 U.S. 667 (1973)"
+      viewpoint_discrimination:
+        - case: "Rosenberger v. Rector and Visitors of the University of Virginia"
+          citation: "515 U.S. 819 (1995)"
+        - case: "Board of Regents of the University of Wisconsin System v. Southworth"
+          citation: "529 U.S. 217 (2000)"
+    1A-religion:
+      free_exercise:
+        - case: "Kennedy v. Bremerton School District"
+          citation: "597 U.S. 507 (2022)"
+        - case: "Fulton v. City of Philadelphia"
+          citation: "593 U.S. 522 (2021)"
+      general:
+        - case: "Church of the Lukumi Babalu Aye v. City of Hialeah"
+          citation: "508 U.S. 520 (1993)"
+    14A-due-process:
+      campus_discipline:
+        - case: "Mathews v. Eldridge"
+          citation: "424 U.S. 319 (1976)"
+        - case: "Goss v. Lopez"
+          citation: "419 U.S. 565 (1975)"
+        - case: "Doe v. Baum"
+          citation: "903 F.3d 575 (6th Cir. 2018)"
+    14A-equal-protection:
+      general:
+        - case: "Reed v. Reed"
+          citation: "404 U.S. 71 (1971)"
+        - case: "Students for Fair Admissions v. President and Fellows of Harvard College"
+          citation: "600 U.S. 181 (2023)"
+    parental-rights:
+      general:
+        - case: "Troxel v. Granville"
+          citation: "530 U.S. 57 (2000)"
+        - case: "Pierce v. Society of Sisters"
+          citation: "268 U.S. 510 (1925)"
 
 notifications:
   routes:

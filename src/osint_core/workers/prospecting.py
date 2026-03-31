@@ -14,6 +14,8 @@ from sqlalchemy import select
 
 from osint_core.db import async_session
 from osint_core.models.event import Event
+from osint_core.models.lead import Lead
+from osint_core.services.deep_analyzer import DeepAnalyzer
 from osint_core.services.lead_matcher import LeadMatcher, LeadMatcherConfig
 from osint_core.workers.celery_app import celery_app
 
@@ -27,6 +29,7 @@ _EMAIL_BACKOFF_BASE = 2  # seconds; delay = base ** attempt (1-indexed)
 
 # Pipeline completion guard settings
 _MATCH_LEADS_TASK_NAME = "osint.match_leads"
+_ANALYSIS_TASK_NAME = "osint.analyze_leads"
 _GUARD_MAX_DEFERRALS = 5
 _GUARD_BACKOFF_BASE = 120  # seconds; delay = base * (attempt + 1), capped at 600
 
@@ -64,6 +67,21 @@ def _build_matcher_config(plan_content: dict[str, Any], plan_id: str) -> LeadMat
                 )
 
     return LeadMatcherConfig(**kwargs)
+
+
+def _is_deep_analysis_enabled(plan_content: dict[str, Any] | None = None) -> bool:
+    """Check if deep analysis is enabled for a plan."""
+    if plan_content is None:
+        return False
+    custom = plan_content.get("custom", {})
+    return bool(custom.get("deep_analysis_enabled", False))
+
+
+def _get_precedent_map(plan_content: dict[str, Any]) -> dict[str, dict[str, list[dict[str, str]]]]:
+    """Extract precedent map from plan content."""
+    custom: dict[str, Any] = plan_content.get("custom", {})
+    result: dict[str, dict[str, list[dict[str, str]]]] = custom.get("precedent_map", {})
+    return result
 
 
 async def _match_leads_async(event_ids: list[str], plan_id: str) -> dict[str, Any]:
@@ -135,11 +153,135 @@ def match_leads_task(self: Any, event_ids: list[str], plan_id: str) -> dict[str,
     """
     loop = asyncio.new_event_loop()
     try:
-        return loop.run_until_complete(_match_leads_async(event_ids, plan_id))
+        result = loop.run_until_complete(_match_leads_async(event_ids, plan_id))
     except Exception as exc:
         logger.exception("Lead matching failed for events %s", event_ids)
         raise self.retry(
             exc=exc, countdown=min(2 ** self.request.retries * 30, 900),
+        ) from exc
+    finally:
+        loop.close()
+
+    # Dispatch deep analysis after successful lead matching
+    analyze_leads_task.delay(plan_id)
+
+    return result
+
+
+async def _analyze_leads_async(plan_id: str) -> dict[str, Any]:
+    """Run deep analysis on all pending leads for a plan."""
+    from osint_core.models.plan import PlanVersion
+
+    async with async_session() as db:
+        # Load active plan content
+        plan_stmt = (
+            select(PlanVersion)
+            .where(PlanVersion.plan_id == plan_id, PlanVersion.is_active.is_(True))
+            .limit(1)
+        )
+        plan_result = await db.execute(plan_stmt)
+        plan_version = plan_result.scalar_one_or_none()
+
+        if not plan_version:
+            return {"status": "skipped", "reason": "no_active_plan"}
+
+        plan_content = plan_version.content or {}
+
+        if not _is_deep_analysis_enabled(plan_content):
+            return {"status": "skipped", "reason": "deep_analysis_disabled"}
+
+        custom = plan_content.get("custom", {})
+        relevance_gate = bool(custom.get("deep_analysis_relevance_gate", False))
+        precedent_map = _get_precedent_map(plan_content)
+
+        # Select pending leads
+        stmt = (
+            select(Lead)
+            .where(
+                Lead.plan_id == plan_id,
+                Lead.analysis_status == "pending",
+            )
+        )
+        lead_result = await db.execute(stmt)
+        leads = list(lead_result.scalars().all())
+
+        if not leads:
+            return {"status": "completed", "analyzed": 0, "plan_id": plan_id}
+
+        analyzer = DeepAnalyzer(precedent_map=precedent_map)
+        analyzed = 0
+        failed = 0
+
+        for lead in leads:
+            # Get the first event for source material
+            if not lead.event_ids:
+                lead.analysis_status = "no_source_material"
+                continue
+
+            event_stmt = select(Event).where(Event.id == lead.event_ids[0])
+            event_result = await db.execute(event_stmt)
+            event = event_result.scalar_one_or_none()
+
+            if not event:
+                lead.analysis_status = "no_source_material"
+                continue
+
+            # Optional relevance gate
+            if relevance_gate:
+                relevance = getattr(event, "nlp_relevance", None)
+                if isinstance(relevance, str) and relevance.strip().lower() != "relevant":
+                    lead.analysis_status = "no_source_material"
+                    continue
+
+            try:
+                result = await analyzer.analyze_lead(lead, event)
+            except Exception as exc:
+                logger.warning(
+                    "deep_analysis_failed lead_id=%s error=%s",
+                    str(lead.id), str(exc),
+                )
+                lead.analysis_status = "failed"
+                failed += 1
+                continue
+
+            if result is None:
+                lead.analysis_status = "no_source_material"
+                continue
+
+            lead.deep_analysis = result
+            lead.analysis_status = "completed"
+
+            # Downgrade non-actionable leads
+            if not result.get("actionable", True):
+                lead.severity = "info"
+
+            analyzed += 1
+
+        await db.commit()
+
+    return {
+        "status": "completed",
+        "plan_id": plan_id,
+        "analyzed": analyzed,
+        "failed": failed,
+        "total": len(leads),
+    }
+
+
+@celery_app.task(bind=True, name="osint.analyze_leads", max_retries=2)  # type: ignore[untyped-decorator]
+def analyze_leads_task(self: Any, plan_id: str) -> dict[str, Any]:
+    """Run deep constitutional analysis on pending leads.
+
+    Called after match_leads completes. Analyzes full policy documents
+    and incident reports for clause-level constitutional issues.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_analyze_leads_async(plan_id))
+    except Exception as exc:
+        logger.exception("Deep analysis failed for plan %s", plan_id)
+        raise self.retry(
+            exc=exc, countdown=min(2 ** self.request.retries * 30, 300),
         ) from exc
     finally:
         loop.close()
@@ -214,7 +356,7 @@ def _has_pending_match_leads_tasks() -> bool:
             continue
         for _worker, tasks in task_map.items():
             for task in tasks:
-                if task.get("name") == _MATCH_LEADS_TASK_NAME:
+                if task.get("name") in (_MATCH_LEADS_TASK_NAME, _ANALYSIS_TASK_NAME):
                     return True
 
     return False

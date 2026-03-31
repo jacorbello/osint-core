@@ -54,6 +54,7 @@ celery_app.conf.update(
         "osint.send_notification": {"queue": "notify"},
         "osint.compile_digest": {"queue": "digest"},
         "osint.match_leads": {"queue": "enrich"},
+        "osint.analyze_leads": {"queue": "enrich"},
         "osint.generate_prospecting_report": {"queue": "osint"},
         "osint.collect_prospecting_sources": {"queue": "ingest"},
         "osint.purge_expired_events": {"queue": "osint"},
