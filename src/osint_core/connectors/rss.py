@@ -23,7 +23,7 @@ class RssConnector(BaseConnector):
     """Fetches and parses RSS/Atom feeds into RawItems."""
 
     async def fetch(self) -> list[RawItem]:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
             resp = await self._fetch_with_retries(client)
 
         if resp is None:

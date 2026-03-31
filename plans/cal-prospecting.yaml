@@ -161,7 +161,7 @@ sources:
   # ── RSS: FIRE (Foundation for Individual Rights and Expression) ──
   - id: rss_fire
     type: rss
-    url: "https://www.thefire.org/feed"
+    url: "https://www.fire.org/rssfeed"
     schedule_cron: "20 7,14 * * *"
     weight: 1.5
     params:

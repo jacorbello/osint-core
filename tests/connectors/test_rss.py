@@ -265,3 +265,30 @@ async def test_fetch_returns_empty_on_non_retryable_error(connector: RssConnecto
     items = await connector.fetch()
     assert items == []
     assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_follows_redirects(respx_mock):
+    """RSS connector follows HTTP redirects (#214)."""
+    config = SourceConfig(
+        id="rss-redirect",
+        type="rss",
+        url="https://old.example.com/feed",
+        weight=0.5,
+    )
+    connector = RssConnector(config)
+    respx_mock.get("https://old.example.com/feed").mock(
+        return_value=httpx.Response(
+            301,
+            headers={"Location": "https://new.example.com/rssfeed"},
+        ),
+    )
+    respx_mock.get("https://new.example.com/rssfeed").mock(
+        return_value=httpx.Response(
+            200,
+            content=SAMPLE_RSS_FEED,
+            headers={"content-type": "application/rss+xml"},
+        ),
+    )
+    items = await connector.fetch()
+    assert len(items) == 2
