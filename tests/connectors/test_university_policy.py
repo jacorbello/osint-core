@@ -1513,8 +1513,10 @@ class TestUpdatedSelectors:
         """UDC OGC policies page links to docs.udc.edu PDFs."""
         html = """
         <main>
-          <li><a href="https://docs.udc.edu/ogc/Protection-of-Minors.pdf">Protection of Minors</a></li>
-          <li><a href="https://docs.udc.edu/ogc/Report-Form.docx">Mandatory Reporter Form</a></li>
+          <li><a href="https://docs.udc.edu/ogc/Minors.pdf">
+            Protection of Minors</a></li>
+          <li><a href="https://docs.udc.edu/ogc/Form.docx">
+            Mandatory Reporter Form</a></li>
           <li><a href="https://www.udc.edu/about">About UDC</a></li>
         </main>
         """
@@ -1523,4 +1525,4 @@ class TestUpdatedSelectors:
             "https://www.udc.edu/about/administration/ogc/policies",
         )
         assert len(links) == 1
-        assert links[0][1] == "https://docs.udc.edu/ogc/Protection-of-Minors.pdf"
+        assert links[0][1] == "https://docs.udc.edu/ogc/Minors.pdf"
