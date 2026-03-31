@@ -7,6 +7,7 @@ import pytest
 import respx
 
 from osint_core.workers.nlp_enrich import (
+    _CAL_SYSTEM_MESSAGE,
     _enrich_event_async,
     _validate_attack_techniques,
     _validate_constitutional_fields,
@@ -798,3 +799,23 @@ async def test_cal_plan_multiple_constitutional_bases():
     assert event.metadata_["lead_type"] == "incident"
     assert event.metadata_["institution"] == "Texas A&M"
     assert event.metadata_["jurisdiction"] == "TX"
+
+
+class TestCalPromptGuidance:
+    """Verify CAL prompt prevents over-classification (#215)."""
+
+    def test_prompt_contains_irrelevant_guidance(self):
+        assert "irrelevant" in _CAL_SYSTEM_MESSAGE.lower()
+        assert "administrative" in _CAL_SYSTEM_MESSAGE.lower()
+
+    def test_prompt_contains_negative_examples(self):
+        for keyword in [
+            "Compensation", "Veteran employment",
+            "Honorary titles", "Budget",
+        ]:
+            assert keyword.lower() in _CAL_SYSTEM_MESSAGE.lower(), (
+                f"Missing negative example: {keyword}"
+            )
+
+    def test_prompt_instructs_empty_basis_for_irrelevant(self):
+        assert "EMPTY list []" in _CAL_SYSTEM_MESSAGE

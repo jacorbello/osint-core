@@ -365,13 +365,15 @@ enrichment:
   mission: >-
     Identify constitutional rights violations at educational institutions for
     The Center For American Liberty. Focus on First Amendment, parental rights,
-    religious liberty, and due process cases with litigation potential.
+    religious liberty, and due process cases with litigation potential. Skip
+    routine administrative, HR, financial, and operational policies that do not
+    implicate constitutional rights.
   classify_relevance: true
   extract_entities: true
   generate_summaries: true
 
 custom:
-  lead_confidence_threshold: 0.3
+  lead_confidence_threshold: 0.5
   report_schedule:
     timezone: "America/Chicago"
     times:
