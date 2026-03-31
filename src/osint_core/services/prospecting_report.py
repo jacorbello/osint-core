@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import importlib.resources
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -78,7 +79,7 @@ async def _select_reportable_leads(db: AsyncSession) -> list[Lead]:
     return list(result.scalars().all())
 
 
-async def _generate_narrative(lead: Lead) -> dict[str, str]:
+async def _generate_narrative(lead: Lead) -> dict[str, Any]:
     """Generate narrative sections for a lead via vLLM."""
     lead_data = {
         "title": lead.title,
@@ -105,6 +106,7 @@ async def _generate_narrative(lead: Lead) -> dict[str, str]:
                     ],
                     "max_tokens": 1500,
                     "temperature": 0.2,
+                    "response_format": {"type": "json_object"},
                 },
             )
             resp.raise_for_status()
@@ -115,11 +117,98 @@ async def _generate_narrative(lead: Lead) -> dict[str, str]:
     try:
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
-        result: dict[str, str] = json.loads(content)
+        result = _extract_json(content)
+        if result is None:
+            logger.warning(
+                "narrative_parse_failed",
+                lead_id=str(lead.id),
+                content_preview=content[:200] if content else "",
+            )
+            return _fallback_narrative(lead)
         return result
-    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+    except (json.JSONDecodeError, ValueError, KeyError, IndexError) as exc:
         logger.warning("narrative_parse_failed", lead_id=str(lead.id), error=str(exc))
         return _fallback_narrative(lead)
+
+
+_JSON_FENCE_RE = re.compile(
+    r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL,
+)
+
+
+def _extract_json(content: str) -> dict[str, Any] | None:
+    """Try to parse JSON from LLM output, handling common formatting issues.
+
+    Handles: raw JSON, markdown-fenced JSON, JSON embedded in prose.
+    Returns None if no valid JSON object can be extracted.
+    """
+    if not content or not content.strip():
+        return None
+
+    text = content.strip()
+
+    # 1. Direct parse (ideal case — response_format: json_object)
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Strip markdown code fences (```json ... ```)
+    fence_match = _JSON_FENCE_RE.search(text)
+    if fence_match:
+        try:
+            parsed = json.loads(fence_match.group(1))
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Scan for balanced { ... } blocks in prose and try each as JSON
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escape = False
+        end = None
+
+        for i in range(start, len(text)):
+            ch = text[i]
+
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+
+            if ch == '"':
+                in_string = True
+                continue
+
+            if ch == "{":
+                depth += 1
+            elif ch == "}" and depth > 0:
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+
+        if end is not None:
+            candidate = text[start : end + 1]
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
+        start = text.find("{", start + 1)
+
+    return None
 
 
 def _fallback_narrative(lead: Lead) -> dict[str, str]:
