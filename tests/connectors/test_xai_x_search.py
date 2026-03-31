@@ -683,3 +683,43 @@ async def test_fetch_parses_new_field_names(
     assert items[0].raw_data["author"] == "@TestUser"
     assert "Original tweet content" in items[0].raw_data["text"]
     assert "Brief relevance" in items[0].summary
+
+
+@pytest.mark.asyncio
+async def test_fetch_empty_json_falls_back_to_annotations(
+    connector: XaiXSearchConnector, respx_mock,
+):
+    """When Grok returns prose containing [] but annotations have tweet URLs,
+    annotation parsing is used instead of returning 0 items (#212)."""
+    response = {
+        "id": "resp_empty_json_with_annotations",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": "[]",
+                "annotations": [
+                    {
+                        "type": "url_citation",
+                        "url": "https://x.com/TheFIREorg/status/555555",
+                    },
+                    {
+                        "type": "url_citation",
+                        "url": "https://x.com/CampusReform/status/666666",
+                    },
+                ],
+            }],
+        }],
+    }
+    respx_mock.post("https://api.x.ai/v1/responses").mock(
+        return_value=httpx.Response(200, json=response),
+    )
+    items = await connector.fetch()
+
+    # Should fall back to annotations when JSON yields 0 items
+    assert len(items) == 2
+    assert items[0].url == "https://x.com/TheFIREorg/status/555555"
+    assert items[0].raw_data["author"] == "@TheFIREorg"
+    assert items[1].url == "https://x.com/CampusReform/status/666666"
+    assert items[1].raw_data["author"] == "@CampusReform"
