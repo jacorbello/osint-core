@@ -157,4 +157,4 @@ async def _call_provider(
     if content is None:
         raise ValueError("Unexpected LLM response: choices[0].message.content is absent")
 
-    return content
+    return str(content)
