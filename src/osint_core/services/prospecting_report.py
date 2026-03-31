@@ -97,7 +97,7 @@ async def _select_reportable_leads(db: AsyncSession) -> list[Lead]:
 
 
 async def _generate_narrative(lead: Lead) -> dict[str, Any]:
-    """Generate narrative sections for a lead via vLLM."""
+    """Generate narrative sections for a lead via the configured LLM provider."""
     lead_data = {
         "title": lead.title,
         "summary": lead.summary,

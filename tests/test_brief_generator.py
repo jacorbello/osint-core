@@ -269,7 +269,7 @@ async def test_vllm_receives_event_context(generator_with_vllm: BriefGenerator):
     assert "CVE-2026-1234 Published" in sent_prompt
     assert "192.168.1.100" in sent_prompt
     assert "APT-29" in sent_prompt
-    assert generated_by == "vllm"
+    assert generated_by == "llm"
 
 
 # ---------------------------------------------------------------------------

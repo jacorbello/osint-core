@@ -12,6 +12,13 @@ from osint_core.config import settings
 logger = structlog.get_logger()
 
 
+def active_llm_model() -> str:
+    """Return the model identifier for the currently active LLM provider."""
+    if settings.llm_provider == "groq" and settings.groq_api_key:
+        return settings.groq_model
+    return settings.llm_model
+
+
 async def llm_chat_completion(
     *,
     messages: list[dict[str, str]],
@@ -54,6 +61,7 @@ async def llm_chat_completion(
                 timeout=timeout,
                 response_format=response_format,
                 json_schema=json_schema,
+                raise_retryable=True,
             )
         except _RetryableError as exc:
             logger.warning(
@@ -73,15 +81,16 @@ async def llm_chat_completion(
         timeout=timeout,
         response_format=response_format,
         json_schema=None,  # vLLM does not support strict json_schema
+        raise_retryable=False,
     )
 
 
 class _RetryableError(Exception):
     """Raised when a provider returns a retryable HTTP status (429/5xx)."""
 
-    def __init__(self, status_code: int, body: str) -> None:
+    def __init__(self, status_code: int) -> None:
         self.status_code = status_code
-        super().__init__(f"HTTP {status_code}: {body[:200]}")
+        super().__init__(f"HTTP {status_code}")
 
 
 async def _call_provider(
@@ -95,6 +104,7 @@ async def _call_provider(
     timeout: float,
     response_format: dict[str, Any] | None,
     json_schema: dict[str, Any] | None,
+    raise_retryable: bool = True,
 ) -> str:
     base = base_url.rstrip("/")
     # Append /v1 if not already present (vLLM URLs typically omit it)
@@ -131,8 +141,8 @@ async def _call_provider(
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(url, json=payload, headers=headers)
 
-    if resp.status_code == 429 or resp.status_code >= 500:
-        raise _RetryableError(resp.status_code, resp.text)
+    if raise_retryable and (resp.status_code == 429 or resp.status_code >= 500):
+        raise _RetryableError(resp.status_code)
 
     resp.raise_for_status()
     data = resp.json()

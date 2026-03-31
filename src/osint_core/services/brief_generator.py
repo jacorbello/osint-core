@@ -211,7 +211,7 @@ class BriefGenerator:
             timeout=120.0,
         )
         logger.info(
-            "brief_generated_from_vllm",
+            "brief_generated_from_llm",
             response_length=len(content),
         )
         return content
@@ -238,7 +238,7 @@ class BriefGenerator:
 
         Returns:
             Tuple of (content_md, generated_by) where generated_by is one of
-            ``"none"``, ``"vllm"``, or ``"template"``.
+            ``"none"``, ``"llm"``, or ``"template"``.
         """
         title = query or "Intelligence Brief"
 
@@ -258,10 +258,10 @@ class BriefGenerator:
             try:
                 context = self._build_context(events, indicators, entities)
                 content_md = await self.generate_from_vllm(query=query, context=context)
-                return content_md, "vllm"
+                return content_md, "llm"
             except Exception as exc:
                 logger.warning(
-                    "vllm_generation_failed_falling_back_to_template",
+                    "llm_generation_failed_falling_back_to_template",
                     error=str(exc),
                 )
 
