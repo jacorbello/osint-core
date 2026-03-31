@@ -179,6 +179,11 @@ class LeadMatcher:
 
         Returns the Lead if above confidence threshold, else None.
         """
+        # Skip events classified as irrelevant by NLP enrichment (#215)
+        relevance = event.nlp_relevance
+        if isinstance(relevance, str) and relevance.strip().lower() == "irrelevant":
+            return None
+
         metadata = event.metadata_ or {}
 
         # Extract and normalize lead_type

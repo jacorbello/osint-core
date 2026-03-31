@@ -677,3 +677,21 @@ class TestLeadCitations:
         assert len(sources) == 2
         assert "https://x.com/a/status/1" in sources[0]
         assert "https://x.com/b/status/2" in sources[1]
+
+
+class TestIrrelevantGate:
+    """Events classified as irrelevant should never create leads (#215)."""
+
+    @pytest.mark.asyncio()
+    async def test_irrelevant_event_returns_none(self):
+        event = _make_event()
+        event.nlp_relevance = "irrelevant"
+        matcher = LeadMatcher(LeadMatcherConfig(
+            plan_id="cal-prospecting",
+            confidence_threshold=0.3,
+        ))
+        db = _mock_db()
+
+        result = await matcher.match_event_to_lead(event, db)
+
+        assert result is None
