@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 SAMPLE_PLAN_CONTENT = {
     "custom": {
@@ -65,7 +63,10 @@ class TestFullPipeline:
 
         event = MagicMock()
         event.id = lead.event_ids[0]
-        event.metadata_ = {"minio_uri": "minio://osint-artifacts/test.html", "document_type": "html"}
+        event.metadata_ = {
+            "minio_uri": "minio://osint-artifacts/test.html",
+            "document_type": "html",
+        }
         event.nlp_relevance = "relevant"
 
         plan_version = MagicMock()
@@ -93,9 +94,21 @@ class TestFullPipeline:
 
         with (
             patch("osint_core.workers.prospecting.async_session", return_value=ctx),
-            patch("osint_core.services.deep_analyzer.DeepAnalyzer._retrieve_document", new_callable=AsyncMock, return_value=b"<p>Policy text</p>"),
-            patch("osint_core.services.deep_analyzer.llm_chat_completion", new_callable=AsyncMock, return_value=json.dumps(SAMPLE_POLICY_RESULT)),
-            patch("osint_core.services.deep_analyzer.CourtListenerClient.lookup_precedent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "osint_core.services.deep_analyzer.DeepAnalyzer._retrieve_document",
+                new_callable=AsyncMock,
+                return_value=b"<p>Policy text</p>",
+            ),
+            patch(
+                "osint_core.services.deep_analyzer.llm_chat_completion",
+                new_callable=AsyncMock,
+                return_value=json.dumps(SAMPLE_POLICY_RESULT),
+            ),
+            patch(
+                "osint_core.services.deep_analyzer.CourtListenerClient.lookup_precedent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
         ):
             result = await _analyze_leads_async("cal-prospecting")
 

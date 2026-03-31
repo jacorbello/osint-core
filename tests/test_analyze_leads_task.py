@@ -62,9 +62,9 @@ class TestAnalyzeLeadsAsync:
 
         with (
             patch("osint_core.workers.prospecting.async_session", return_value=ctx),
-            patch("osint_core.workers.prospecting.DeepAnalyzer") as MockAnalyzer,
+            patch("osint_core.workers.prospecting.DeepAnalyzer") as mock_analyzer_cls,
         ):
-            mock_instance = MockAnalyzer.return_value
+            mock_instance = mock_analyzer_cls.return_value
             mock_instance.analyze_lead = AsyncMock(return_value=analysis_result)
 
             result = await _analyze_leads_async("cal-prospecting")
@@ -125,9 +125,9 @@ class TestAnalyzeLeadsAsync:
 
         with (
             patch("osint_core.workers.prospecting.async_session", return_value=ctx),
-            patch("osint_core.workers.prospecting.DeepAnalyzer") as MockAnalyzer,
+            patch("osint_core.workers.prospecting.DeepAnalyzer") as mock_analyzer_cls,
         ):
-            mock_instance = MockAnalyzer.return_value
+            mock_instance = mock_analyzer_cls.return_value
             mock_instance.analyze_lead = AsyncMock(return_value=analysis_result)
 
             result = await _analyze_leads_async("cal-prospecting")

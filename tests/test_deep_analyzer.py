@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from osint_core.services.deep_analyzer import DeepAnalyzer, _POLICY_ANALYSIS_SCHEMA, _INCIDENT_ANALYSIS_SCHEMA
+from osint_core.services.deep_analyzer import (
+    DeepAnalyzer,
+)
 
 
 def _make_lead(*, lead_type: str = "policy", event_ids: list | None = None) -> MagicMock:
@@ -75,10 +76,24 @@ class TestAnalyzePolicy:
         event = _make_event()
 
         with (
-            patch.object(analyzer, "_retrieve_document", new_callable=AsyncMock, return_value=b"<p>Policy text</p>"),
+            patch.object(
+                analyzer,
+                "_retrieve_document",
+                new_callable=AsyncMock,
+                return_value=b"<p>Policy text</p>",
+            ),
             patch.object(analyzer, "_get_document_type", return_value="html"),
-            patch("osint_core.services.deep_analyzer.llm_chat_completion", new_callable=AsyncMock, return_value=json.dumps(SAMPLE_POLICY_ANALYSIS)),
-            patch.object(analyzer, "_attach_precedent", new_callable=AsyncMock, return_value=SAMPLE_POLICY_ANALYSIS),
+            patch(
+                "osint_core.services.deep_analyzer.llm_chat_completion",
+                new_callable=AsyncMock,
+                return_value=json.dumps(SAMPLE_POLICY_ANALYSIS),
+            ),
+            patch.object(
+                analyzer,
+                "_attach_precedent",
+                new_callable=AsyncMock,
+                return_value=SAMPLE_POLICY_ANALYSIS,
+            ),
         ):
             result = await analyzer.analyze_lead(lead, event)
 
@@ -100,10 +115,21 @@ class TestAnalyzePolicy:
         }
 
         with (
-            patch.object(analyzer, "_retrieve_document", new_callable=AsyncMock, return_value=b"<p>Admin stuff</p>"),
+            patch.object(
+                analyzer,
+                "_retrieve_document",
+                new_callable=AsyncMock,
+                return_value=b"<p>Admin stuff</p>",
+            ),
             patch.object(analyzer, "_get_document_type", return_value="html"),
-            patch("osint_core.services.deep_analyzer.llm_chat_completion", new_callable=AsyncMock, return_value=json.dumps(empty_result)),
-            patch.object(analyzer, "_attach_precedent", new_callable=AsyncMock, return_value=empty_result),
+            patch(
+                "osint_core.services.deep_analyzer.llm_chat_completion",
+                new_callable=AsyncMock,
+                return_value=json.dumps(empty_result),
+            ),
+            patch.object(
+                analyzer, "_attach_precedent", new_callable=AsyncMock, return_value=empty_result
+            ),
         ):
             result = await analyzer.analyze_lead(lead, event)
 
@@ -120,8 +146,17 @@ class TestAnalyzeIncident:
         event.raw_excerpt = "https://example.com/article"
 
         with (
-            patch.object(analyzer, "_fetch_article_content", new_callable=AsyncMock, return_value="Article about professor firing."),
-            patch("osint_core.services.deep_analyzer.llm_chat_completion", new_callable=AsyncMock, return_value=json.dumps(SAMPLE_INCIDENT_ANALYSIS)),
+            patch.object(
+                analyzer,
+                "_fetch_article_content",
+                new_callable=AsyncMock,
+                return_value="Article about professor firing.",
+            ),
+            patch(
+                "osint_core.services.deep_analyzer.llm_chat_completion",
+                new_callable=AsyncMock,
+                return_value=json.dumps(SAMPLE_INCIDENT_ANALYSIS),
+            ),
         ):
             result = await analyzer.analyze_lead(lead, event)
 

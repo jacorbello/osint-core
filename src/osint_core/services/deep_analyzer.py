@@ -157,7 +157,10 @@ class DeepAnalyzer:
         minio_uri = metadata.get("minio_uri")
 
         if not minio_uri:
-            logger.info("deep_analysis_no_source", extra={"lead_id": str(lead.id), "reason": "no minio_uri"})
+            logger.info(
+                "deep_analysis_no_source",
+                extra={"lead_id": str(lead.id), "reason": "no minio_uri"},
+            )
             return None
 
         doc_bytes = await self._retrieve_document(minio_uri)
@@ -205,7 +208,10 @@ class DeepAnalyzer:
                 )
                 result = json.loads(content)
             except Exception as exc:
-                logger.warning("deep_analysis_llm_failed", extra={"lead_id": str(lead.id), "chunk": chunk.index, "error": str(exc)})
+                logger.warning(
+                    "deep_analysis_llm_failed",
+                    extra={"lead_id": str(lead.id), "chunk": chunk.index, "error": str(exc)},
+                )
                 continue
 
             all_provisions.extend(result.get("provisions", []))
@@ -244,7 +250,10 @@ class DeepAnalyzer:
         content_text = await self._fetch_article_content(event)
 
         if not content_text:
-            logger.info("deep_analysis_no_source", extra={"lead_id": str(lead.id), "reason": "no article content"})
+            logger.info(
+                "deep_analysis_no_source",
+                extra={"lead_id": str(lead.id), "reason": "no article content"},
+            )
             return None
 
         user_msg = (
@@ -267,7 +276,10 @@ class DeepAnalyzer:
             )
             return json.loads(response)
         except Exception as exc:
-            logger.warning("deep_analysis_llm_failed", extra={"lead_id": str(lead.id), "error": str(exc)})
+            logger.warning(
+                "deep_analysis_llm_failed",
+                extra={"lead_id": str(lead.id), "error": str(exc)},
+            )
             return None
 
     # ------------------------------------------------------------------
@@ -327,7 +339,10 @@ class DeepAnalyzer:
             response.release_conn()
             return data
         except Exception as exc:
-            logger.warning("deep_analysis_minio_failed", extra={"uri": minio_uri, "error": str(exc)})
+            logger.warning(
+                "deep_analysis_minio_failed",
+                extra={"uri": minio_uri, "error": str(exc)},
+            )
             return None
 
     @staticmethod

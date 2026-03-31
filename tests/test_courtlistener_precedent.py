@@ -8,7 +8,6 @@ import pytest
 
 from osint_core.services.courtlistener import CourtListenerClient, VerifiedCitation
 
-
 SAMPLE_PRECEDENT_MAP = {
     "1A-free-speech": {
         "compelled_speech": [
@@ -101,7 +100,9 @@ class TestLookupPrecedent:
             verified=True,
             holding_summary="Government cannot compel speech.",
         )
-        with patch.object(client, "verify_citations", new_callable=AsyncMock, return_value=[verified]):
+        with patch.object(
+            client, "verify_citations", new_callable=AsyncMock, return_value=[verified]
+        ):
             results = await client.lookup_precedent(
                 constitutional_basis="1A-free-speech",
                 constitutional_issue="Compelled speech requirement",
