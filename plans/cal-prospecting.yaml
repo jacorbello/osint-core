@@ -207,19 +207,17 @@ sources:
       archive_pdfs: true
 
   # ── University Policy: CSU System ────────────────────────────
-  # DISABLED: calstate.edu returns 403 (JavaScript bot check). Uncomment
-  # when headless-browser support is added or an accessible policy
-  # endpoint is found. See #220.
-  # - id: univ_csu
-  #   type: university_policy
-  #   schedule_cron: "5 8 * * 1"
-  #   weight: 1.8
-  #   params:
-  #     institutions:
-  #       - name: "California State University System"
-  #         policy_url: "https://www.calstate.edu/csu-system/board-of-trustees/past-meetings"
-  #         selector: "a[href$='.pdf'], a[href*='policy']"
-  #     archive_pdfs: true
+  - id: univ_csu
+    type: university_policy
+    schedule_cron: "5 8 * * 1"
+    weight: 1.8
+    params:
+      institutions:
+        - name: "California State University System"
+          policy_url: "https://www.calstate.edu/csu-system/board-of-trustees/past-meetings"
+          selector: "a[href*='past-meetings/'], a[href$='.pdf']"
+          impersonate: "true"
+      archive_pdfs: true
 
   # ── University Policy: UT System ─────────────────────────────
   - id: univ_ut
@@ -315,11 +313,11 @@ source_profiles:
     credibility: 1
     corroboration_required: false
     license: "public"
-  # univ_csu: disabled (see #213)
-  #   reliability: A
-  #   credibility: 1
-  #   corroboration_required: false
-  #   license: "public"
+  univ_csu:
+    reliability: A
+    credibility: 1
+    corroboration_required: false
+    license: "public"
   univ_ut:
     reliability: A
     credibility: 1
@@ -353,7 +351,7 @@ scoring:
     rss_volokh: 0.8
     rss_courthouse_news: 0.85
     univ_uc: 0.95
-    # univ_csu: 0.95  # disabled (see #213)
+    univ_csu: 0.95
     univ_ut: 0.95
     univ_tamu: 0.95
     univ_umn: 0.95
