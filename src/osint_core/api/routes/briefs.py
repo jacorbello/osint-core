@@ -169,10 +169,7 @@ async def create_brief(
     """Generate and persist a new intelligence brief."""
     ctx: BriefContext = await fetch_brief_context(db, body.query)
 
-    generator = BriefGenerator(
-        vllm_url=settings.vllm_url,
-        llm_model=settings.llm_model,
-    )
+    generator = BriefGenerator()
 
     try:
         content_md, generated_by = await generator.generate(

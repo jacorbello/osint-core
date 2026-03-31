@@ -12,13 +12,12 @@ from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import httpx
 import structlog
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from osint_core.config import settings
+from osint_core.llm import llm_chat_completion
 from osint_core.models.lead import Lead
 from osint_core.models.report import Report
 from osint_core.services.courtlistener import CourtListenerClient
@@ -39,6 +38,24 @@ _NARRATIVE_SYSTEM_PROMPT = (
     '"jurisdiction_analysis": "...", "time_sensitivity": "...", '
     '"affected_population": "...", "policy_text": "...", "precedents": "..."}'
 )
+
+_NARRATIVE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "executive_summary": {"type": "string"},
+        "constitutional_analysis": {"type": "string"},
+        "recommendation": {"type": "string"},
+        "parties": {"type": "string"},
+        "evidence": {"type": "string"},
+        "jurisdiction_analysis": {"type": "string"},
+        "time_sensitivity": {"type": "string"},
+        "affected_population": {"type": "string"},
+        "policy_text": {"type": "string"},
+        "precedents": {"type": "string"},
+    },
+    "required": ["executive_summary", "constitutional_analysis", "recommendation"],
+    "additionalProperties": False,
+}
 
 
 @dataclass
@@ -95,28 +112,22 @@ async def _generate_narrative(lead: Lead) -> dict[str, Any]:
     user_msg = f"Lead data:\n{json.dumps(lead_data, default=str)}"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{settings.vllm_url}/v1/chat/completions",
-                json={
-                    "model": settings.llm_model,
-                    "messages": [
-                        {"role": "system", "content": _NARRATIVE_SYSTEM_PROMPT},
-                        {"role": "user", "content": user_msg},
-                    ],
-                    "max_tokens": 1500,
-                    "temperature": 0.2,
-                    "response_format": {"type": "json_object"},
-                },
-            )
-            resp.raise_for_status()
+        content = await llm_chat_completion(
+            messages=[
+                {"role": "system", "content": _NARRATIVE_SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            max_tokens=1500,
+            temperature=0.2,
+            timeout=30.0,
+            response_format={"type": "json_object"},
+            json_schema=_NARRATIVE_SCHEMA,
+        )
     except Exception as exc:
         logger.warning("narrative_generation_failed", lead_id=str(lead.id), error=str(exc))
         return _fallback_narrative(lead)
 
     try:
-        data = resp.json()
-        content = data["choices"][0]["message"]["content"]
         result = _extract_json(content)
         if result is None:
             logger.warning(

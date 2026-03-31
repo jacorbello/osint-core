@@ -98,10 +98,7 @@ async def create_job(
 
         ctx: BriefContext = await fetch_brief_context(db, query_str)
 
-        generator = BriefGenerator(
-            vllm_url=settings.vllm_url,
-            llm_model=settings.llm_model,
-        )
+        generator = BriefGenerator()
         job = Job(
             job_type=body.kind,
             status="running",

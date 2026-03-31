@@ -7,11 +7,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, NamedTuple
 
-import httpx
 import structlog
 from jinja2 import Template
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from osint_core.llm import llm_chat_completion
 
 logger = structlog.get_logger()
 
@@ -131,24 +132,18 @@ def _load_template() -> Template:
 
 
 class BriefGenerator:
-    """Generate intelligence briefs using vLLM or a Jinja2 template fallback.
+    """Generate intelligence briefs using LLM or a Jinja2 template fallback.
 
     Args:
-        vllm_url: Base URL for the vLLM API (e.g. ``http://vllm-inference:8000``).
-        llm_model: Model identifier (e.g. ``meta-llama/Llama-3.2-3B-Instruct``).
-        llm_available: Whether to attempt vLLM generation before falling back.
+        llm_available: Whether to attempt LLM generation before falling back.
     """
 
     def __init__(
         self,
         *,
-        vllm_url: str = "",
-        llm_model: str = "",
         llm_available: bool = True,
     ) -> None:
-        self._vllm_url = vllm_url.rstrip("/") if vllm_url else ""
-        self._llm_model = llm_model
-        self._llm_available = llm_available and bool(vllm_url)
+        self._llm_available = llm_available
         self._template = _load_template()
 
     # ------------------------------------------------------------------
@@ -201,7 +196,7 @@ class BriefGenerator:
     # ------------------------------------------------------------------
 
     async def generate_from_vllm(self, *, query: str, context: str) -> str:
-        """Call the vLLM ``/v1/chat/completions`` endpoint to produce an AI brief.
+        """Call the shared LLM helper to produce an AI brief.
 
         Args:
             query: The user's natural-language query describing the brief scope.
@@ -209,45 +204,17 @@ class BriefGenerator:
 
         Returns:
             Generated Markdown string from the LLM.
-
-        Raises:
-            httpx.HTTPStatusError: If the vLLM API returns a non-2xx status.
-            httpx.ConnectError: If the vLLM service is unreachable.
         """
         prompt = f"{_SYSTEM_PROMPT}\n\nQuery: {query}\n\nContext:\n{context}"
-
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{self._vllm_url}/v1/chat/completions",
-                json={
-                    "model": self._llm_model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": False,
-                },
-            )
-            response.raise_for_status()
-
-        data = response.json()
-        choices = data.get("choices")
-        if not choices or not isinstance(choices, list):
-            raise ValueError(
-                "Unexpected vLLM response shape: "
-                f"missing or empty 'choices' (got: {list(data.keys())})"
-            )
-        message = choices[0].get("message", {})
-        content = message.get("content")
-        if content is None:
-            raise ValueError(
-                "Unexpected vLLM response shape: 'choices[0].message.content' is absent"
-            )
-        text: str = content
-
+        content = await llm_chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            timeout=120.0,
+        )
         logger.info(
             "brief_generated_from_vllm",
-            model=self._llm_model,
-            response_length=len(text),
+            response_length=len(content),
         )
-        return text
+        return content
 
     # ------------------------------------------------------------------
     # Unified generation (vLLM first, template fallback)
@@ -292,12 +259,7 @@ class BriefGenerator:
                 context = self._build_context(events, indicators, entities)
                 content_md = await self.generate_from_vllm(query=query, context=context)
                 return content_md, "vllm"
-            except (
-                httpx.HTTPStatusError,
-                httpx.ConnectError,
-                httpx.TimeoutException,
-                ValueError,
-            ) as exc:
+            except Exception as exc:
                 logger.warning(
                     "vllm_generation_failed_falling_back_to_template",
                     error=str(exc),

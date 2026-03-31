@@ -152,30 +152,15 @@ class TestProspectingReportGenerator:
         leads = [_make_lead(), _make_lead(lead_type="policy")]
         db = _mock_db(leads)
 
-        vllm_response = {
-            "choices": [{
-                "message": {
-                    "content": json.dumps({
-                        "executive_summary": "Summary",
-                        "constitutional_analysis": "Analysis",
-                        "recommendation": "Recommend",
-                    }),
-                },
-            }],
-        }
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = vllm_response
+        narrative = json.dumps({
+            "executive_summary": "Summary",
+            "constitutional_analysis": "Analysis",
+            "recommendation": "Recommend",
+        })
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value=narrative), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://test"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             result = await generator.generate_report(db)
 
@@ -190,17 +175,9 @@ class TestProspectingReportGenerator:
         lead_reviewing = _make_lead(status="reviewing")
         db = _mock_db([lead_new, lead_reviewing])
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
-            mock_client = AsyncMock()
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             await generator.generate_report(db)
 
@@ -212,39 +189,23 @@ class TestProspectingReportGenerator:
     async def test_archive_failure_raises(self, generator):
         db = _mock_db([_make_lead()])
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
-             patch(f"{_MOD}._archive_pdf", return_value=""), \
-             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
-            mock_client = AsyncMock()
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
-
-            with pytest.raises(RuntimeError, match="PDF archival"):
-                await generator.generate_report(db)
+        with (
+            patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"),
+            patch(f"{_MOD}._archive_pdf", return_value=""),
+            patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"),
+            pytest.raises(RuntimeError, match="PDF archival"),
+        ):
+            await generator.generate_report(db)
 
     @pytest.mark.asyncio()
-    async def test_fallback_on_non_json_response_body(self, generator):
-        """When vLLM returns a non-JSON body (e.g. HTML error), fallback is used."""
+    async def test_fallback_on_llm_failure(self, generator):
         leads = [_make_lead()]
         db = _mock_db(leads)
 
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.side_effect = json.JSONDecodeError("Expecting value", "", 0)
-
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        mock_llm = AsyncMock(side_effect=Exception("LLM down"))
+        with patch(f"{_MOD}.llm_chat_completion", mock_llm), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             result = await generator.generate_report(db)
 
@@ -252,18 +213,15 @@ class TestProspectingReportGenerator:
         assert result.lead_count == 1
 
     @pytest.mark.asyncio()
-    async def test_fallback_on_vllm_failure(self, generator):
+    async def test_fallback_on_unparseable_content(self, generator):
+        """When LLM returns non-JSON content, fallback is used."""
         leads = [_make_lead()]
         db = _mock_db(leads)
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        mock_llm = AsyncMock(return_value="Not valid JSON at all")
+        with patch(f"{_MOD}.llm_chat_completion", mock_llm), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(side_effect=Exception("vLLM down"))
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             result = await generator.generate_report(db)
 
@@ -271,8 +229,8 @@ class TestProspectingReportGenerator:
         assert result.lead_count == 1
 
     @pytest.mark.asyncio()
-    async def test_vllm_request_includes_response_format(self, generator):
-        """The vLLM request includes response_format: json_object (#211)."""
+    async def test_llm_called_with_expected_params(self, generator):
+        """The llm_chat_completion call includes expected parameters."""
         leads = [_make_lead()]
         db = _mock_db(leads)
         narrative = json.dumps({
@@ -281,24 +239,18 @@ class TestProspectingReportGenerator:
             "recommendation": "Test",
         })
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        mock_llm = AsyncMock(return_value=narrative)
+        with patch(f"{_MOD}.llm_chat_completion", mock_llm), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {
-                "choices": [{"message": {"content": narrative}}],
-            }
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             await generator.generate_report(db)
 
-        body = mock_client.post.call_args.kwargs["json"]
-        assert body["response_format"] == {"type": "json_object"}
+        call_kwargs = mock_llm.call_args.kwargs
+        assert call_kwargs["max_tokens"] == 1500
+        assert call_kwargs["temperature"] == 0.2
+        assert call_kwargs["response_format"] == {"type": "json_object"}
+        assert call_kwargs["json_schema"] is not None
 
     @pytest.mark.asyncio()
     async def test_parses_markdown_fenced_json(self, generator):
@@ -312,19 +264,9 @@ class TestProspectingReportGenerator:
         }
         fenced = f"```json\n{json.dumps(narrative_dict)}\n```"
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value=fenced), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {
-                "choices": [{"message": {"content": fenced}}],
-            }
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             result = await generator.generate_report(db)
 
@@ -350,17 +292,9 @@ class TestProspectingReportGenerator:
         ordered = [lead_critical, lead_high_b, lead_high_a, lead_low]
         db = _mock_db(ordered)
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
-            mock_client = AsyncMock()
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             await generator.generate_report(db)
 
@@ -402,28 +336,14 @@ class TestProspectingReportGenerator:
         mock_cl.verify_citations = AsyncMock(return_value=mock_citations)
         generator = ProspectingReportGenerator(courtlistener=mock_cl)
 
-        vllm_response = {
-            "choices": [{
-                "message": {
-                    "content": json.dumps({
-                        "executive_summary": "Summary referencing Tinker v. Des Moines",
-                        "constitutional_analysis": "Analysis",
-                    }),
-                },
-            }],
-        }
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = vllm_response
+        narrative = json.dumps({
+            "executive_summary": "Summary referencing Tinker v. Des Moines",
+            "constitutional_analysis": "Analysis",
+        })
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value=narrative), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             result = await generator.generate_report(db)
 
@@ -448,17 +368,9 @@ class TestProspectingReportGenerator:
         mock_cl.verify_citations = AsyncMock(side_effect=Exception("API down"))
         generator = ProspectingReportGenerator(courtlistener=mock_cl)
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
-            mock_client = AsyncMock()
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             result = await generator.generate_report(db)
 
@@ -471,17 +383,9 @@ class TestProspectingReportGenerator:
         leads = [_make_lead()]
         db = _mock_db(leads)
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"), \
              patch("weasyprint.HTML") as mock_html:
-            mock_client = AsyncMock()
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             mock_html.return_value.write_pdf.side_effect = OSError(
                 "cairo surface error"
@@ -510,17 +414,9 @@ class TestProspectingReportGenerator:
         mock_cl.verify_citations = AsyncMock(return_value=mock_citations)
         generator = ProspectingReportGenerator(courtlistener=mock_cl)
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
-            mock_client = AsyncMock()
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             await generator.generate_report(db)
 
@@ -537,17 +433,9 @@ class TestProspectingReportGenerator:
         leads = [_make_lead()]
         db = _mock_db(leads)
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://bucket/report.pdf"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
-            mock_client = AsyncMock()
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             await generator.generate_report(db)
 
@@ -571,17 +459,9 @@ class TestProspectingReportGenerator:
         lead2 = _make_lead(status="new", lead_type="policy")
         db = _mock_db([lead1, lead2])
 
-        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
-            mock_client = AsyncMock()
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
 
             await generator.generate_report(db)
 

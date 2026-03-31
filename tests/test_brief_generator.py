@@ -3,9 +3,7 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
-import httpx
 import pytest
-import respx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.services.brief_generator import (
@@ -49,18 +47,14 @@ SAMPLE_ENTITIES = [
 
 @pytest.fixture()
 def generator_no_vllm() -> BriefGenerator:
-    """BriefGenerator with vLLM explicitly disabled."""
-    return BriefGenerator(vllm_url="", llm_model="", llm_available=False)
+    """BriefGenerator with LLM explicitly disabled."""
+    return BriefGenerator(llm_available=False)
 
 
 @pytest.fixture()
 def generator_with_vllm() -> BriefGenerator:
-    """BriefGenerator pointing at a (mocked) vLLM endpoint."""
-    return BriefGenerator(
-        vllm_url="http://localhost:8000",
-        llm_model="meta-llama/Llama-3.2-3B-Instruct",
-        llm_available=True,
-    )
+    """BriefGenerator with LLM enabled (mocked via llm_chat_completion)."""
+    return BriefGenerator(llm_available=True)
 
 
 # ---------------------------------------------------------------------------
@@ -85,47 +79,35 @@ def test_template_fallback_produces_markdown(generator_no_vllm: BriefGenerator):
     assert "APT-29" in md
 
 
-@respx.mock
 @pytest.mark.asyncio
 async def test_vllm_generation(generator_with_vllm: BriefGenerator):
-    """BriefGenerator calls vLLM API and returns the generated text."""
-    vllm_response = {
-        "choices": [
-            {
-                "message": {
-                    "content": "## Threat Summary\n\nCritical CVE activity detected."
-                }
-            }
-        ]
-    }
-
-    respx.post("http://localhost:8000/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json=vllm_response)
-    )
-
-    result = await generator_with_vllm.generate_from_vllm(
-        query="Summarize recent CVE activity",
-        context="CVE-2026-1234 was published with CVSS 9.8",
-    )
+    """BriefGenerator calls llm_chat_completion and returns the generated text."""
+    with patch(
+        "osint_core.services.brief_generator.llm_chat_completion",
+        return_value="## Threat Summary\n\nCritical CVE activity detected.",
+    ):
+        result = await generator_with_vllm.generate_from_vllm(
+            query="Summarize recent CVE activity",
+            context="CVE-2026-1234 was published with CVSS 9.8",
+        )
 
     assert "Threat Summary" in result
     assert "Critical CVE activity detected" in result
 
 
-@respx.mock
 @pytest.mark.asyncio
 async def test_vllm_fallback_on_error(generator_with_vllm: BriefGenerator):
-    """When vLLM returns an error, generate() falls back to template."""
-    respx.post("http://localhost:8000/v1/chat/completions").mock(
-        return_value=httpx.Response(500, json={"error": "model not found"})
-    )
-
-    result, generated_by = await generator_with_vllm.generate(
-        query="Summarize threats",
-        events=SAMPLE_EVENTS,
-        indicators=SAMPLE_INDICATORS,
-        entities=SAMPLE_ENTITIES,
-    )
+    """When LLM raises an error, generate() falls back to template."""
+    with patch(
+        "osint_core.services.brief_generator.llm_chat_completion",
+        side_effect=RuntimeError("model not found"),
+    ):
+        result, generated_by = await generator_with_vllm.generate(
+            query="Summarize threats",
+            events=SAMPLE_EVENTS,
+            indicators=SAMPLE_INDICATORS,
+            entities=SAMPLE_ENTITIES,
+        )
 
     # Should still produce valid markdown via template fallback
     assert "# Intel Brief:" in result
@@ -262,30 +244,31 @@ def test_serialize_events_for_context_deduplicates_entities():
     assert entity_ids == [shared_ent_id]
 
 
-@respx.mock
 @pytest.mark.asyncio
 async def test_vllm_receives_event_context(generator_with_vllm: BriefGenerator):
     """When events are provided, the LLM prompt includes their data."""
-    vllm_response = {
-        "choices": [{"message": {"content": "## Brief\n\nAnalysis complete."}}]
-    }
+    captured_messages: list = []
 
-    route = respx.post("http://localhost:8000/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json=vllm_response)
-    )
+    async def _fake_llm(**kwargs):
+        captured_messages.append(kwargs["messages"])
+        return "## Brief\n\nAnalysis complete."
 
-    content_md, generated_by = await generator_with_vllm.generate(
-        query="Austin terrorism",
-        events=SAMPLE_EVENTS,
-        indicators=SAMPLE_INDICATORS,
-        entities=SAMPLE_ENTITIES,
-    )
+    with patch(
+        "osint_core.services.brief_generator.llm_chat_completion",
+        side_effect=_fake_llm,
+    ):
+        content_md, generated_by = await generator_with_vllm.generate(
+            query="Austin terrorism",
+            events=SAMPLE_EVENTS,
+            indicators=SAMPLE_INDICATORS,
+            entities=SAMPLE_ENTITIES,
+        )
 
-    sent_body = route.calls.last.request.content.decode()
-    # The prompt sent to vLLM should include actual event data
-    assert "CVE-2026-1234 Published" in sent_body
-    assert "192.168.1.100" in sent_body
-    assert "APT-29" in sent_body
+    # The prompt sent to LLM should include actual event data
+    sent_prompt = captured_messages[0][0]["content"]
+    assert "CVE-2026-1234 Published" in sent_prompt
+    assert "192.168.1.100" in sent_prompt
+    assert "APT-29" in sent_prompt
     assert generated_by == "vllm"
 
 
@@ -294,28 +277,25 @@ async def test_vllm_receives_event_context(generator_with_vllm: BriefGenerator):
 # ---------------------------------------------------------------------------
 
 
-@respx.mock
 @pytest.mark.asyncio
 async def test_generate_empty_events_skips_vllm(generator_with_vllm: BriefGenerator):
-    """When events list is empty, generate() must NOT call vLLM."""
-    # Register a route — we assert it is never called
-    route = respx.post("http://localhost:8000/v1/chat/completions").mock(
-        return_value=httpx.Response(
-            200, json={"choices": [{"message": {"content": "hallucination"}}]},
+    """When events list is empty, generate() must NOT call the LLM."""
+    mock_llm = MagicMock()
+
+    with patch(
+        "osint_core.services.brief_generator.llm_chat_completion",
+        mock_llm,
+    ):
+        result, generated_by = await generator_with_vllm.generate(
+            query="What are the current terror threats in Austin, Texas?",
+            events=[],
+            indicators=[],
+            entities=[],
         )
-    )
 
-    result, generated_by = await generator_with_vllm.generate(
-        query="What are the current terror threats in Austin, Texas?",
-        events=[],
-        indicators=[],
-        entities=[],
-    )
-
-    assert route.called is False, "vLLM must not be called when there are no events"
+    mock_llm.assert_not_called()
     assert "# No Matching Events" in result
     assert "Austin, Texas" in result
-    assert "hallucination" not in result
     assert generated_by == "none"
 
 

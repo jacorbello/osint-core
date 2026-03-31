@@ -2,9 +2,7 @@
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
-import respx
 
 from osint_core.workers.nlp_enrich import (
     _CAL_SYSTEM_MESSAGE,
@@ -361,91 +359,91 @@ class TestValidateAttackTechniques:
         assert _validate_attack_techniques([]) == []
 
 
-@respx.mock
 @pytest.mark.asyncio
 async def test_call_vllm_includes_attack_techniques_in_system_prompt():
-    """The vLLM system message must include ATT&CK technique instructions."""
+    """The default system message must include ATT&CK technique instructions."""
     content = json.dumps({
         "summary": "s", "relevance": "relevant",
         "entities": [], "attack_techniques": [],
     })
-    vllm_response = {
-        "choices": [{"message": {"content": content}}]
-    }
-    route = respx.post("http://localhost:8001/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json=vllm_response),
-    )
+
     from osint_core.workers.nlp_enrich import _call_vllm
-    await _call_vllm("test prompt")
-    sent = route.calls.last.request
-    body = json.loads(sent.content)
-    messages = body["messages"]
-    assert len(messages) == 2
-    assert messages[0]["role"] == "system"
-    assert "JSON only" in messages[0]["content"]
-    assert "attack_techniques" in messages[0]["content"]
-    assert "MITRE ATT&CK" in messages[0]["content"]
-    assert "T1566" in messages[0]["content"]
+
+    with patch(
+        "osint_core.workers.nlp_enrich.llm_chat_completion",
+        new_callable=AsyncMock,
+        return_value=content,
+    ) as mock_llm:
+        await _call_vllm("test prompt")
+        messages = mock_llm.call_args.kwargs["messages"]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert "JSON only" in messages[0]["content"]
+        assert "attack_techniques" in messages[0]["content"]
+        assert "MITRE ATT&CK" in messages[0]["content"]
+        assert "T1566" in messages[0]["content"]
 
 
-@respx.mock
 @pytest.mark.asyncio
 async def test_call_vllm_includes_system_role():
-    """The vLLM payload must include a system role message."""
-    vllm_response = {
-        "choices": [
-            {"message": {"content": '{"summary":"s","relevance":"relevant","entities":[]}'}}
-        ]
-    }
-    route = respx.post("http://localhost:8001/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json=vllm_response),
-    )
+    """The payload must include a system role message."""
+    content = '{"summary":"s","relevance":"relevant","entities":[],"attack_techniques":[]}'
+
     from osint_core.workers.nlp_enrich import _call_vllm
-    await _call_vllm("test prompt")
-    sent = route.calls.last.request
-    body = json.loads(sent.content)
-    messages = body["messages"]
-    assert len(messages) == 2
-    assert messages[0]["role"] == "system"
-    assert "JSON only" in messages[0]["content"]
-    assert messages[1]["role"] == "user"
-    assert messages[1]["content"] == "test prompt"
+
+    with patch(
+        "osint_core.workers.nlp_enrich.llm_chat_completion",
+        new_callable=AsyncMock,
+        return_value=content,
+    ) as mock_llm:
+        await _call_vllm("test prompt")
+        messages = mock_llm.call_args.kwargs["messages"]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert "JSON only" in messages[0]["content"]
+        assert messages[1]["role"] == "user"
+        assert messages[1]["content"] == "test prompt"
 
 
-@respx.mock
 @pytest.mark.asyncio
 async def test_call_vllm_custom_system_message_and_max_tokens():
-    """Custom system_message and max_tokens are forwarded in the payload."""
+    """Custom system_message and max_tokens are forwarded to llm_chat_completion."""
     content = json.dumps({
         "summary": "s", "relevance": "relevant",
         "entities": [], "constitutional_basis": [],
     })
-    vllm_response = {"choices": [{"message": {"content": content}}]}
-    route = respx.post("http://localhost:8001/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json=vllm_response),
-    )
+
     from osint_core.workers.nlp_enrich import _call_vllm
+
     custom_msg = "You are a constitutional rights analyst. Respond with JSON only."
-    await _call_vllm("test prompt", system_message=custom_msg, max_tokens=800)
-    sent = route.calls.last.request
-    body = json.loads(sent.content)
-    assert body["messages"][0]["content"] == custom_msg
-    assert body["max_tokens"] == 800
+    with patch(
+        "osint_core.workers.nlp_enrich.llm_chat_completion",
+        new_callable=AsyncMock,
+        return_value=content,
+    ) as mock_llm:
+        await _call_vllm("test prompt", system_message=custom_msg, max_tokens=800)
+        assert mock_llm.call_args.kwargs["messages"][0]["content"] == custom_msg
+        assert mock_llm.call_args.kwargs["max_tokens"] == 800
 
 
-@respx.mock
 @pytest.mark.asyncio
 async def test_call_vllm_parses_markdown_wrapped_json():
-    """vLLM sometimes wraps JSON in markdown code fences."""
-    wrapped = '```json\n{"summary":"s","relevance":"relevant","entities":[]}\n```'
-    vllm_response = {"choices": [{"message": {"content": wrapped}}]}
-    respx.post("http://localhost:8001/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json=vllm_response),
+    """LLM sometimes wraps JSON in markdown code fences."""
+    wrapped = (
+        '```json\n{"summary":"s","relevance":"relevant",'
+        '"entities":[],"attack_techniques":[]}\n```'
     )
+
     from osint_core.workers.nlp_enrich import _call_vllm
-    result = await _call_vllm("test prompt")
-    assert result["relevance"] == "relevant"
-    assert result["summary"] == "s"
+
+    with patch(
+        "osint_core.workers.nlp_enrich.llm_chat_completion",
+        new_callable=AsyncMock,
+        return_value=wrapped,
+    ):
+        result = await _call_vllm("test prompt")
+        assert result["relevance"] == "relevant"
+        assert result["summary"] == "s"
 
 
 # ---------------------------------------------------------------------------
