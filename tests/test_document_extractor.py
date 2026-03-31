@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-from osint_core.services.document_extractor import DocumentExtractor, DocumentChunk
+from osint_core.services.document_extractor import DocumentExtractor
 
 
 class TestExtractHtml:
