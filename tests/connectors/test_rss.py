@@ -290,5 +290,48 @@ async def test_fetch_follows_redirects(respx_mock):
             headers={"content-type": "application/rss+xml"},
         ),
     )
-    items = await connector.fetch()
+    with patch("osint_core.connectors.rss._is_safe_redirect_target", return_value=True):
+        items = await connector.fetch()
     assert len(items) == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_blocks_redirect_to_private_ip(respx_mock):
+    """RSS connector blocks redirects to private/loopback IPs (SSRF mitigation)."""
+    config = SourceConfig(
+        id="rss-ssrf",
+        type="rss",
+        url="https://public.example.com/feed",
+        weight=0.5,
+    )
+    connector = RssConnector(config)
+    respx_mock.get("https://public.example.com/feed").mock(
+        return_value=httpx.Response(
+            302,
+            headers={"Location": "http://169.254.169.254/latest/meta-data"},
+        ),
+    )
+    with patch("osint_core.connectors.rss._is_safe_redirect_target", return_value=False):
+        items = await connector.fetch()
+    assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_blocks_non_http_redirect(respx_mock):
+    """RSS connector blocks redirects to non-HTTP(S) schemes."""
+    config = SourceConfig(
+        id="rss-ftp",
+        type="rss",
+        url="https://public.example.com/feed",
+        weight=0.5,
+    )
+    connector = RssConnector(config)
+    respx_mock.get("https://public.example.com/feed").mock(
+        return_value=httpx.Response(
+            302,
+            headers={"Location": "ftp://internal.example.com/data"},
+        ),
+    )
+    with patch("osint_core.connectors.rss._is_safe_redirect_target", return_value=False):
+        items = await connector.fetch()
+    assert items == []
