@@ -233,6 +233,50 @@ def _extract_json(content: str) -> dict[str, Any] | None:
     return None
 
 
+def _build_deep_analysis_context(lead: Lead) -> dict[str, Any]:
+    """Build template context from deep analysis results."""
+    analysis = lead.deep_analysis or {}
+
+    if lead.lead_type == "policy":
+        provisions = analysis.get("provisions", [])
+        return {
+            "has_deep_analysis": True,
+            "lead_type": "policy",
+            "title": lead.title,
+            "institution": lead.institution,
+            "jurisdiction": lead.jurisdiction,
+            "severity": lead.severity,
+            "confidence": lead.confidence,
+            "constitutional_basis": lead.constitutional_basis,
+            "document_summary": analysis.get("document_summary", ""),
+            "overall_assessment": analysis.get("overall_assessment", ""),
+            "actionable": analysis.get("actionable", False),
+            "provisions": provisions,
+            "source_citations": [],
+            "legal_citations": [],
+        }
+    else:
+        # Incident
+        return {
+            "has_deep_analysis": True,
+            "lead_type": "incident",
+            "title": lead.title,
+            "institution": lead.institution or analysis.get("institution", ""),
+            "jurisdiction": lead.jurisdiction,
+            "severity": lead.severity,
+            "confidence": lead.confidence,
+            "constitutional_basis": lead.constitutional_basis,
+            "incident_summary": analysis.get("incident_summary", ""),
+            "rights_violated": analysis.get("rights_violated", []),
+            "individuals_identified": analysis.get("individuals_identified", []),
+            "corroboration_strength": analysis.get("corroboration_strength", ""),
+            "corroboration_notes": analysis.get("corroboration_notes", ""),
+            "actionable": analysis.get("actionable", False),
+            "source_citations": [],
+            "legal_citations": [],
+        }
+
+
 def _fallback_narrative(lead: Lead) -> dict[str, str]:
     """Produce minimal narrative when LLM is unavailable."""
     return {
@@ -279,62 +323,72 @@ class ProspectingReportGenerator:
         all_legal_citations: list[dict[str, Any]] = []
 
         for lead in leads:
-            sections = await _generate_narrative(lead)
+            if getattr(lead, "analysis_status", None) == "completed" and lead.deep_analysis:
+                # Skip non-actionable leads
+                if not lead.deep_analysis.get("actionable", True):
+                    continue
+                lead_ctx = _build_deep_analysis_context(lead)
+            else:
+                # Existing shallow narrative path
+                sections = await _generate_narrative(lead)
 
-            # Source citations from lead metadata
-            source_cites: list[str] = []
-            if lead.citations:
-                source_cites = lead.citations.get("sources", [])
-                all_source_citations.extend(source_cites)
+                # Source citations from lead metadata
+                source_cites: list[str] = []
+                if lead.citations:
+                    source_cites = lead.citations.get("sources", [])
+                    all_source_citations.extend(source_cites)
 
-            # Verify legal citations via CourtListener
-            lead_legal_citations: list[dict[str, Any]] = []
-            try:
-                narrative_text = " ".join(
-                    str(v) for v in sections.values() if v
-                )
-                if not self._courtlistener.api_key:
-                    logger.debug(
-                        "courtlistener_skipped_no_api_key",
+                # Verify legal citations via CourtListener
+                lead_legal_citations: list[dict[str, Any]] = []
+                try:
+                    narrative_text = " ".join(
+                        str(v) for v in sections.values() if v
+                    )
+                    if not self._courtlistener.api_key:
+                        logger.debug(
+                            "courtlistener_skipped_no_api_key",
+                            lead_id=str(lead.id),
+                        )
+                        verified: list[Any] = []
+                    else:
+                        verified = await asyncio.wait_for(
+                            self._courtlistener.verify_citations(narrative_text),
+                            timeout=10.0,
+                        )
+                    for vc in verified:
+                        cite_dict: dict[str, Any] = {
+                            "case_name": vc.case_name,
+                            "citation": vc.citation,
+                            "courtlistener_url": vc.courtlistener_url,
+                            "verified": vc.verified,
+                            "relevance": vc.relevance,
+                            "holding_summary": vc.holding_summary,
+                        }
+                        lead_legal_citations.append(cite_dict)
+                        all_legal_citations.append(cite_dict)
+                except Exception as exc:
+                    logger.warning(
+                        "courtlistener_verification_failed",
                         lead_id=str(lead.id),
+                        error=str(exc),
                     )
-                    verified: list[Any] = []
-                else:
-                    verified = await asyncio.wait_for(
-                        self._courtlistener.verify_citations(narrative_text),
-                        timeout=10.0,
-                    )
-                for vc in verified:
-                    cite_dict: dict[str, Any] = {
-                        "case_name": vc.case_name,
-                        "citation": vc.citation,
-                        "courtlistener_url": vc.courtlistener_url,
-                        "verified": vc.verified,
-                        "relevance": vc.relevance,
-                        "holding_summary": vc.holding_summary,
-                    }
-                    lead_legal_citations.append(cite_dict)
-                    all_legal_citations.append(cite_dict)
-            except Exception as exc:
-                logger.warning(
-                    "courtlistener_verification_failed",
-                    lead_id=str(lead.id),
-                    error=str(exc),
-                )
 
-            lead_contexts.append({
-                "lead_type": lead.lead_type,
-                "title": lead.title,
-                "summary": lead.summary,
-                "constitutional_basis": lead.constitutional_basis or [],
-                "jurisdiction": lead.jurisdiction,
-                "institution": lead.institution,
-                "severity": lead.severity,
-                "confidence": lead.confidence,
-                "sections": sections,
-                "source_citations": source_cites,
-                "legal_citations": lead_legal_citations,
-            })
+                lead_ctx = {
+                    "has_deep_analysis": False,
+                    "lead_type": lead.lead_type,
+                    "title": lead.title,
+                    "summary": lead.summary,
+                    "constitutional_basis": lead.constitutional_basis or [],
+                    "jurisdiction": lead.jurisdiction,
+                    "institution": lead.institution,
+                    "severity": lead.severity,
+                    "confidence": lead.confidence,
+                    "sections": sections,
+                    "source_citations": source_cites,
+                    "legal_citations": lead_legal_citations,
+                }
+
+            lead_contexts.append(lead_ctx)
 
         # Build summary stats
         by_jurisdiction: dict[str, int] = {}

@@ -67,6 +67,138 @@
 <!-- Lead Sections -->
 {% if leads %}
     {% for lead in leads %}
+    {% if lead.has_deep_analysis and lead.lead_type == 'policy' %}
+    {# --- Deep Analysis: Policy Lead --- #}
+    <div class="lead-section">
+        <div class="lead-header">
+            <div class="lead-title">{{ lead.title }}</div>
+            <div class="lead-meta">
+                <span class="severity-badge severity-{{ lead.severity or 'info' }}">
+                    {{ lead.severity or 'info' }}
+                </span>
+                &nbsp;
+                Confidence:
+                <span class="confidence-bar">
+                    <span class="confidence-fill" style="width: {{ (lead.confidence or 0) * 100 }}%"></span>
+                </span>
+                {{ "%.0f" | format((lead.confidence or 0) * 100) }}%
+                &nbsp;|&nbsp;
+                Policy
+                {% if lead.institution %} — {{ lead.institution }}{% endif %}
+                {% if lead.jurisdiction %} ({{ lead.jurisdiction }}){% endif %}
+            </div>
+        </div>
+
+        {% if lead.constitutional_basis %}
+        <div class="constitutional-tags">
+            {% for basis in lead.constitutional_basis %}
+            <span class="constitutional-tag">{{ basis }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if lead.document_summary %}
+        <div class="lead-subsection">
+            <h3>Document Summary</h3>
+            <p>{{ lead.document_summary }}</p>
+        </div>
+        {% endif %}
+
+        {% if lead.overall_assessment %}
+        <div class="lead-subsection">
+            <h3>Overall Assessment</h3>
+            <p>{{ lead.overall_assessment }}</p>
+        </div>
+        {% endif %}
+
+        {% for provision in lead.provisions %}
+        <div class="lead-subsection provision">
+            <h4>{{ provision.section_reference }} — {{ provision.constitutional_issue }}</h4>
+            <blockquote>{{ provision.quoted_language }}</blockquote>
+            <p>
+                <strong>Constitutional basis:</strong> {{ provision.constitutional_basis }}<br>
+                <strong>Severity:</strong> {{ provision.severity }} —
+                {{ provision.facial_or_as_applied }} challenge<br>
+                <strong>Affected population:</strong> {{ provision.affected_population }}
+            </p>
+            {% if provision.precedent %}
+            <p><strong>Relevant precedent:</strong></p>
+            <ul>
+                {% for p in provision.precedent %}
+                <li>
+                    <em>{{ p.case_name }}</em>, {{ p.citation }}
+                    {% if p.verified %}
+                        <span class="citation-verified">✓</span>
+                    {% else %}
+                        <span class="citation-unverified">⚠</span>
+                    {% endif %}
+                    {% if p.holding_summary %} — {{ p.holding_summary }}{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    {% elif lead.has_deep_analysis and lead.lead_type == 'incident' %}
+    {# --- Deep Analysis: Incident Lead --- #}
+    <div class="lead-section">
+        <div class="lead-header">
+            <div class="lead-title">{{ lead.title }}</div>
+            <div class="lead-meta">
+                <span class="severity-badge severity-{{ lead.severity or 'info' }}">
+                    {{ lead.severity or 'info' }}
+                </span>
+                &nbsp;
+                Confidence:
+                <span class="confidence-bar">
+                    <span class="confidence-fill" style="width: {{ (lead.confidence or 0) * 100 }}%"></span>
+                </span>
+                {{ "%.0f" | format((lead.confidence or 0) * 100) }}%
+                &nbsp;|&nbsp;
+                Incident
+                {% if lead.institution %} — {{ lead.institution }}{% endif %}
+                {% if lead.jurisdiction %} ({{ lead.jurisdiction }}){% endif %}
+            </div>
+        </div>
+
+        {% if lead.constitutional_basis %}
+        <div class="constitutional-tags">
+            {% for basis in lead.constitutional_basis %}
+            <span class="constitutional-tag">{{ basis }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if lead.incident_summary %}
+        <div class="lead-subsection">
+            <h3>Incident Summary</h3>
+            <p>{{ lead.incident_summary }}</p>
+        </div>
+        {% endif %}
+
+        <div class="lead-subsection">
+            <p>
+                <strong>Rights violated:</strong> {{ lead.rights_violated | join(', ') }}<br>
+                <strong>Corroboration:</strong> {{ lead.corroboration_strength }} — {{ lead.corroboration_notes }}
+            </p>
+        </div>
+
+        {% if lead.individuals_identified %}
+        <div class="lead-subsection">
+            <h3>Individuals Identified</h3>
+            <ul>
+                {% for person in lead.individuals_identified %}
+                <li>{{ person.name }} ({{ person.role }})</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+
+    {% else %}
+    {# --- Shallow Narrative Lead (existing) --- #}
     <div class="lead-section">
         <div class="lead-header">
             <div class="lead-title">{{ lead.title }}</div>
@@ -228,6 +360,7 @@
         </div>
         {% endif %}
     </div>
+    {% endif %}
     {% endfor %}
 {% else %}
     <div class="no-leads-message">
