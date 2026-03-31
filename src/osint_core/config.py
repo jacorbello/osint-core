@@ -68,7 +68,7 @@ class Settings(BaseSettings):
 
     # --- Resend ---
     resend_api_key: str = ""
-    resend_from_email: str = "reports@corbello.io"
+    resend_from_email: str = "reports@mail.corbello.io"
     resend_recipients: str = ""  # comma-separated list of email addresses
 
     # --- Shodan ---

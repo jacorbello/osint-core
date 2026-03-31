@@ -375,7 +375,7 @@ custom:
       - "08:00"
       - "15:00"
   resend:
-    from_email: "reports@corbello.io"
+    from_email: "reports@mail.corbello.io"
     recipients:
       - "${CAL_REPORT_RECIPIENT_1}"
       - "${CAL_REPORT_RECIPIENT_2}"
