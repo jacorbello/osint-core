@@ -1526,3 +1526,101 @@ class TestUpdatedSelectors:
         )
         assert len(links) == 1
         assert links[0][1] == "https://docs.udc.edu/ogc/Minors.pdf"
+
+    def test_csu_selector(self):
+        """CSU board meetings page has meeting links and PDFs."""
+        html = """
+        <main>
+          <a href="/csu-system/board-of-trustees/past-meetings/2026/Pages/March.aspx">
+            March 2026</a>
+          <a href="/csu-system/board-of-trustees/past-meetings/2025/Pages/Nov.aspx">
+            November 2025</a>
+          <a href="/csu-system/board-of-trustees/PastNotices/Documents/notice.pdf">
+            Meeting Notice</a>
+          <a href="/about">About CSU</a>
+        </main>
+        """
+        links = self._extract(
+            html, "a[href*='past-meetings/'], a[href$='.pdf']",
+            "https://www.calstate.edu/csu-system/board-of-trustees/past-meetings",
+        )
+        assert len(links) == 3
+        assert "March" in links[0][0]
+
+
+class TestImpersonationFetch:
+    """Tests for curl_cffi browser impersonation (#220)."""
+
+    @pytest.mark.asyncio()
+    async def test_impersonation_used_when_configured(self):
+        """Institution with impersonate='true' uses curl_cffi."""
+        config = SourceConfig(
+            id="test-impersonate",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [{
+                    "name": "Bot-Protected University",
+                    "policy_url": "https://botcheck.example.edu/policies",
+                    "selector": "a[href$='.pdf']",
+                    "impersonate": "true",
+                }],
+            },
+        )
+        connector = UniversityPolicyConnector(config)
+
+        mock_cffi_resp = MagicMock()
+        mock_cffi_resp.status_code = 200
+        mock_cffi_resp.content = b"<html><a href='/doc.pdf'>Policy</a></html>"
+        mock_cffi_resp.headers = {"content-type": "text/html"}
+
+        stub_cffi = MagicMock()
+        stub_cffi.get.return_value = mock_cffi_resp
+
+        async def fake_to_thread(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        with (
+            patch(
+                "osint_core.connectors.university_policy.cffi_requests",
+                stub_cffi,
+            ),
+            patch(
+                "osint_core.connectors.university_policy.asyncio.to_thread",
+                side_effect=fake_to_thread,
+            ),
+        ):
+            resp = await connector._fetch_with_impersonation(
+                "https://botcheck.example.edu/policies",
+            )
+
+        assert resp is not None
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio()
+    async def test_impersonation_returns_none_without_curl_cffi(self):
+        """Gracefully returns None when curl_cffi is not installed."""
+        config = SourceConfig(
+            id="test-no-cffi",
+            type="university_policy",
+            url="https://policy.example.edu",
+            weight=0.5,
+            extra={
+                "institutions": [{
+                    "name": "Test University",
+                    "policy_url": "https://test.example.edu",
+                    "selector": "a",
+                }],
+            },
+        )
+        connector = UniversityPolicyConnector(config)
+
+        with patch(
+            "osint_core.connectors.university_policy.cffi_requests", None,
+        ):
+            resp = await connector._fetch_with_impersonation(
+                "https://test.example.edu",
+            )
+
+        assert resp is None

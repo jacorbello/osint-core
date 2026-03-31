@@ -16,6 +16,11 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 import redis.asyncio as aioredis
+
+try:
+    from curl_cffi import requests as cffi_requests  # type: ignore[import-not-found]
+except ImportError:
+    cffi_requests = None
 import redis.exceptions
 import soupsieve
 import structlog
@@ -46,12 +51,12 @@ DEFAULT_INSTITUTIONS: list[dict[str, str]] = [
         "policy_url": "https://policy.ucop.edu/advanced-search.php?action=welcome&op=browse&all=1",
         "selector": "a.blue[href*='/doc/']",
     },
-    # CSU disabled: calstate.edu returns 403 (JS bot check). See #220.
-    # {
-    #     "name": "California State University System",
-    #     "policy_url": "https://www.calstate.edu/csu-system/board-of-trustees/past-meetings",
-    #     "selector": "a[href$='.pdf'], a[href*='policy']",
-    # },
+    {
+        "name": "California State University System",
+        "policy_url": "https://www.calstate.edu/csu-system/board-of-trustees/past-meetings",
+        "selector": "a[href*='past-meetings/'], a[href$='.pdf']",
+        "impersonate": "true",
+    },
     {
         "name": "University of Texas System",
         "policy_url": "https://www.utsystem.edu/offices/board-regents/regents-rules-and-regulations",
@@ -313,6 +318,11 @@ class UniversityPolicyConnector(BaseConnector):
         name = institution["name"]
         policy_url = institution["policy_url"]
         selector = institution["selector"]
+        raw_impersonate = institution.get("impersonate", False)
+        impersonate = (
+            raw_impersonate is True
+            or (isinstance(raw_impersonate, str) and raw_impersonate.lower() == "true")
+        )
 
         logger.info(
             "university_policy_fetch_start",
@@ -321,11 +331,14 @@ class UniversityPolicyConnector(BaseConnector):
             url=policy_url,
         )
 
-        try:
-            resp = await self._fetch_with_validated_redirects(client, policy_url)
-        except ValueError:
-            # Redirect to disallowed host — already logged by the method
-            return []
+        if impersonate:
+            resp = await self._fetch_with_impersonation(policy_url)
+        else:
+            try:
+                resp = await self._fetch_with_validated_redirects(client, policy_url)
+            except ValueError:
+                # Redirect to disallowed host — already logged by the method
+                return []
         if resp is None:
             return []
 
@@ -339,7 +352,10 @@ class UniversityPolicyConnector(BaseConnector):
 
         items: list[RawItem] = []
         for title, url in links:
-            item = await self._process_policy(client, institution, title, url)
+            item = await self._process_policy(
+                client, institution, title, url,
+                impersonate=impersonate,
+            )
             if item is not None:
                 items.append(item)
         return items
@@ -458,6 +474,92 @@ class UniversityPolicyConnector(BaseConnector):
         )
         return None
 
+    async def _fetch_with_impersonation(self, url: str) -> httpx.Response | None:
+        """Fetch a URL using curl_cffi with Chrome TLS impersonation.
+
+        Used for sites behind JavaScript bot checks (e.g. Cloudflare)
+        that reject plain httpx requests. Falls back to None if
+        curl_cffi is not installed or the request fails.
+
+        Redirects are followed manually with domain-allowlist validation
+        to maintain the same SSRF mitigation as ``_fetch_with_validated_redirects``.
+        """
+        if cffi_requests is None:
+            logger.warning(
+                "university_policy_impersonation_unavailable",
+                source_id=self.config.id,
+                url=url,
+                hint="pip install 'osint-core[browser]'",
+            )
+            return None
+
+        current_url = url
+        for _ in range(_MAX_REDIRECTS):
+            try:
+                resp = await asyncio.to_thread(
+                    cffi_requests.get,
+                    current_url,
+                    impersonate="chrome",
+                    timeout=30,
+                    allow_redirects=False,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "university_policy_impersonation_error",
+                    source_id=self.config.id,
+                    url=current_url,
+                    error=str(exc),
+                )
+                return None
+
+            if resp.status_code >= 400:
+                logger.warning(
+                    "university_policy_impersonation_http_error",
+                    source_id=self.config.id,
+                    url=current_url,
+                    status=resp.status_code,
+                )
+                return None
+
+            if resp.status_code not in _REDIRECT_STATUS_CODES:
+                # Wrap curl_cffi response in an httpx.Response-like object
+                return httpx.Response(
+                    status_code=resp.status_code,
+                    content=resp.content,
+                    headers=dict(resp.headers),
+                    request=httpx.Request("GET", current_url),
+                )
+
+            location = resp.headers.get("Location")
+            if not location:
+                return httpx.Response(
+                    status_code=resp.status_code,
+                    content=resp.content,
+                    headers=dict(resp.headers),
+                    request=httpx.Request("GET", current_url),
+                )
+
+            redirect_url = urljoin(current_url, location)
+            if not self._is_url_allowed(redirect_url):
+                logger.warning(
+                    "university_policy_redirect_blocked",
+                    source_id=self.config.id,
+                    original_url=url,
+                    redirect_url=redirect_url,
+                    reason="redirect target not in domain allowlist",
+                )
+                return None
+
+            current_url = redirect_url
+
+        logger.error(
+            "university_policy_too_many_redirects",
+            source_id=self.config.id,
+            url=url,
+            max_redirects=_MAX_REDIRECTS,
+        )
+        return None
+
     # ------------------------------------------------------------------
     # Parsing helpers
     # ------------------------------------------------------------------
@@ -501,6 +603,8 @@ class UniversityPolicyConnector(BaseConnector):
         institution: dict[str, str],
         title: str,
         url: str,
+        *,
+        impersonate: bool = False,
     ) -> RawItem | None:
         """Download a policy document and return a RawItem if new/changed."""
         if not self._is_url_allowed(url):
@@ -513,11 +617,14 @@ class UniversityPolicyConnector(BaseConnector):
             )
             return None
 
-        try:
-            resp = await self._fetch_with_validated_redirects(client, url)
-        except ValueError:
-            # Redirect to disallowed host — already logged by the method
-            return None
+        if impersonate:
+            resp = await self._fetch_with_impersonation(url)
+        else:
+            try:
+                resp = await self._fetch_with_validated_redirects(client, url)
+            except ValueError:
+                # Redirect to disallowed host — already logged by the method
+                return None
         if resp is None:
             return None
 
