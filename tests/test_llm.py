@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-import respx
 
 from osint_core.llm import llm_chat_completion
 
@@ -147,9 +146,8 @@ async def test_both_fail_raises(respx_mock):
         "http://localhost:8001/v1/chat/completions",
     ).mock(return_value=httpx.Response(500, text="vllm down"))
 
-    with patch("osint_core.llm.settings", s):
-        with pytest.raises(Exception):
-            await llm_chat_completion(messages=_MESSAGES, timeout=5.0)
+    with patch("osint_core.llm.settings", s), pytest.raises(httpx.HTTPStatusError):
+        await llm_chat_completion(messages=_MESSAGES, timeout=5.0)
 
 
 @pytest.mark.asyncio
