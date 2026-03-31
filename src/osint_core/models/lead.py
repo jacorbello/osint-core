@@ -60,6 +60,12 @@ class Lead(UUIDMixin, TimestampMixin, Base):
         ARRAY(UUID(as_uuid=True)), server_default="{}", nullable=False
     )
     citations: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    deep_analysis: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True, default=None
+    )
+    analysis_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="pending"
+    )
 
     report_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
@@ -96,4 +102,9 @@ class Lead(UUIDMixin, TimestampMixin, Base):
         Index("ix_leads_jurisdiction", "jurisdiction"),
         Index("ix_leads_reported_at", "reported_at"),
         Index("ix_leads_plan_id", "plan_id"),
+        CheckConstraint(
+            "analysis_status IN ('pending', 'completed', 'no_source_material', 'failed')",
+            name="ck_leads_analysis_status_valid",
+        ),
+        Index("ix_leads_analysis_status", "analysis_status"),
     )
