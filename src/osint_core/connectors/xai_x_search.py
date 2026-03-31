@@ -63,7 +63,7 @@ class XaiXSearchConnector(BaseConnector):
             resp = await self._request_with_retries(client, api_key, body)
 
         if resp is None:
-            logger.warning("xai_no_response", source=self.config.id)
+            logger.debug("xai_no_response", source_id=self.config.id)
             return []
 
         data = resp.json()
@@ -78,7 +78,7 @@ class XaiXSearchConnector(BaseConnector):
             if annotation_items:
                 logger.info(
                     "xai_annotation_fallback",
-                    source=self.config.id,
+                    source_id=self.config.id,
                     json_count=len(items) if items is not None else -1,
                     annotation_count=len(annotation_items),
                 )
@@ -86,12 +86,14 @@ class XaiXSearchConnector(BaseConnector):
         if items is None:
             items = []
 
+        returned = items[:max_results]
         logger.info(
             "xai_fetch_complete",
-            source=self.config.id,
-            item_count=len(items),
+            source_id=self.config.id,
+            parsed_count=len(items),
+            returned_count=len(returned),
         )
-        return items[:max_results]
+        return returned
 
     def _build_prompt(self, searches: list[str], max_results: int) -> str:
         mission = self.config.extra.get(

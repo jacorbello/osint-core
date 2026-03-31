@@ -698,11 +698,7 @@ async def test_fetch_empty_json_falls_back_to_annotations(
             "role": "assistant",
             "content": [{
                 "type": "output_text",
-                "text": (
-                    "I searched for the given queries but found no posts "
-                    "matching the exact JSON format.\n\n[]\n\nHowever, "
-                    "I found relevant discussions on X."
-                ),
+                "text": "[]",
                 "annotations": [
                     {
                         "type": "url_citation",
