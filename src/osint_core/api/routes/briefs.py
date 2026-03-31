@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from osint_core.api.deps import get_current_user, get_db
 from osint_core.api.errors import collection_page, problem_response, problem_response_docs
 from osint_core.api.middleware.auth import UserInfo
-from osint_core.config import settings
+from osint_core.llm import active_llm_model
 from osint_core.models.brief import Brief
 from osint_core.schemas.brief import BriefCreateRequest, BriefList, BriefResponse
 from osint_core.services.brief_generator import BriefContext, BriefGenerator, fetch_brief_context
@@ -169,10 +169,7 @@ async def create_brief(
     """Generate and persist a new intelligence brief."""
     ctx: BriefContext = await fetch_brief_context(db, body.query)
 
-    generator = BriefGenerator(
-        vllm_url=settings.vllm_url,
-        llm_model=settings.llm_model,
-    )
+    generator = BriefGenerator()
 
     try:
         content_md, generated_by = await generator.generate(
@@ -194,7 +191,7 @@ async def create_brief(
         content_md=content_md,
         target_query=body.query,
         generated_by=generated_by,
-        model_id=settings.llm_model,
+        model_id=active_llm_model(),
         requested_by=current_user.username,
         event_ids=ctx.event_ids,
         entity_ids=ctx.entity_ids,

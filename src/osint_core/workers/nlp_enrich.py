@@ -16,6 +16,7 @@ from sqlalchemy import NullPool
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from osint_core.config import settings
+from osint_core.llm import llm_chat_completion
 from osint_core.models.event import Event
 from osint_core.workers.celery_app import celery_app
 
@@ -191,36 +192,102 @@ def _validate_constitutional_fields(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_NLP_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "relevance": {"type": "string", "enum": ["relevant", "tangential", "irrelevant"]},
+        "entities": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "type": {
+                        "type": "string",
+                        "enum": ["person", "organization", "location", "indicator"],
+                    },
+                },
+                "required": ["name", "type"],
+                "additionalProperties": False,
+            },
+        },
+        "attack_techniques": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                },
+                "required": ["id", "name"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["summary", "relevance", "entities", "attack_techniques"],
+    "additionalProperties": False,
+}
+
+_CAL_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "relevance": {"type": "string", "enum": ["relevant", "tangential", "irrelevant"]},
+        "entities": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "person", "organization", "location",
+                            "indicator", "official", "affected_individual",
+                        ],
+                    },
+                },
+                "required": ["name", "type"],
+                "additionalProperties": False,
+            },
+        },
+        "constitutional_basis": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "lead_type": {"type": ["string", "null"], "enum": ["incident", "policy", None]},
+        "institution": {"type": ["string", "null"]},
+        "jurisdiction": {"type": ["string", "null"]},
+    },
+    "required": [
+        "summary", "relevance", "entities",
+        "constitutional_basis", "lead_type", "institution", "jurisdiction",
+    ],
+    "additionalProperties": False,
+}
+
+
 async def _call_vllm(
     prompt: str,
     *,
     system_message: str | None = None,
     max_tokens: int = 500,
 ) -> dict[str, Any]:
-    url = f"{settings.vllm_url}/v1/chat/completions"
-    payload = {
-        "model": settings.llm_model,
-        "messages": [
-            {"role": "system", "content": system_message or _SYSTEM_MESSAGE},
-            {"role": "user", "content": prompt},
-        ],
-        "max_tokens": max_tokens,
-        "temperature": 0.1,
-    }
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(url, json=payload)
-        resp.raise_for_status()
-    data = resp.json()
-    choices = data.get("choices")
-    if not choices or not isinstance(choices, list):
-        raise ValueError(
-            f"Unexpected vLLM response shape: missing or empty 'choices' (got: {list(data.keys())})"
-        )
-    content = choices[0].get("message", {}).get("content")
-    if content is None:
-        raise ValueError(
-            "Unexpected vLLM response shape: 'choices[0].message.content' is absent"
-        )
+    sys_msg = system_message or _SYSTEM_MESSAGE
+    messages = [
+        {"role": "system", "content": sys_msg},
+        {"role": "user", "content": prompt},
+    ]
+    schema = _CAL_RESPONSE_SCHEMA if system_message == _CAL_SYSTEM_MESSAGE else _NLP_RESPONSE_SCHEMA
+    content = await llm_chat_completion(
+        messages=messages,
+        max_tokens=max_tokens,
+        temperature=0.1,
+        timeout=15.0,
+        response_format={"type": "json_object"},
+        json_schema=schema,
+    )
     result: dict[str, Any] = json.loads(_strip_markdown_fences(content))
     return result
 

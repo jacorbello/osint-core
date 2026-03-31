@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     qdrant_port: int = 6333
     qdrant_collection: str = "osint-events"
 
+    # --- LLM Provider ---
+    llm_provider: str = "vllm"  # "groq" or "vllm"
+
     # --- vLLM (with deprecated Ollama fallbacks) ---
     vllm_url: str = Field(
         default_factory=lambda: _deprecated_env(
@@ -45,6 +48,11 @@ class Settings(BaseSettings):
             "OSINT_LLM_MODEL", "OSINT_OLLAMA_MODEL", "meta-llama/Llama-3.2-3B-Instruct"
         ),
     )
+
+    # --- Groq (cloud LLM) ---
+    groq_api_key: str = ""
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "openai/gpt-oss-20b"
 
     # --- MinIO ---
     minio_endpoint: str = "minio:9000"
