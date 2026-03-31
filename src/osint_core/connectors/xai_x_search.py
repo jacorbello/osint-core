@@ -63,16 +63,34 @@ class XaiXSearchConnector(BaseConnector):
             resp = await self._request_with_retries(client, api_key, body)
 
         if resp is None:
+            logger.warning("xai_no_response", source=self.config.id)
             return []
 
         data = resp.json()
         # Primary: parse structured JSON when Grok returns valid tweet
         # objects (most reliable for full_text, post_url, username).
-        # Fallback: extract from annotations when JSON parsing fails.
+        # Fallback: extract from annotations when JSON parsing fails
+        # or yields no items (xAI often returns prose + citations
+        # rather than structured JSON — see #212).
         items = self._parse_json_response(data)
+        if not items:
+            annotation_items = self._parse_annotations(data)
+            if annotation_items:
+                logger.info(
+                    "xai_annotation_fallback",
+                    source=self.config.id,
+                    json_count=len(items) if items is not None else -1,
+                    annotation_count=len(annotation_items),
+                )
+                items = annotation_items
         if items is None:
-            items = self._parse_annotations(data)
+            items = []
 
+        logger.info(
+            "xai_fetch_complete",
+            source=self.config.id,
+            item_count=len(items),
+        )
         return items[:max_results]
 
     def _build_prompt(self, searches: list[str], max_results: int) -> str:
