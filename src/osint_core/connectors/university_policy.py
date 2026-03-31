@@ -46,7 +46,7 @@ DEFAULT_INSTITUTIONS: list[dict[str, str]] = [
         "policy_url": "https://policy.ucop.edu/advanced-search.php?action=welcome&op=browse&all=1",
         "selector": "a.blue[href*='/doc/']",
     },
-    # CSU disabled: calstate.edu returns 403 (JS bot check). See #213.
+    # CSU disabled: calstate.edu returns 403 (JS bot check). See #220.
     # {
     #     "name": "California State University System",
     #     "policy_url": "https://www.calstate.edu/csu-system/board-of-trustees/past-meetings",
@@ -70,7 +70,7 @@ DEFAULT_INSTITUTIONS: list[dict[str, str]] = [
     {
         "name": "University of the District of Columbia",
         "policy_url": "https://www.udc.edu/about/administration/ogc/policies",
-        "selector": "a[href$='.pdf'], a[href$='.docx']",
+        "selector": "a[href$='.pdf']",
     },
 ]
 

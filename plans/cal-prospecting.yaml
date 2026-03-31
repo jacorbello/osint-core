@@ -209,7 +209,7 @@ sources:
   # ── University Policy: CSU System ────────────────────────────
   # DISABLED: calstate.edu returns 403 (JavaScript bot check). Uncomment
   # when headless-browser support is added or an accessible policy
-  # endpoint is found. See #213.
+  # endpoint is found. See #220.
   # - id: univ_csu
   #   type: university_policy
   #   schedule_cron: "5 8 * * 1"
@@ -266,7 +266,7 @@ sources:
       institutions:
         - name: "University of the District of Columbia"
           policy_url: "https://www.udc.edu/about/administration/ogc/policies"
-          selector: "a[href$='.pdf'], a[href$='.docx']"
+          selector: "a[href$='.pdf']"
       archive_pdfs: true
 
 source_profiles:

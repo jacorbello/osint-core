@@ -1510,7 +1510,7 @@ class TestUpdatedSelectors:
         assert links[0][1] == "https://policies.tamus.edu/01-01.pdf"
 
     def test_udc_selector(self):
-        """UDC OGC policies page links to docs.udc.edu PDFs and .docx files."""
+        """UDC OGC policies page links to docs.udc.edu PDFs."""
         html = """
         <main>
           <li><a href="https://docs.udc.edu/ogc/Protection-of-Minors.pdf">Protection of Minors</a></li>
@@ -1519,9 +1519,8 @@ class TestUpdatedSelectors:
         </main>
         """
         links = self._extract(
-            html, "a[href$='.pdf'], a[href$='.docx']",
+            html, "a[href$='.pdf']",
             "https://www.udc.edu/about/administration/ogc/policies",
         )
-        assert len(links) == 2
+        assert len(links) == 1
         assert links[0][1] == "https://docs.udc.edu/ogc/Protection-of-Minors.pdf"
-        assert links[1][1] == "https://docs.udc.edu/ogc/Report-Form.docx"
