@@ -43,14 +43,15 @@ _PRIVATE_HOSTNAMES = {"localhost", "localhost.localdomain"}
 DEFAULT_INSTITUTIONS: list[dict[str, str]] = [
     {
         "name": "University of California System",
-        "policy_url": "https://policy.ucop.edu/advanced-search.php",
-        "selector": "a.policy-link, table.policies a[href*='doc']",
+        "policy_url": "https://policy.ucop.edu/advanced-search.php?action=welcome&op=browse&all=1",
+        "selector": "a.blue[href*='/doc/']",
     },
-    {
-        "name": "California State University System",
-        "policy_url": "https://www.calstate.edu/csu-system/board-of-trustees/past-meetings",
-        "selector": "a[href$='.pdf'], a[href*='policy']",
-    },
+    # CSU disabled: calstate.edu returns 403 (JS bot check). See #220.
+    # {
+    #     "name": "California State University System",
+    #     "policy_url": "https://www.calstate.edu/csu-system/board-of-trustees/past-meetings",
+    #     "selector": "a[href$='.pdf'], a[href*='policy']",
+    # },
     {
         "name": "University of Texas System",
         "policy_url": "https://www.utsystem.edu/offices/board-regents/regents-rules-and-regulations",
@@ -59,7 +60,7 @@ DEFAULT_INSTITUTIONS: list[dict[str, str]] = [
     {
         "name": "Texas A&M University System",
         "policy_url": "https://policies.tamus.edu",
-        "selector": "a[href*='policy'], a[href*='regulation']",
+        "selector": "a[href$='.pdf']",
     },
     {
         "name": "University of Minnesota",
@@ -68,8 +69,8 @@ DEFAULT_INSTITUTIONS: list[dict[str, str]] = [
     },
     {
         "name": "University of the District of Columbia",
-        "policy_url": "https://www.udc.edu/policies/",
-        "selector": "a[href$='.pdf'], a[href*='policy']",
+        "policy_url": "https://www.udc.edu/about/administration/ogc/policies",
+        "selector": "a[href$='.pdf']",
     },
 ]
 

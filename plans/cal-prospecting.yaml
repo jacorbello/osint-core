@@ -202,21 +202,24 @@ sources:
     params:
       institutions:
         - name: "University of California System"
-          policy_url: "https://policy.ucop.edu/advanced-search.php"
-          selector: "a.policy-link, table.policies a[href*='doc']"
+          policy_url: "https://policy.ucop.edu/advanced-search.php?action=welcome&op=browse&all=1"
+          selector: "a.blue[href*='/doc/']"
       archive_pdfs: true
 
   # ── University Policy: CSU System ────────────────────────────
-  - id: univ_csu
-    type: university_policy
-    schedule_cron: "5 8 * * 1"
-    weight: 1.8
-    params:
-      institutions:
-        - name: "California State University System"
-          policy_url: "https://www.calstate.edu/csu-system/board-of-trustees/past-meetings"
-          selector: "a[href$='.pdf'], a[href*='policy']"
-      archive_pdfs: true
+  # DISABLED: calstate.edu returns 403 (JavaScript bot check). Uncomment
+  # when headless-browser support is added or an accessible policy
+  # endpoint is found. See #220.
+  # - id: univ_csu
+  #   type: university_policy
+  #   schedule_cron: "5 8 * * 1"
+  #   weight: 1.8
+  #   params:
+  #     institutions:
+  #       - name: "California State University System"
+  #         policy_url: "https://www.calstate.edu/csu-system/board-of-trustees/past-meetings"
+  #         selector: "a[href$='.pdf'], a[href*='policy']"
+  #     archive_pdfs: true
 
   # ── University Policy: UT System ─────────────────────────────
   - id: univ_ut
@@ -239,7 +242,7 @@ sources:
       institutions:
         - name: "Texas A&M University System"
           policy_url: "https://policies.tamus.edu"
-          selector: "a[href*='policy'], a[href*='regulation']"
+          selector: "a[href$='.pdf']"
       archive_pdfs: true
 
   # ── University Policy: UMN ───────────────────────────────────
@@ -262,8 +265,8 @@ sources:
     params:
       institutions:
         - name: "University of the District of Columbia"
-          policy_url: "https://www.udc.edu/policies/"
-          selector: "a[href$='.pdf'], a[href*='policy']"
+          policy_url: "https://www.udc.edu/about/administration/ogc/policies"
+          selector: "a[href$='.pdf']"
       archive_pdfs: true
 
 source_profiles:
@@ -312,11 +315,11 @@ source_profiles:
     credibility: 1
     corroboration_required: false
     license: "public"
-  univ_csu:
-    reliability: A
-    credibility: 1
-    corroboration_required: false
-    license: "public"
+  # univ_csu: disabled (see #213)
+  #   reliability: A
+  #   credibility: 1
+  #   corroboration_required: false
+  #   license: "public"
   univ_ut:
     reliability: A
     credibility: 1
@@ -350,7 +353,7 @@ scoring:
     rss_volokh: 0.8
     rss_courthouse_news: 0.85
     univ_uc: 0.95
-    univ_csu: 0.95
+    # univ_csu: 0.95  # disabled (see #213)
     univ_ut: 0.95
     univ_tamu: 0.95
     univ_umn: 0.95

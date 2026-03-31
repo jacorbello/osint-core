@@ -1471,3 +1471,58 @@ class TestRedisPersistence:
         # Hash should be in Redis, not in the fallback dict
         assert len(conn._fallback_hashes) == 0
         assert len(fake_redis._data.get("policy_hashes:test-university", {})) == 1
+
+
+class TestUpdatedSelectors:
+    """Verify updated CSS selectors match actual institution HTML (#213)."""
+
+    @staticmethod
+    def _extract(html: str, selector: str, base_url: str) -> list[tuple[str, str]]:
+        return UniversityPolicyConnector._extract_policy_links(html, base_url, selector)
+
+    def test_uc_system_selector(self):
+        """UC System browse page uses a.blue links to /doc/NNN."""
+        html = """
+        <div id="content">
+          <div><a class="blue" href="/doc/4000701">View PolicyAbusive Conduct</a></div>
+          <div><a class="blue" href="/doc/1001004">View PolicyAnti-Discrimination</a></div>
+          <a href="?action=search">Search policies</a>
+        </div>
+        """
+        links = self._extract(html, "a.blue[href*='/doc/']", "https://policy.ucop.edu")
+        assert len(links) == 2
+        assert links[0] == ("View PolicyAbusive Conduct", "https://policy.ucop.edu/doc/4000701")
+
+    def test_tamu_system_selector(self):
+        """TAMU policy library page uses direct PDF links."""
+        html = """
+        <main>
+          <a href="https://policies.tamus.edu/01-01.pdf">01.01</a>
+          <a href="https://policies.tamus.edu/02-01.pdf">02.01</a>
+          <a href="https://www.tamus.edu/legal/policy/">Policy Office</a>
+        </main>
+        """
+        links = self._extract(
+            html, "a[href$='.pdf']",
+            "https://policies.tamus.edu",
+        )
+        assert len(links) == 2
+        assert links[0][1] == "https://policies.tamus.edu/01-01.pdf"
+
+    def test_udc_selector(self):
+        """UDC OGC policies page links to docs.udc.edu PDFs."""
+        html = """
+        <main>
+          <li><a href="https://docs.udc.edu/ogc/Minors.pdf">
+            Protection of Minors</a></li>
+          <li><a href="https://docs.udc.edu/ogc/Form.docx">
+            Mandatory Reporter Form</a></li>
+          <li><a href="https://www.udc.edu/about">About UDC</a></li>
+        </main>
+        """
+        links = self._extract(
+            html, "a[href$='.pdf']",
+            "https://www.udc.edu/about/administration/ogc/policies",
+        )
+        assert len(links) == 1
+        assert links[0][1] == "https://docs.udc.edu/ogc/Minors.pdf"
