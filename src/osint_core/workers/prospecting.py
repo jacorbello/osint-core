@@ -80,7 +80,8 @@ def _is_deep_analysis_enabled(plan_content: dict[str, Any] | None = None) -> boo
 def _get_precedent_map(plan_content: dict[str, Any]) -> dict[str, dict[str, list[dict[str, str]]]]:
     """Extract precedent map from plan content."""
     custom: dict[str, Any] = plan_content.get("custom", {})
-    return custom.get("precedent_map", {})
+    result: dict[str, dict[str, list[dict[str, str]]]] = custom.get("precedent_map", {})
+    return result
 
 
 async def _match_leads_async(event_ids: list[str], plan_id: str) -> dict[str, Any]:
