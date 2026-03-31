@@ -18,7 +18,7 @@ import httpx
 import redis.asyncio as aioredis
 
 try:
-    from curl_cffi import requests as cffi_requests
+    from curl_cffi import requests as cffi_requests  # type: ignore[import-not-found]
 except ImportError:
     cffi_requests = None  # type: ignore[assignment]
 import redis.exceptions
