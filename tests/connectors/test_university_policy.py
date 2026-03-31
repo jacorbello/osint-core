@@ -1575,12 +1575,21 @@ class TestImpersonationFetch:
         mock_cffi_resp.content = b"<html><a href='/doc.pdf'>Policy</a></html>"
         mock_cffi_resp.headers = {"content-type": "text/html"}
 
-        async def fake_to_thread(fn, *args, **kwargs):
-            return mock_cffi_resp
+        stub_cffi = MagicMock()
+        stub_cffi.get.return_value = mock_cffi_resp
 
-        with patch(
-            "osint_core.connectors.university_policy.asyncio.to_thread",
-            side_effect=fake_to_thread,
+        async def fake_to_thread(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        with (
+            patch(
+                "osint_core.connectors.university_policy.cffi_requests",
+                stub_cffi,
+            ),
+            patch(
+                "osint_core.connectors.university_policy.asyncio.to_thread",
+                side_effect=fake_to_thread,
+            ),
         ):
             resp = await connector._fetch_with_impersonation(
                 "https://botcheck.example.edu/policies",
