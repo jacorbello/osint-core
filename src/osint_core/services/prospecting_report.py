@@ -53,7 +53,18 @@ _NARRATIVE_SCHEMA = {
         "policy_text": {"type": "string"},
         "precedents": {"type": "string"},
     },
-    "required": ["executive_summary", "constitutional_analysis", "recommendation"],
+    "required": [
+        "executive_summary",
+        "constitutional_analysis",
+        "recommendation",
+        "parties",
+        "evidence",
+        "jurisdiction_analysis",
+        "time_sensitivity",
+        "affected_population",
+        "policy_text",
+        "precedents",
+    ],
     "additionalProperties": False,
 }
 
