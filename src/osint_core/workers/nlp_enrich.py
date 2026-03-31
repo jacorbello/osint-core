@@ -71,7 +71,7 @@ _CAL_SYSTEM_MESSAGE = (
     '"entities": [{"name": "...", "type": '
     '"person|organization|location|indicator|official|affected_individual"}],\n'
     '"constitutional_basis": ["1A-free-speech"],\n'
-    '"lead_type": "incident|policy",\n'
+    '"lead_type": "incident|policy|null",\n'
     '"institution": "Name of the state university or institution involved",\n'
     '"jurisdiction": "CA|TX|MN|DC"}\n'
     "\n"
