@@ -11,6 +11,7 @@ from osint_core.services.courtlistener import VerifiedCitation
 from osint_core.services.prospecting_report import (
     ProspectingReportGenerator,
     _archive_pdf,
+    _extract_json,
     _fallback_narrative,
     _select_reportable_leads,
 )
@@ -244,6 +245,70 @@ class TestProspectingReportGenerator:
 
         assert result is not None
         assert result.lead_count == 1
+
+    @pytest.mark.asyncio()
+    async def test_vllm_request_includes_response_format(self, generator):
+        """The vLLM request includes response_format: json_object (#211)."""
+        leads = [_make_lead()]
+        db = _mock_db(leads)
+        narrative = json.dumps({
+            "executive_summary": "Test",
+            "constitutional_analysis": "Test",
+            "recommendation": "Test",
+        })
+
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {
+                "choices": [{"message": {"content": narrative}}],
+            }
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            await generator.generate_report(db)
+
+        body = mock_client.post.call_args.kwargs["json"]
+        assert body["response_format"] == {"type": "json_object"}
+
+    @pytest.mark.asyncio()
+    async def test_parses_markdown_fenced_json(self, generator):
+        """LLM output wrapped in markdown fences is parsed (#211)."""
+        leads = [_make_lead()]
+        db = _mock_db(leads)
+        narrative_dict = {
+            "executive_summary": "Fenced test",
+            "constitutional_analysis": "Analysis",
+            "recommendation": "Rec",
+        }
+        fenced = f"```json\n{json.dumps(narrative_dict)}\n```"
+
+        with patch(f"{_MOD}.httpx.AsyncClient") as mock_cls, \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {
+                "choices": [{"message": {"content": fenced}}],
+            }
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            result = await generator.generate_report(db)
+
+        assert result is not None
+        # _render_pdf_html is called with a single dict arg
+        ctx = mock_render.call_args[0][0]
+        sections = ctx["leads"][0]["sections"]
+        assert sections["executive_summary"] == "Fenced test"
 
     @pytest.mark.asyncio()
     async def test_leads_appear_in_severity_confidence_order(self, generator):
@@ -524,3 +589,46 @@ class TestArchivePdf:
         mock_upload.assert_called_once()
         call_kwargs = mock_upload.call_args
         assert call_kwargs.kwargs.get("retention_class") == "evidentiary"
+
+
+class TestExtractJson:
+    """Tests for _extract_json (#211)."""
+
+    _VALID = {
+        "executive_summary": "Free speech violation at UC Berkeley.",
+        "constitutional_analysis": "First Amendment issue.",
+        "recommendation": "Investigate further.",
+    }
+
+    def test_parses_raw_json(self):
+        assert _extract_json(json.dumps(self._VALID)) == self._VALID
+
+    def test_strips_markdown_fence(self):
+        content = f"```json\n{json.dumps(self._VALID)}\n```"
+        assert _extract_json(content) == self._VALID
+
+    def test_strips_fence_without_lang(self):
+        content = f"```\n{json.dumps(self._VALID)}\n```"
+        assert _extract_json(content) == self._VALID
+
+    def test_extracts_json_from_prose(self):
+        content = (
+            "Here is the analysis:\n\n"
+            f"{json.dumps(self._VALID)}\n\n"
+            "Let me know if you need more detail."
+        )
+        assert _extract_json(content) == self._VALID
+
+    def test_returns_none_for_empty(self):
+        assert _extract_json("") is None
+        assert _extract_json("   ") is None
+
+    def test_returns_none_for_plain_text(self):
+        assert _extract_json("No JSON here at all.") is None
+
+    def test_returns_none_for_array(self):
+        assert _extract_json('[1, 2, 3]') is None
+
+    def test_handles_nested_braces(self):
+        data = {"summary": "test {nested} braces", "key": "value"}
+        assert _extract_json(json.dumps(data)) == data
