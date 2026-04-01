@@ -217,6 +217,7 @@ class DeepAnalyzer:
                     timeout=60.0,
                     response_format={"type": "json_object"},
                     json_schema=_POLICY_ANALYSIS_SCHEMA,
+                    strict=False,
                 )
                 result = json.loads(content)
             except Exception as exc:
@@ -285,6 +286,7 @@ class DeepAnalyzer:
                 timeout=30.0,
                 response_format={"type": "json_object"},
                 json_schema=_INCIDENT_ANALYSIS_SCHEMA,
+                strict=False,
             )
             result: dict[str, Any] = json.loads(response)
             return result
