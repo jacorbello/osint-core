@@ -328,11 +328,17 @@ class ProspectingReportGenerator:
         all_legal_citations: list[dict[str, Any]] = []
 
         for lead in leads:
-            if getattr(lead, "analysis_status", None) == "completed" and lead.deep_analysis:
-                # Skip non-actionable leads
-                if not lead.deep_analysis.get("actionable", True):
+            analysis_status = getattr(lead, "analysis_status", None)
+            da = lead.deep_analysis if hasattr(lead, "deep_analysis") else None
+
+            # Skip leads that deep analysis determined are not actionable
+            if analysis_status == "completed" and da:
+                if not da.get("actionable", True):
                     continue
                 lead_ctx = _build_deep_analysis_context(lead)
+            elif analysis_status in ("completed", "no_source_material", "failed"):
+                # Deep analysis ran but produced nothing useful — skip
+                continue
             else:
                 # Existing shallow narrative path
                 sections = await _generate_narrative(lead)

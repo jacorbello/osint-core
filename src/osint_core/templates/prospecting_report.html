@@ -121,22 +121,7 @@
                 {{ provision.facial_or_as_applied }} challenge<br>
                 <strong>Affected population:</strong> {{ provision.affected_population }}
             </p>
-            {% if provision.precedent %}
-            <p><strong>Relevant precedent:</strong></p>
-            <ul>
-                {% for p in provision.precedent %}
-                <li>
-                    <em>{{ p.case_name }}</em>, {{ p.citation }}
-                    {% if p.verified %}
-                        <span class="citation-verified">✓</span>
-                    {% else %}
-                        <span class="citation-unverified">⚠</span>
-                    {% endif %}
-                    {% if p.holding_summary %} — {{ p.holding_summary }}{% endif %}
-                </li>
-                {% endfor %}
-            </ul>
-            {% endif %}
+            {# Precedent removed — repetitive across leads. See citations appendix. #}
         </div>
         {% endfor %}
     </div>
