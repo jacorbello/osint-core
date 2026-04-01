@@ -67,7 +67,7 @@
 <!-- Lead Sections -->
 {% if leads %}
     {% for lead in leads %}
-    {% if lead.has_deep_analysis and lead.lead_type == 'policy' %}
+    {% if lead.has_deep_analysis and lead.provisions is defined and lead.provisions %}
     {# --- Deep Analysis: Policy Lead --- #}
     <div class="lead-section">
         <div class="lead-header">
@@ -141,7 +141,7 @@
         {% endfor %}
     </div>
 
-    {% elif lead.has_deep_analysis and lead.lead_type == 'incident' %}
+    {% elif lead.has_deep_analysis and lead.incident_summary is defined %}
     {# --- Deep Analysis: Incident Lead --- #}
     <div class="lead-section">
         <div class="lead-header">

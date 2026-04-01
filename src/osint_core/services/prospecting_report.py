@@ -237,7 +237,12 @@ def _build_deep_analysis_context(lead: Lead) -> dict[str, Any]:
     """Build template context from deep analysis results."""
     analysis = lead.deep_analysis or {}
 
-    if lead.lead_type == "policy":
+    # Use analysis content to determine rendering path, not lead_type —
+    # NLP triage frequently misclassifies policy documents as incidents,
+    # but the deep analyzer uses source-based dispatch and stores
+    # provisions for all archived policy documents regardless of lead_type.
+    has_provisions = bool(analysis.get("provisions"))
+    if has_provisions:
         provisions = analysis.get("provisions", [])
         return {
             "has_deep_analysis": True,
