@@ -27,6 +27,7 @@ async def llm_chat_completion(
     timeout: float = 30.0,
     response_format: dict[str, Any] | None = None,
     json_schema: dict[str, Any] | None = None,
+    strict: bool = True,
 ) -> str:
     """Send a chat completion request to the configured LLM provider.
 
@@ -61,6 +62,7 @@ async def llm_chat_completion(
                 timeout=timeout,
                 response_format=response_format,
                 json_schema=json_schema,
+                strict=strict,
                 raise_retryable=True,
             )
         except _RetryableError as exc:
@@ -104,6 +106,7 @@ async def _call_provider(
     timeout: float,
     response_format: dict[str, Any] | None,
     json_schema: dict[str, Any] | None,
+    strict: bool = True,
     raise_retryable: bool = True,
 ) -> str:
     base = base_url.rstrip("/")
@@ -125,13 +128,16 @@ async def _call_provider(
     if temperature is not None:
         payload["temperature"] = temperature
 
-    # Structured output: json_schema (Groq strict) takes precedence
+    # Structured output: json_schema takes precedence.
+    # strict=True uses constrained decoding (guaranteed schema match).
+    # strict=False uses best-effort mode (recommended for complex schemas
+    # with large inputs per Groq docs — avoids json_validate_failed errors).
     if json_schema is not None:
         payload["response_format"] = {
             "type": "json_schema",
             "json_schema": {
                 "name": "response",
-                "strict": True,
+                "strict": strict,
                 "schema": json_schema,
             },
         }
