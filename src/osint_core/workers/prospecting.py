@@ -66,6 +66,9 @@ def _build_matcher_config(plan_content: dict[str, Any], plan_id: str) -> LeadMat
                     plan_id,
                 )
 
+    if custom.get("deep_analysis_enabled"):
+        kwargs["deep_analysis_enabled"] = True
+
     return LeadMatcherConfig(**kwargs)
 
 
