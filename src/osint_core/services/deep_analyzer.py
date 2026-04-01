@@ -104,13 +104,23 @@ _POLICY_SYSTEM_PROMPT = (
     "1. Quote the EXACT language from the document\n"
     "2. Cite the section/rule number\n"
     "3. Explain which constitutional right is affected and how\n"
-    "4. Assess severity (how clearly does this violate established precedent?)\n"
+    "4. Assess severity (info/low/medium/high/critical)\n"
     "5. Identify the affected population\n"
     "6. Determine if this is a facial challenge or as-applied\n\n"
     "If the document contains NO constitutional issues, return an empty provisions "
     "array and set actionable to false. Do not stretch to find issues that aren't there.\n\n"
     "CRITICAL: Only quote language that actually appears in the document. "
-    "Do not fabricate or paraphrase policy text."
+    "Do not fabricate or paraphrase policy text.\n\n"
+    "Respond with JSON in this exact structure:\n"
+    '{"provisions": [{"section_reference": "...", "quoted_language": "...", '
+    '"constitutional_issue": "...", "constitutional_basis": "1A-free-speech", '
+    '"severity": "high", "affected_population": "...", '
+    '"facial_or_as_applied": "facial"}], '
+    '"document_summary": "...", "overall_assessment": "...", "actionable": true}\n\n'
+    "constitutional_basis must be one of: 1A-free-speech, 1A-religion, 1A-assembly, "
+    "1A-press, 14A-due-process, 14A-equal-protection, parental-rights.\n"
+    "severity must be one of: info, low, medium, high, critical.\n"
+    "facial_or_as_applied must be one of: facial, as-applied, both."
 )
 
 _INCIDENT_SYSTEM_PROMPT = (
@@ -123,7 +133,12 @@ _INCIDENT_SYSTEM_PROMPT = (
     "- moderate: 2+ sources or one credible detailed report\n"
     "- weak: single source, anonymous, or vague details\n"
     "- unverified: social media only, no corroboration\n\n"
-    "If the incident does not involve constitutional rights, set actionable to false."
+    "If the incident does not involve constitutional rights, set actionable to false.\n\n"
+    "Respond with JSON in this exact structure:\n"
+    '{"incident_summary": "...", "rights_violated": ["1A-free-speech"], '
+    '"individuals_identified": [{"name": "...", "role": "..."}], '
+    '"institution": "...", "corroboration_strength": "strong", '
+    '"corroboration_notes": "...", "actionable": true}'
 )
 
 
@@ -216,8 +231,6 @@ class DeepAnalyzer:
                     temperature=0.1,
                     timeout=60.0,
                     response_format={"type": "json_object"},
-                    json_schema=_POLICY_ANALYSIS_SCHEMA,
-                    strict=False,
                 )
                 result = json.loads(content)
             except Exception as exc:
@@ -285,8 +298,6 @@ class DeepAnalyzer:
                 temperature=0.1,
                 timeout=30.0,
                 response_format={"type": "json_object"},
-                json_schema=_INCIDENT_ANALYSIS_SCHEMA,
-                strict=False,
             )
             result: dict[str, Any] = json.loads(response)
             return result
