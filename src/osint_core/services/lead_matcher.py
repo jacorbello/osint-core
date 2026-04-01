@@ -41,6 +41,7 @@ class LeadMatcherConfig:
     plan_id: str
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD
     source_reputation: dict[str, float] = field(default_factory=dict)
+    deep_analysis_enabled: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -179,9 +180,18 @@ class LeadMatcher:
 
         Returns the Lead if above confidence threshold, else None.
         """
-        # Skip events classified as irrelevant by NLP enrichment (#215)
+        # Skip events classified as irrelevant by NLP enrichment (#215).
+        # When deep analysis is enabled, let university_policy events through
+        # regardless — deep analysis reads the full document and determines
+        # actionability, so the NLP triage should not be the final gate.
         relevance = event.nlp_relevance
-        if isinstance(relevance, str) and relevance.strip().lower() == "irrelevant":
+        is_policy_source = (event.source_id or "").startswith("univ_")
+        bypass_relevance = self.config.deep_analysis_enabled and is_policy_source
+        if (
+            not bypass_relevance
+            and isinstance(relevance, str)
+            and relevance.strip().lower() == "irrelevant"
+        ):
             return None
 
         metadata = event.metadata_ or {}

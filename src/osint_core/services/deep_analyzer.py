@@ -143,8 +143,20 @@ class DeepAnalyzer:
         """Run deep analysis on a lead using its source event's document.
 
         Returns the analysis dict, or None if no source material is available.
+
+        The analysis path is determined by the **source type**, not
+        ``lead.lead_type``, because NLP triage frequently misclassifies
+        university policy documents as incidents.  If the source event
+        came from a ``university_policy`` connector or has a ``minio_uri``
+        in its metadata, the policy analysis path is used regardless of
+        the lead type classification.
         """
-        if lead.lead_type == "policy":
+        metadata = event.metadata_ or {}
+        source_id: str = getattr(event, "source_id", "") or ""
+        has_archived_doc = bool(metadata.get("minio_uri"))
+        is_policy_source = source_id.startswith("univ_")
+
+        if has_archived_doc or is_policy_source:
             return await self._analyze_policy(lead, event)
         return await self._analyze_incident(lead, event)
 

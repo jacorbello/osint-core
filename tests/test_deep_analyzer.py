@@ -31,12 +31,17 @@ def _make_lead(*, lead_type: str = "policy", event_ids: list | None = None) -> M
     return lead
 
 
-def _make_event(*, minio_uri: str | None = "minio://osint-artifacts/policy.html") -> MagicMock:
+def _make_event(
+    *,
+    minio_uri: str | None = "minio://osint-artifacts/policy.html",
+    source_id: str = "univ_uc",
+) -> MagicMock:
     event = MagicMock()
     event.id = uuid.uuid4()
     event.metadata_ = {"minio_uri": minio_uri, "document_type": "html"} if minio_uri else {}
     event.raw_excerpt = "https://example.edu/policy"
     event.title = "Test Policy"
+    event.source_id = source_id
     return event
 
 
@@ -142,7 +147,7 @@ class TestAnalyzeIncident:
     async def test_analyzes_incident(self) -> None:
         analyzer = DeepAnalyzer(precedent_map={})
         lead = _make_lead(lead_type="incident")
-        event = _make_event(minio_uri=None)
+        event = _make_event(minio_uri=None, source_id="rss_fire")
         event.raw_excerpt = "https://example.com/article"
 
         with (

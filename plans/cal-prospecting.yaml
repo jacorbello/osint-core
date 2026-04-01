@@ -205,6 +205,7 @@ sources:
           policy_url: "https://policy.ucop.edu/advanced-search.php?action=welcome&op=browse&all=1"
           selector: "a.blue[href*='/doc/']"
       archive_pdfs: true
+      max_items: 500
 
   # ── University Policy: CSU System ────────────────────────────
   - id: univ_csu
