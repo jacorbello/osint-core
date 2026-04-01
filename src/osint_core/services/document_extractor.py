@@ -134,9 +134,12 @@ class DocumentExtractor:
             full_text = preamble + chunk_text if preamble else chunk_text
             chunks.append(DocumentChunk(text=full_text, index=len(chunks), total=0, toc=toc))
 
+            # Advance past this chunk, backing up by overlap for context.
+            # Guarantee forward progress of at least half the content_max.
             next_start = start + len(chunk_text)
             if next_start < len(text) and overlap_chars > 0:
-                next_start = max(next_start - overlap_chars, start + 1)
+                min_advance = max(content_max // 2, 1)
+                next_start = max(next_start - overlap_chars, start + min_advance)
             start = next_start
 
         total = len(chunks)
