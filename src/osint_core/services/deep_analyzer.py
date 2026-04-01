@@ -201,8 +201,12 @@ class DeepAnalyzer:
             logger.info("deep_analysis_empty_document", extra={"lead_id": str(lead.id)})
             return None
 
+        # Groq json_object mode fails on inputs > ~25k chars.
+        # Use a conservative chunk size to keep each LLM call reliable.
         chunks = DocumentExtractor.chunk(
             text,
+            max_chars=20_000,
+            overlap_chars=2_000,
             document_title=lead.title or "",
             institution=lead.institution or "",
         )
