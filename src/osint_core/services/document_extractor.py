@@ -86,8 +86,8 @@ class DocumentExtractor:
         and private-use-area codepoints. Returns ExtractionResult with
         passed=False if the ratio of bad chars >= threshold.
         """
-        if not text:
-            return ExtractionResult(passed=True)
+        if not text or not text.strip():
+            return ExtractionResult(passed=False, failure_reason="no_content")
 
         bad = 0
         for ch in text:

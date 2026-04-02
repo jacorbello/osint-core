@@ -97,6 +97,16 @@ class TestDetectType:
 
 
 class TestValidateEncoding:
+    def test_validate_encoding_empty_text(self) -> None:
+        result = DocumentExtractor.validate_encoding("")
+        assert result.passed is False
+        assert result.failure_reason == "no_content"
+
+    def test_validate_encoding_whitespace_only(self) -> None:
+        result = DocumentExtractor.validate_encoding("   \n\t  ")
+        assert result.passed is False
+        assert result.failure_reason == "no_content"
+
     def test_validate_encoding_clean_text(self) -> None:
         text = "This is perfectly clean English text with no garbled characters."
         result = DocumentExtractor.validate_encoding(text)
