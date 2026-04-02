@@ -282,7 +282,13 @@ class DeepAnalyzer:
         self._precedent_map = precedent_map
         self._courtlistener = courtlistener or CourtListenerClient()
 
-    async def analyze_lead(self, lead: Any, event: Any) -> dict[str, Any] | None:
+    async def analyze_lead(
+        self,
+        lead: Any,
+        event: Any,
+        *,
+        corroborating_events: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
         """Run deep analysis on a lead using its source event's document.
 
         Returns the analysis dict, or None if no source material is available.
@@ -300,14 +306,20 @@ class DeepAnalyzer:
         is_policy_source = source_id.startswith("univ_")
 
         if has_archived_doc or is_policy_source:
-            return await self._analyze_policy(lead, event)
+            return await self._analyze_policy(lead, event, corroborating_events=corroborating_events)
         return await self._analyze_incident(lead, event)
 
     # ------------------------------------------------------------------
     # Policy analysis — two-pass architecture
     # ------------------------------------------------------------------
 
-    async def _analyze_policy(self, lead: Any, event: Any) -> dict[str, Any] | None:
+    async def _analyze_policy(
+        self,
+        lead: Any,
+        event: Any,
+        *,
+        corroborating_events: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
         metadata = event.metadata_ or {}
         minio_uri = metadata.get("minio_uri")
 
@@ -395,8 +407,8 @@ class DeepAnalyzer:
                 "lead_title": screening.get("lead_title", ""),
             }
 
-        # Step 5: Gather corroborating events
-        corroborating = self._gather_corroborating_events(lead, event)
+        # Step 5: Gather corroborating events (prefer caller-provided over stub)
+        corroborating = corroborating_events or self._gather_corroborating_events(lead, event)
 
         # Step 6: Pass 2 — Targeted provision analysis
         provisions: list[dict[str, Any]] = []
