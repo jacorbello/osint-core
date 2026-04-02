@@ -33,12 +33,26 @@ This page documents the `OSINT_` variables that are loaded by `src/osint_core/co
 | `OSINT_QDRANT_PORT` | No | `6333` | Qdrant server port. |
 | `OSINT_QDRANT_COLLECTION` | No | `osint-events` | Qdrant collection name for event embeddings. |
 
-### LLM (vLLM)
+### LLM Provider
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `OSINT_VLLM_URL` | No | `http://localhost:8001` | vLLM inference server URL. Falls back to deprecated `OSINT_OLLAMA_URL` if set. |
-| `OSINT_LLM_MODEL` | No | `meta-llama/Llama-3.2-3B-Instruct` | LLM model identifier. Falls back to deprecated `OSINT_OLLAMA_MODEL` if set. |
+| `OSINT_LLM_PROVIDER` | No | `vllm` | LLM provider selection: `groq` or `vllm`. When set to `groq`, Groq cloud inference is used as the primary provider and vLLM acts as a local fallback. |
+
+### LLM — Groq (Cloud Inference)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OSINT_GROQ_API_KEY` | Yes* | `""` | Groq API key for cloud LLM inference. Required when `OSINT_LLM_PROVIDER` is `groq`. |
+| `OSINT_GROQ_BASE_URL` | No | `https://api.groq.com/openai/v1` | Groq API base URL. |
+| `OSINT_GROQ_MODEL` | No | `openai/gpt-oss-20b` | Groq model identifier. |
+
+### LLM — vLLM (Local / Fallback)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OSINT_VLLM_URL` | No | `http://localhost:8001` | vLLM inference server URL. Used as the primary provider when `OSINT_LLM_PROVIDER` is `vllm`, or as a fallback when Groq is primary. Falls back to deprecated `OSINT_OLLAMA_URL` if set. |
+| `OSINT_LLM_MODEL` | No | `meta-llama/Llama-3.2-3B-Instruct` | LLM model identifier for vLLM. Falls back to deprecated `OSINT_OLLAMA_MODEL` if set. |
 | `OSINT_OLLAMA_URL` | No | `""` | Deprecated. Legacy inference server URL used only for backward compatibility. Prefer `OSINT_VLLM_URL`. |
 | `OSINT_OLLAMA_MODEL` | No | `""` | Deprecated. Legacy model identifier used only for backward compatibility. Prefer `OSINT_LLM_MODEL`. |
 
@@ -148,6 +162,7 @@ passed as plain-text environment variables in deployment manifests.
 The following variables are examples of secrets and should be managed through Infisical (non-exhaustive):
 
 - `OSINT_DATABASE_URL` (contains credentials)
+- `OSINT_GROQ_API_KEY`
 - `OSINT_MINIO_ACCESS_KEY` / `OSINT_MINIO_SECRET_KEY`
 - `OSINT_GOTIFY_TOKEN`
 - `OSINT_SMTP_USER`
