@@ -27,6 +27,42 @@ logger = structlog.get_logger()
 
 _CAL_PLAN_ID = "cal-prospecting"
 
+_SKIPPED_STATUSES = frozenset({
+    "extraction_failed", "non_english", "no_content",
+    "no_source_material", "failed",
+})
+
+
+def _filter_reportable_leads(leads: list[Lead]) -> list[Lead]:
+    """Filter out non-actionable and skipped leads from main report body."""
+    return [
+        lead for lead in leads
+        if getattr(lead, "analysis_status", None) not in ("not_actionable", *_SKIPPED_STATUSES)
+    ]
+
+
+def _extract_source_url(lead: Lead) -> str:
+    """Extract primary source URL from lead citations."""
+    citations_data = lead.citations or {}
+    source_cites = citations_data.get("source_citations", [])
+    return source_cites[0].get("url", "") if source_cites else ""
+
+
+def _group_skipped_leads(leads: list[Lead]) -> dict[str, list[dict[str, Any]]]:
+    """Group skipped leads by failure status for the appendix."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for lead in leads:
+        status = getattr(lead, "analysis_status", None)
+        if status not in _SKIPPED_STATUSES:
+            continue
+        entry = {
+            "title": lead.title or "",
+            "institution": lead.institution or "",
+            "source_url": _extract_source_url(lead),
+        }
+        groups.setdefault(status, []).append(entry)
+    return groups
+
 _NARRATIVE_SYSTEM_PROMPT = (
     "You are a constitutional rights analyst for The Center For American Liberty. "
     "Given the following lead data, produce structured narrative sections for a legal "
@@ -312,8 +348,8 @@ class ProspectingReportGenerator:
 
         Returns None if no reportable leads exist.
         """
-        leads = await _select_reportable_leads(db)
-        if not leads:
+        all_leads = await _select_reportable_leads(db)
+        if not all_leads:
             logger.info("prospecting_report_no_leads")
             return None
 
@@ -321,6 +357,9 @@ class ProspectingReportGenerator:
         ct_now = now.astimezone(ZoneInfo("America/Chicago"))
         tz_abbr = ct_now.strftime("%Z")  # CST or CDT depending on DST
         report_date = ct_now.strftime(f"%B %d, %Y — %I:%M %p {tz_abbr}")
+
+        skipped = _group_skipped_leads(all_leads)
+        leads = _filter_reportable_leads(all_leads)
 
         # Build lead contexts with narrative sections
         lead_contexts = []
@@ -347,6 +386,12 @@ class ProspectingReportGenerator:
                 if not da.get("actionable", True):
                     continue
                 lead_ctx = _build_deep_analysis_context(lead)
+                # Enrich with source URL and legal citations from citations field
+                citations_data = lead.citations or {}
+                source_cites = citations_data.get("source_citations", [])
+                lead_ctx["source_url"] = source_cites[0].get("url", "") if source_cites else ""
+                legal_cites = citations_data.get("legal_citations", [])
+                lead_ctx["legal_citations"] = legal_cites
             elif analysis_status in ("completed", "no_source_material", "failed"):
                 # Deep analysis ran but produced nothing useful — skip
                 continue
@@ -395,6 +440,11 @@ class ProspectingReportGenerator:
                         error=str(exc),
                     )
 
+                # Extract source URL from source_citations field
+                citations_data = lead.citations or {}
+                src_citation_list = citations_data.get("source_citations", [])
+                source_url = src_citation_list[0].get("url", "") if src_citation_list else ""
+
                 lead_ctx = {
                     "has_deep_analysis": False,
                     "lead_type": lead.lead_type,
@@ -408,11 +458,12 @@ class ProspectingReportGenerator:
                     "sections": sections,
                     "source_citations": source_cites,
                     "legal_citations": lead_legal_citations,
+                    "source_url": source_url,
                 }
 
             lead_contexts.append(lead_ctx)
 
-        # Build summary stats
+        # Build summary stats (based on reportable leads, not all_leads)
         by_jurisdiction: dict[str, int] = {}
         for lead in leads:
             j = lead.jurisdiction or "Unknown"
@@ -436,6 +487,7 @@ class ProspectingReportGenerator:
             "leads": lead_contexts,
             "all_source_citations": all_source_citations or None,
             "all_legal_citations": all_legal_citations or None,
+            "skipped_leads": skipped or None,
         }
         html = _render_pdf_html(context)
 
@@ -470,14 +522,14 @@ class ProspectingReportGenerator:
         report = Report(
             artifact_uri=artifact_uri,
             generated_at=now,
-            lead_count=len(leads),
+            lead_count=len(all_leads),
             plan_id=_CAL_PLAN_ID,
         )
         db.add(report)
         await db.flush()
 
-        # Update lead statuses and link to report
-        for lead in leads:
+        # Update lead statuses and link to report (all leads, including skipped)
+        for lead in all_leads:
             lead.reported_at = now
             lead.report_id = report.id
             if lead.status == "new":
@@ -486,13 +538,13 @@ class ProspectingReportGenerator:
 
         logger.info(
             "prospecting_report_generated",
-            lead_count=len(leads),
+            lead_count=len(all_leads),
             artifact_uri=artifact_uri,
         )
 
         return ReportResult(
             pdf_bytes=pdf_bytes,
-            lead_count=len(leads),
+            lead_count=len(all_leads),
             artifact_uri=artifact_uri,
             report_date=report_date,
         )
