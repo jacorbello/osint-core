@@ -1,7 +1,7 @@
 """extend analysis_status check constraint with new statuses
 
-Revision ID: 0007
-Revises: 77ec0a12abb2
+Revision ID: 0011
+Revises: 0010
 Create Date: 2026-04-02
 
 """
@@ -9,8 +9,8 @@ from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "0007"
-down_revision: Union[str, None] = "77ec0a12abb2"
+revision: str = "0011"
+down_revision: Union[str, None] = "0010"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
