@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from osint_core.services.document_extractor import DocumentExtractor
+from osint_core.services.document_extractor import DocumentExtractor, ExtractionResult
 
 
 class TestExtractHtml:
@@ -94,3 +94,75 @@ class TestDetectType:
 
     def test_html_default(self) -> None:
         assert DocumentExtractor.detect_type(b"<html>") == "html"
+
+
+class TestValidateEncoding:
+    def test_validate_encoding_clean_text(self) -> None:
+        text = "This is perfectly clean English text with no garbled characters."
+        result = DocumentExtractor.validate_encoding(text)
+        assert result.passed is True
+        assert result.failure_reason is None
+
+    def test_validate_encoding_garbled_text(self) -> None:
+        # >5% U+FFFD replacement characters
+        clean = "a" * 90
+        garbled = "\ufffd" * 10  # 10% replacement chars
+        result = DocumentExtractor.validate_encoding(clean + garbled)
+        assert result.passed is False
+        assert result.failure_reason == "extraction_failed"
+
+    def test_validate_encoding_control_chars(self) -> None:
+        # Control chars (not \t \n \r) should count as bad
+        clean = "a" * 90
+        bad_controls = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b" * 1  # 10 bad control chars
+        result = DocumentExtractor.validate_encoding(clean + bad_controls)
+        assert result.passed is False
+
+
+class TestDetectLanguage:
+    def test_detect_language_english(self) -> None:
+        text = (
+            "The Constitution of the United States establishes the framework "
+            "for the federal government and delegates limited powers."
+        )
+        assert DocumentExtractor.detect_language(text) == "en"
+
+    def test_detect_language_non_english(self) -> None:
+        # Tagalog text
+        text = (
+            "Ang Saligang Batas ng Pilipinas ay ang pinakamataas na batas ng "
+            "bansa na nagtatatag ng pambansang pamahalaan."
+        )
+        result = DocumentExtractor.detect_language(text)
+        assert result != "en"
+
+    def test_detect_language_short_text(self) -> None:
+        assert DocumentExtractor.detect_language("Hi") == "unknown"
+
+
+class TestCheckContent:
+    def test_check_content_empty(self) -> None:
+        assert DocumentExtractor.check_content("") is False
+
+    def test_check_content_minimal(self) -> None:
+        # 99 chars — just under threshold
+        text = "a" * 99
+        assert DocumentExtractor.check_content(text) is False
+
+    def test_check_content_sufficient(self) -> None:
+        text = "a" * 100
+        assert DocumentExtractor.check_content(text) is True
+
+
+class TestExtractPdfWithFallback:
+    def test_extract_pdf_with_fallback_clean(self) -> None:
+        import fitz
+
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "Clean PDF content for testing purposes")
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        result = DocumentExtractor.extract_pdf_with_fallback(pdf_bytes)
+        assert "Clean PDF content for testing purposes" in result

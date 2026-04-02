@@ -8,6 +8,7 @@ and section-boundary-aware splitting.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from bs4 import BeautifulSoup
@@ -21,6 +22,14 @@ _SECTION_RE = re.compile(
     r"(?:^|\n)(?=(?:#{1,6}\s|§\s*\d|Article\s+\d|Section\s+\d|Rule\s+\d|PART\s+\d))",
     re.IGNORECASE,
 )
+
+
+@dataclass(frozen=True)
+class ExtractionResult:
+    """Result of a pre-analysis quality gate check."""
+
+    passed: bool
+    failure_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +77,84 @@ class DocumentExtractor:
             pages.append(f"[Page {i}]\n{text}")
         doc.close()
         return "\n\n".join(pages)
+
+    @staticmethod
+    def validate_encoding(text: str, threshold: float = 0.05) -> ExtractionResult:
+        """Check for garbled characters in extracted text.
+
+        Flags U+FFFD replacement chars, control chars (except \\t\\n\\r),
+        and private-use-area codepoints. Returns ExtractionResult with
+        passed=False if the ratio of bad chars >= threshold.
+        """
+        if not text:
+            return ExtractionResult(passed=True)
+
+        bad = 0
+        for ch in text:
+            cp = ord(ch)
+            if cp == 0xFFFD:
+                bad += 1
+            elif cp < 0x20 and ch not in "\t\n\r":
+                bad += 1
+            elif 0xE000 <= cp <= 0xF8FF:
+                bad += 1
+            elif unicodedata.category(ch) in ("Cc", "Cf") and ch not in "\t\n\r":
+                # Additional control/format chars outside the basic range
+                if cp >= 0x20:
+                    bad += 1
+
+        ratio = bad / len(text)
+        if ratio >= threshold:
+            return ExtractionResult(passed=False, failure_reason="extraction_failed")
+        return ExtractionResult(passed=True)
+
+    @staticmethod
+    def detect_language(text: str) -> str:
+        """Detect language of text using langdetect.
+
+        Returns ISO 639-1 code or "unknown" if text is too short (<20 chars)
+        or detection fails.
+        """
+        if len(text.strip()) < 20:
+            return "unknown"
+        try:
+            from langdetect import detect
+
+            return detect(text[:1000])
+        except Exception:
+            return "unknown"
+
+    @staticmethod
+    def check_content(text: str, min_chars: int = 100) -> bool:
+        """Return True if stripped text has at least min_chars characters."""
+        return len(text.strip()) >= min_chars
+
+    @staticmethod
+    def extract_pdf_with_fallback(pdf_bytes: bytes) -> str:
+        """Extract PDF text with PyMuPDF, falling back to pdfplumber on garbled output."""
+        primary = DocumentExtractor.extract_pdf(pdf_bytes)
+        result = DocumentExtractor.validate_encoding(primary)
+        if result.passed:
+            return primary
+
+        # Fallback: try pdfplumber
+        import io
+
+        import pdfplumber
+
+        pages: list[str] = []
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for i, page in enumerate(pdf.pages, start=1):
+                text = (page.extract_text() or "").strip()
+                pages.append(f"[Page {i}]\n{text}")
+        fallback = "\n\n".join(pages)
+
+        fallback_result = DocumentExtractor.validate_encoding(fallback)
+        if fallback_result.passed:
+            return fallback
+
+        # Return whichever is less garbled (prefer primary)
+        return primary
 
     @staticmethod
     def extract_toc(text: str) -> str:
@@ -162,5 +249,5 @@ class DocumentExtractor:
     def extract(content_bytes: bytes, doc_type: str) -> str:
         """Extract text from content bytes based on document type."""
         if doc_type == "pdf":
-            return DocumentExtractor.extract_pdf(content_bytes)
+            return DocumentExtractor.extract_pdf_with_fallback(content_bytes)
         return DocumentExtractor.extract_html(content_bytes.decode("utf-8", errors="replace"))
