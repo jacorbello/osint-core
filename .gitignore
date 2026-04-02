@@ -83,3 +83,4 @@ docker-compose.override.yml
 # Git worktrees
 .worktrees/
 .worktrees/
+.claude/
