@@ -95,16 +95,17 @@ class DocumentExtractor:
         bad = 0
         for ch in text:
             cp = ord(ch)
-            if cp == 0xFFFD:
+            if (
+                cp == 0xFFFD
+                or (cp < 0x20 and ch not in "\t\n\r")
+                or 0xE000 <= cp <= 0xF8FF
+                or (
+                    unicodedata.category(ch) in ("Cc", "Cf")
+                    and ch not in "\t\n\r"
+                    and cp >= 0x20
+                )
+            ):
                 bad += 1
-            elif cp < 0x20 and ch not in "\t\n\r":
-                bad += 1
-            elif 0xE000 <= cp <= 0xF8FF:
-                bad += 1
-            elif unicodedata.category(ch) in ("Cc", "Cf") and ch not in "\t\n\r":
-                # Additional control/format chars outside the basic range
-                if cp >= 0x20:
-                    bad += 1
 
         ratio = bad / len(text)
         if ratio >= threshold:

@@ -334,7 +334,9 @@ class TestPass2ProvisionAnalysis:
             "Cheating is prohibited."
         )
         # Fuzzy: ref uses different formatting than actual text
-        result = analyzer._extract_section_text(full_text, "Section 12 - Student Conduct Requirements")
+        result = analyzer._extract_section_text(
+            full_text, "Section 12 - Student Conduct Requirements",
+        )
         assert "conduct standards" in result
 
 
@@ -357,7 +359,9 @@ class TestTwoPassFlow:
         provision_response_1 = json.dumps(SAMPLE_PROVISION_RESULT_1)
         provision_response_2 = json.dumps(SAMPLE_PROVISION_RESULT_2)
 
-        llm_mock = AsyncMock(side_effect=[screening_response, provision_response_1, provision_response_2])
+        llm_mock = AsyncMock(
+            side_effect=[screening_response, provision_response_1, provision_response_2],
+        )
 
         with (
             patch.object(
@@ -439,8 +443,12 @@ class TestTwoPassFlow:
         event = _make_event()
 
         # Text that passes encoding but is non-English
-        spanish_text = "Esta es una política universitaria sobre los procedimientos administrativos y la gestión de recursos humanos en la universidad. " * 5
-        doc_bytes = f"<p>{spanish_text}</p>".encode("utf-8")
+        spanish_text = (
+            "Esta es una política universitaria sobre los"
+            " procedimientos administrativos y la gestión"
+            " de recursos humanos en la universidad. "
+        ) * 5
+        doc_bytes = f"<p>{spanish_text}</p>".encode()
 
         with (
             patch.object(
@@ -650,14 +658,21 @@ class TestEndToEnd:
             "affected_population": "University community",
             "facial_or_as_applied": "facial",
             "sources_cited": [
-                {"type": "policy_document", "url": "https://policy.ucop.edu/doc/3000127", "section": "§ 4.2"},
+                {
+                    "type": "policy_document",
+                    "url": "https://policy.ucop.edu/doc/3000127",
+                    "section": "§ 4.2",
+                },
             ],
         }
 
         with (
             patch.object(analyzer, "_retrieve_document", new_callable=AsyncMock, return_value=html),
-            patch("osint_core.services.deep_analyzer.llm_chat_completion",
-                  new_callable=AsyncMock, side_effect=[json.dumps(screening), json.dumps(provision)]),
+            patch(
+                "osint_core.services.deep_analyzer.llm_chat_completion",
+                new_callable=AsyncMock,
+                side_effect=[json.dumps(screening), json.dumps(provision)],
+            ),
         ):
             result = await analyzer.analyze_lead(lead, event)
 

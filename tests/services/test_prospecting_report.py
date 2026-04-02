@@ -617,7 +617,7 @@ class TestReportFiltering:
             _make_lead(analysis_status="pending", title="Pending"),
         ]
         result = _filter_reportable_leads(leads)
-        titles = [l.title for l in result]
+        titles = [lead.title for lead in result]
         assert titles == ["Good", "Pending"]
 
     def test_skipped_leads_grouped_by_status(self):

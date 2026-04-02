@@ -313,7 +313,9 @@ class DeepAnalyzer:
         is_policy_source = source_id.startswith("univ_")
 
         if has_archived_doc or is_policy_source:
-            return await self._analyze_policy(lead, event, corroborating_events=corroborating_events)
+            return await self._analyze_policy(
+                lead, event, corroborating_events=corroborating_events,
+            )
         return await self._analyze_incident(lead, event)
 
     # ------------------------------------------------------------------
@@ -581,7 +583,10 @@ class DeepAnalyzer:
         precedent_context = ""
         precedent_cases = self._get_precedent_for_basis(constitutional_basis) if constitutional_basis else []
         if precedent_cases:
-            case_lines = [f"  - {c.get('case', '')} ({c.get('citation', '')})" for c in precedent_cases]
+            case_lines = [
+                f"  - {c.get('case', '')} ({c.get('citation', '')})"
+                for c in precedent_cases
+            ]
             precedent_context = "\nRelevant precedent:\n" + "\n".join(case_lines) + "\n"
 
         # Build corroboration context

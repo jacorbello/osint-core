@@ -96,7 +96,10 @@ class TestFullPipeline:
         ctx.__aexit__ = AsyncMock(return_value=False)
 
         # Document must be long enough to pass check_content gate (100 chars)
-        doc_bytes = b"<p>Student conduct policy with mandatory training requirements for all students.</p>" * 5
+        doc_bytes = (
+            b"<p>Student conduct policy with mandatory"
+            b" training requirements for all students.</p>"
+        ) * 5
 
         # Two-pass: first call is screening, second is provision analysis
         llm_responses = [
