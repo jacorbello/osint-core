@@ -134,7 +134,7 @@ class TestAnalyzeLeadsAsync:
 
         assert result["analyzed"] >= 1
         assert lead.severity == "info"
-        assert lead.analysis_status == "completed"
+        assert lead.analysis_status == "not_actionable"
 
     @pytest.mark.asyncio
     async def test_no_active_plan(self) -> None:

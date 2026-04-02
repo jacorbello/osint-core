@@ -34,6 +34,17 @@ _GUARD_MAX_DEFERRALS = 5
 _GUARD_BACKOFF_BASE = 120  # seconds; delay = base * (attempt + 1), capped at 600
 
 
+def _source_type_label(source_id: str) -> str:
+    """Map source_id prefix to a human-readable source type label."""
+    if source_id.startswith("x_"):
+        return "social_media"
+    if source_id.startswith("rss_"):
+        return "news_article"
+    if source_id.startswith("univ_"):
+        return "policy_document"
+    return "unknown"
+
+
 def _build_matcher_config(plan_content: dict[str, Any], plan_id: str) -> LeadMatcherConfig:
     """Build a LeadMatcherConfig from plan content."""
     scoring = plan_content.get("scoring", {})
@@ -236,8 +247,29 @@ async def _analyze_leads_async(plan_id: str) -> dict[str, Any]:
                     lead.analysis_status = "no_source_material"
                     continue
 
+            # Gather corroborating events from other events linked to this lead
+            all_event_ids = lead.event_ids or []
+            corroborating_events: list[dict[str, Any]] = []
+            if len(all_event_ids) > 1:
+                other_ids = [eid for eid in all_event_ids if eid != event.id][:4]
+                if other_ids:
+                    other_result = await db.execute(
+                        select(Event).where(Event.id.in_(other_ids))
+                    )
+                    for other_evt in other_result.scalars().all():
+                        other_meta = other_evt.metadata_ or {}
+                        corroborating_events.append({
+                            "type": _source_type_label(other_evt.source_id or ""),
+                            "title": other_evt.title or "",
+                            "url": other_meta.get("url", ""),
+                            "summary": (other_evt.raw_excerpt or "")[:500],
+                            "date": str(other_evt.created_at),
+                        })
+
             try:
-                result = await analyzer.analyze_lead(lead, event)
+                result = await analyzer.analyze_lead(
+                    lead, event, corroborating_events=corroborating_events,
+                )
             except Exception as exc:
                 logger.warning(
                     "deep_analysis_failed lead_id=%s error=%s",
@@ -251,12 +283,48 @@ async def _analyze_leads_async(plan_id: str) -> dict[str, Any]:
                 lead.analysis_status = "no_source_material"
                 continue
 
-            lead.deep_analysis = result
-            lead.analysis_status = "completed"
+            # Check for quality gate failures returned by analyzer
+            result_status = result.get("analysis_status", "")
+            if result_status in ("no_content", "extraction_failed", "non_english"):
+                lead.deep_analysis = result
+                lead.analysis_status = result_status
+                continue
 
-            # Downgrade non-actionable leads
-            if not result.get("actionable", True):
+            lead.deep_analysis = result
+
+            # Update lead title from screening if available
+            lead_title = result.get("lead_title")
+            if lead_title:
+                lead.title = lead_title
+
+            provisions = result.get("provisions", [])
+
+            # Compute severity from provisions
+            if provisions:
+                lead.severity = DeepAnalyzer.compute_max_severity(provisions)
+
+            # Downgrade non-actionable leads and preserve not_actionable status
+            actionable = result.get("actionable", True)
+            if not actionable or result_status == "not_actionable":
                 lead.severity = "info"
+                lead.analysis_status = "not_actionable"
+            else:
+                lead.analysis_status = "completed"
+
+            # Populate citations
+            metadata = event.metadata_ or {}
+            legal_precedent: list[dict[str, Any]] = []
+            for prov in provisions:
+                for case in prov.get("precedent", []):
+                    legal_precedent.append(case)
+
+            lead.citations = DeepAnalyzer.build_citations(
+                provisions,
+                legal_precedent,
+                source_url=metadata.get("url", ""),
+                document_title=lead.title or "",
+                minio_uri=metadata.get("minio_uri", ""),
+            )
 
             analyzed += 1
 

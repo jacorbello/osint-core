@@ -37,6 +37,8 @@ dependencies = [
   "minio>=7.2.0",
   "beautifulsoup4>=4.12.0",
   "PyMuPDF>=1.24.0",
+  "langdetect>=1.0.9",
+  "pdfplumber>=0.10.0",
 ]
 
 [project.optional-dependencies]
@@ -113,6 +115,10 @@ module = [
     "tldextract.*",
     "fitz",
     "fitz.*",
+    "langdetect",
+    "langdetect.*",
+    "pdfplumber",
+    "pdfplumber.*",
 ]
 ignore_missing_imports = true
 

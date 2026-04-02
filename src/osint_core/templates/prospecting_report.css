@@ -198,19 +198,20 @@ h3 {
 
 .confidence-bar {
     display: inline-block;
-    width: 1in;
-    height: 8pt;
+    width: 80px;
+    height: 10px;
     background: #e0e0e0;
-    border-radius: 4pt;
+    border-radius: 5px;
     overflow: hidden;
     vertical-align: middle;
+    margin: 0 4px;
 }
 
 .confidence-fill {
     display: block;
     height: 100%;
-    background: #27ae60;
-    border-radius: 4pt;
+    background: #2c5282;
+    border-radius: 5px;
 }
 
 /* --- Citations --- */
@@ -249,6 +250,59 @@ h3 {
 .citation-unverified {
     color: #e74c3c;
     font-size: 9pt;
+}
+
+/* --- Source links --- */
+.source-link {
+    font-size: 10pt;
+    margin: 4pt 0;
+    word-break: break-all;
+}
+
+.source-link a {
+    color: #2c5282;
+}
+
+/* --- Precedent list --- */
+.precedent-list {
+    padding-left: 0.3in;
+    font-size: 10pt;
+}
+
+.precedent-list li {
+    margin-bottom: 4pt;
+}
+
+/* --- Data tables (skipped leads appendix) --- */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.15in 0;
+    font-size: 10pt;
+}
+
+.data-table th,
+.data-table td {
+    border: 1px solid #ddd;
+    padding: 6pt 10pt;
+    text-align: left;
+}
+
+.data-table th {
+    background: #0d1b2a;
+    color: white;
+    font-size: 9pt;
+    text-transform: uppercase;
+}
+
+.data-table td a {
+    color: #2c5282;
+    word-break: break-all;
+}
+
+/* --- Page break utility --- */
+.page-break {
+    page-break-before: always;
 }
 
 /* --- Utilities --- */

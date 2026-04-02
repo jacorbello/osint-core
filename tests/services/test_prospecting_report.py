@@ -13,6 +13,8 @@ from osint_core.services.prospecting_report import (
     _archive_pdf,
     _extract_json,
     _fallback_narrative,
+    _filter_reportable_leads,
+    _group_skipped_leads,
     _select_reportable_leads,
 )
 
@@ -27,6 +29,9 @@ def _make_lead(
     severity: str = "high",
     reported_at: datetime | None = None,
     last_updated_at: datetime | None = None,
+    analysis_status: str = "pending",
+    deep_analysis: dict | None = None,
+    citations: dict | None = None,
 ) -> MagicMock:
     lead = MagicMock()
     lead.id = uuid.uuid4()
@@ -41,9 +46,11 @@ def _make_lead(
     lead.confidence = 0.85
     lead.plan_id = "cal-prospecting"
     lead.event_ids = [uuid.uuid4()]
-    lead.citations = {"sources": ["https://example.com/article"]}
+    lead.citations = citations if citations is not None else {"sources": ["https://example.com/article"]}
     lead.reported_at = reported_at
     lead.last_updated_at = last_updated_at or datetime.now(UTC)
+    lead.analysis_status = analysis_status
+    lead.deep_analysis = deep_analysis
     return lead
 
 
@@ -553,3 +560,112 @@ class TestExtractJson:
             f'{json.dumps(self._VALID)}'
         )
         assert _extract_json(content) == self._VALID
+
+
+class TestReportFiltering:
+    """Tests for _filter_reportable_leads and _group_skipped_leads."""
+
+    def test_non_actionable_leads_excluded(self):
+        """Lead with analysis_status='not_actionable' should be filtered out."""
+        lead = _make_lead(analysis_status="not_actionable")
+        result = _filter_reportable_leads([lead])
+        assert result == []
+
+    def test_completed_leads_included(self):
+        """Lead with analysis_status='completed' should pass through."""
+        lead = _make_lead(analysis_status="completed")
+        result = _filter_reportable_leads([lead])
+        assert len(result) == 1
+        assert result[0] is lead
+
+    def test_pending_leads_included(self):
+        """Lead with analysis_status='pending' should pass through."""
+        lead = _make_lead(analysis_status="pending")
+        result = _filter_reportable_leads([lead])
+        assert len(result) == 1
+
+    def test_extraction_failed_excluded(self):
+        """Lead with analysis_status='extraction_failed' should be filtered out."""
+        lead = _make_lead(analysis_status="extraction_failed")
+        result = _filter_reportable_leads([lead])
+        assert result == []
+
+    def test_non_english_excluded(self):
+        """Lead with analysis_status='non_english' should be filtered out."""
+        lead = _make_lead(analysis_status="non_english")
+        result = _filter_reportable_leads([lead])
+        assert result == []
+
+    def test_no_content_excluded(self):
+        """Lead with analysis_status='no_content' should be filtered out."""
+        lead = _make_lead(analysis_status="no_content")
+        result = _filter_reportable_leads([lead])
+        assert result == []
+
+    def test_failed_excluded(self):
+        """Lead with analysis_status='failed' should be filtered out."""
+        lead = _make_lead(analysis_status="failed")
+        result = _filter_reportable_leads([lead])
+        assert result == []
+
+    def test_mixed_leads_filtered_correctly(self):
+        """Mix of statuses: only reportable leads pass through."""
+        leads = [
+            _make_lead(analysis_status="completed", title="Good"),
+            _make_lead(analysis_status="not_actionable", title="Bad"),
+            _make_lead(analysis_status="extraction_failed", title="Skip"),
+            _make_lead(analysis_status="pending", title="Pending"),
+        ]
+        result = _filter_reportable_leads(leads)
+        titles = [lead.title for lead in result]
+        assert titles == ["Good", "Pending"]
+
+    def test_skipped_leads_grouped_by_status(self):
+        """Leads with skipped statuses are grouped correctly."""
+        lead_a = _make_lead(analysis_status="extraction_failed", title="Doc A")
+        lead_a.institution = "UC Davis"
+        lead_b = _make_lead(analysis_status="non_english", title="Doc B")
+        lead_b.institution = "UCLA"
+        lead_c = _make_lead(analysis_status="no_content", title="Doc C")
+        lead_c.institution = "UCSF"
+        lead_d = _make_lead(analysis_status="extraction_failed", title="Doc D")
+        lead_d.institution = "UCSD"
+        leads = [
+            lead_a, lead_b, lead_c, lead_d,
+            _make_lead(analysis_status="completed", title="Good One"),
+            _make_lead(analysis_status="pending", title="Pending One"),
+        ]
+        result = _group_skipped_leads(leads)
+
+        assert "extraction_failed" in result
+        assert len(result["extraction_failed"]) == 2
+        assert result["extraction_failed"][0]["title"] == "Doc A"
+        assert result["extraction_failed"][1]["title"] == "Doc D"
+
+        assert "non_english" in result
+        assert len(result["non_english"]) == 1
+        assert result["non_english"][0]["institution"] == "UCLA"
+
+        assert "no_content" in result
+        assert len(result["no_content"]) == 1
+
+        # completed and pending should NOT be grouped
+        assert "completed" not in result
+        assert "pending" not in result
+
+    def test_skipped_leads_extract_source_url(self):
+        """Skipped lead entries include source_url from citations."""
+        lead = _make_lead(
+            analysis_status="extraction_failed",
+            citations={
+                "source_citations": [{"url": "https://example.com/policy.pdf"}],
+            },
+        )
+        result = _group_skipped_leads([lead])
+        assert result["extraction_failed"][0]["source_url"] == "https://example.com/policy.pdf"
+
+    def test_skipped_leads_empty_source_url_when_no_citations(self):
+        """Skipped lead entries have empty source_url when no citations available."""
+        lead = _make_lead(analysis_status="no_content", citations=None)
+        result = _group_skipped_leads([lead])
+        assert result["no_content"][0]["source_url"] == ""

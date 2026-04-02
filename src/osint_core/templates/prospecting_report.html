@@ -97,6 +97,10 @@
         </div>
         {% endif %}
 
+        {% if lead.source_url %}
+        <p class="source-link"><strong>Source:</strong> <a href="{{ lead.source_url }}">{{ lead.source_url }}</a></p>
+        {% endif %}
+
         {% if lead.document_summary %}
         <div class="lead-subsection">
             <h3>Document Summary</h3>
@@ -124,6 +128,22 @@
             {# Precedent removed — repetitive across leads. See citations appendix. #}
         </div>
         {% endfor %}
+
+        {% if lead.legal_citations %}
+        <h3>Relevant Precedent</h3>
+        <ul class="precedent-list">
+          {% for cite in lead.legal_citations %}
+          <li><em>{{ cite.case_name }}</em>, {{ cite.citation }}
+            {% if cite.verified %}<span class="citation-verified">&#10003; Verified</span>
+              {% if cite.courtlistener_url and cite.courtlistener_url.startswith('https://') %}
+                (<a href="{{ cite.courtlistener_url }}">view</a>)
+              {% endif %}
+            {% endif %}
+            {% if cite.relevance %} &mdash; {{ cite.relevance }}{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
     </div>
 
     {% elif lead.has_deep_analysis and lead.incident_summary is defined %}
@@ -156,6 +176,10 @@
         </div>
         {% endif %}
 
+        {% if lead.source_url %}
+        <p class="source-link"><strong>Source:</strong> <a href="{{ lead.source_url }}">{{ lead.source_url }}</a></p>
+        {% endif %}
+
         {% if lead.incident_summary %}
         <div class="lead-subsection">
             <h3>Incident Summary</h3>
@@ -179,6 +203,22 @@
                 {% endfor %}
             </ul>
         </div>
+        {% endif %}
+
+        {% if lead.legal_citations %}
+        <h3>Relevant Precedent</h3>
+        <ul class="precedent-list">
+          {% for cite in lead.legal_citations %}
+          <li><em>{{ cite.case_name }}</em>, {{ cite.citation }}
+            {% if cite.verified %}<span class="citation-verified">&#10003; Verified</span>
+              {% if cite.courtlistener_url and cite.courtlistener_url.startswith('https://') %}
+                (<a href="{{ cite.courtlistener_url }}">view</a>)
+              {% endif %}
+            {% endif %}
+            {% if cite.relevance %} &mdash; {{ cite.relevance }}{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
         {% endif %}
     </div>
 
@@ -210,6 +250,10 @@
             <span class="constitutional-tag">{{ basis }}</span>
             {% endfor %}
         </div>
+        {% endif %}
+
+        {% if lead.source_url %}
+        <p class="source-link"><strong>Source:</strong> <a href="{{ lead.source_url }}">{{ lead.source_url }}</a></p>
         {% endif %}
 
         {% if lead.lead_type == "incident" %}
@@ -386,6 +430,27 @@
     </ol>
     {% endif %}
 </div>
+{% endif %}
+
+{% if skipped_leads %}
+<div class="page-break"></div>
+<h1>Skipped Leads</h1>
+<p>The following documents could not be analyzed.</p>
+{% for status, items in skipped_leads.items() %}
+<h2>{{ status | replace('_', ' ') | title }}</h2>
+<table class="data-table">
+  <thead><tr><th>Institution</th><th>Document</th><th>Source URL</th></tr></thead>
+  <tbody>
+  {% for item in items %}
+  <tr>
+    <td>{{ item.institution }}</td>
+    <td>{{ item.title }}</td>
+    <td>{% if item.source_url %}<a href="{{ item.source_url }}">{{ item.source_url }}</a>{% else %}N/A{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endfor %}
 {% endif %}
 
 </body>
