@@ -417,6 +417,12 @@ A prospecting lead surfaced from OSINT events and qualified through a pipeline.
 | `first_surfaced_at` | TIMESTAMP(tz) | No | Server-default `now()` |
 | `last_updated_at` | TIMESTAMP(tz) | No | Server-default `now()` |
 | `reported_at` | TIMESTAMP(tz) | Yes | When included in a report |
+| `deep_analysis` | JSONB | Yes | Full deep analysis output (provisions for policies, corroboration assessment for incidents). Contains: `provisions` array with `section_reference`, `quoted_language`, `constitutional_issue`, `constitutional_basis`, `severity`, `affected_population`, `facial_or_as_applied`; plus `document_summary`, `overall_assessment`, `actionable` boolean. |
+| `analysis_status` | Text | No | Default `pending`. Tracks deep analysis pipeline progress. Values: `pending`, `completed`, `no_source_material`, `failed`. |
+
+#### Constraints
+
+- Check `ck_leads_analysis_status_valid`: `analysis_status` in `pending`, `completed`, `no_source_material`, `failed`
 
 #### Indexes
 
@@ -425,6 +431,7 @@ A prospecting lead surfaced from OSINT events and qualified through a pipeline.
 - `ix_leads_jurisdiction`
 - `ix_leads_reported_at`
 - `ix_leads_plan_id`
+- `ix_leads_analysis_status`
 
 #### Pydantic Schemas (`src/osint_core/schemas/lead.py`)
 
