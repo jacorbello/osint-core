@@ -581,7 +581,11 @@ class DeepAnalyzer:
 
         # Build precedent context using constitutional_basis from screening
         precedent_context = ""
-        precedent_cases = self._get_precedent_for_basis(constitutional_basis) if constitutional_basis else []
+        precedent_cases = (
+            self._get_precedent_for_basis(constitutional_basis)
+            if constitutional_basis
+            else []
+        )
         if precedent_cases:
             case_lines = [
                 f"  - {c.get('case', '')} ({c.get('citation', '')})"
@@ -803,10 +807,10 @@ class DeepAnalyzer:
         except ValueError:
             pass  # not an IP literal — check domain suffix
 
-        if not any(hostname.endswith(suffix) for suffix in DeepAnalyzer._ALLOWED_DOMAIN_SUFFIXES):
-            return False
-
-        return True
+        return any(
+            hostname.endswith(suffix)
+            for suffix in DeepAnalyzer._ALLOWED_DOMAIN_SUFFIXES
+        )
 
     async def _fetch_url_content(self, url: str) -> bytes | None:
         """Fetch document content from a URL as fallback when MinIO fails.

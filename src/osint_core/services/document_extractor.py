@@ -12,7 +12,8 @@ import unicodedata
 from dataclasses import dataclass
 
 from bs4 import BeautifulSoup
-from langdetect import DetectorFactory, detect as _langdetect_detect
+from langdetect import DetectorFactory
+from langdetect import detect as _langdetect_detect
 
 DetectorFactory.seed = 0
 
