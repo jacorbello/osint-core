@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from osint_core.services.document_extractor import DocumentExtractor, ExtractionResult
+from osint_core.services.document_extractor import DocumentExtractor
 
 
 class TestExtractHtml:

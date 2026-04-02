@@ -12,6 +12,9 @@ import unicodedata
 from dataclasses import dataclass
 
 from bs4 import BeautifulSoup
+from langdetect import DetectorFactory, detect as _langdetect_detect
+
+DetectorFactory.seed = 0
 
 _HEADING_MAP = {"h1": "#", "h2": "##", "h3": "###", "h4": "####", "h5": "#####", "h6": "######"}
 
@@ -118,9 +121,7 @@ class DocumentExtractor:
         if len(text.strip()) < 20:
             return "unknown"
         try:
-            from langdetect import detect
-
-            return detect(text[:1000])
+            return _langdetect_detect(text[:1000])
         except Exception:
             return "unknown"
 

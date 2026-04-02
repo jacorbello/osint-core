@@ -161,10 +161,17 @@ _SCREENING_SYSTEM_PROMPT = (
     "Respond with JSON:\n"
     '{"relevant": true, "language": "en", "lead_title": "Descriptive Title", '
     '"document_summary": "...", "overall_assessment": "...", '
-    '"flagged_sections": ["§ 4.2 - Pronoun Requirements", "§ 5.1 - Protest Zones"]}\n\n'
+    '"flagged_sections": [{"section_reference": "§ 4.2 - Pronoun Requirements", '
+    '"reason": "Compelled speech concern", '
+    '"constitutional_basis": "1A-free-speech"}, '
+    '{"section_reference": "§ 5.1 - Protest Zones", '
+    '"reason": "Assembly restriction", '
+    '"constitutional_basis": "1A-assembly"}]}\n\n'
     "language: ISO 639-1 code (en, es, tl, etc.)\n"
-    "flagged_sections: list of section reference strings to review in detail. "
-    "Empty list if not relevant."
+    "flagged_sections: list of objects with section_reference, reason, and "
+    "constitutional_basis. constitutional_basis must be one of: 1A-free-speech, "
+    "1A-religion, 1A-assembly, 1A-press, 14A-due-process, 14A-equal-protection, "
+    "parental-rights. Empty list if not relevant."
 )
 
 _PROVISION_SYSTEM_PROMPT = (
@@ -412,11 +419,19 @@ class DeepAnalyzer:
 
         # Step 6: Pass 2 — Targeted provision analysis
         provisions: list[dict[str, Any]] = []
-        for section_ref in flagged:
+        for section_entry in flagged:
+            # flagged_sections may be structured dicts or plain strings
+            if isinstance(section_entry, dict):
+                section_ref = section_entry.get("section_reference", str(section_entry))
+                basis = section_entry.get("constitutional_basis", "")
+            else:
+                section_ref = str(section_entry)
+                basis = ""
             provision = await self._analyze_provision(
                 lead, event,
                 full_doc=text,
                 flagged_section=section_ref,
+                constitutional_basis=basis,
                 corroborating_events=corroborating,
             )
             if provision:
@@ -552,6 +567,7 @@ class DeepAnalyzer:
         full_doc: str,
         flagged_section: str,
         *,
+        constitutional_basis: str = "",
         corroborating_events: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         """Analyze a single flagged section in detail (Pass 2).
@@ -561,9 +577,9 @@ class DeepAnalyzer:
         metadata = event.metadata_ or {}
         section_text = self._extract_section_text(full_doc, flagged_section)
 
-        # Build precedent context
+        # Build precedent context using constitutional_basis from screening
         precedent_context = ""
-        precedent_cases = self._get_precedent_for_basis(flagged_section)
+        precedent_cases = self._get_precedent_for_basis(constitutional_basis) if constitutional_basis else []
         if precedent_cases:
             case_lines = [f"  - {c.get('case', '')} ({c.get('citation', '')})" for c in precedent_cases]
             precedent_context = "\nRelevant precedent:\n" + "\n".join(case_lines) + "\n"
@@ -754,11 +770,55 @@ class DeepAnalyzer:
             )
             return None
 
+    _ALLOWED_DOMAIN_SUFFIXES = (".edu", ".gov")
+
+    @staticmethod
+    def _is_url_allowed(url: str) -> bool:
+        """Validate that a URL targets an allowed domain and is not a private IP."""
+        import ipaddress
+        from urllib.parse import urlparse
+
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return False
+
+        if parsed.scheme not in ("http", "https"):
+            return False
+
+        hostname = (parsed.hostname or "").lower()
+        if not hostname:
+            return False
+
+        # Reject private/loopback IPs
+        try:
+            addr = ipaddress.ip_address(hostname)
+            if addr.is_private or addr.is_loopback or addr.is_reserved:
+                return False
+        except ValueError:
+            pass  # not an IP literal — check domain suffix
+
+        if not any(hostname.endswith(suffix) for suffix in DeepAnalyzer._ALLOWED_DOMAIN_SUFFIXES):
+            return False
+
+        return True
+
     async def _fetch_url_content(self, url: str) -> bytes | None:
-        """Fetch document content from a URL as fallback when MinIO fails."""
+        """Fetch document content from a URL as fallback when MinIO fails.
+
+        Only allows .edu and .gov domains. Rejects private IPs and
+        disables redirect following to prevent SSRF.
+        """
+        if not self._is_url_allowed(url):
+            logger.warning(
+                "deep_analysis_url_blocked",
+                extra={"url": url, "reason": "domain not in allowlist"},
+            )
+            return None
+
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(url, follow_redirects=True)
+                resp = await client.get(url, follow_redirects=False)
                 resp.raise_for_status()
                 return resp.content
         except Exception as exc:

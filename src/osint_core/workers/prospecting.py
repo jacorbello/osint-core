@@ -287,7 +287,7 @@ async def _analyze_leads_async(plan_id: str) -> dict[str, Any]:
             result_status = result.get("analysis_status", "")
             if result_status in ("no_content", "extraction_failed", "non_english"):
                 lead.deep_analysis = result
-                lead.analysis_status = "failed"
+                lead.analysis_status = result_status
                 continue
 
             lead.deep_analysis = result
@@ -303,10 +303,11 @@ async def _analyze_leads_async(plan_id: str) -> dict[str, Any]:
             if provisions:
                 lead.severity = DeepAnalyzer.compute_max_severity(provisions)
 
-            # Downgrade non-actionable leads
-            if not result.get("actionable", True):
+            # Downgrade non-actionable leads and preserve not_actionable status
+            actionable = result.get("actionable", True)
+            if not actionable or result_status == "not_actionable":
                 lead.severity = "info"
-                lead.analysis_status = "completed"
+                lead.analysis_status = "not_actionable"
             else:
                 lead.analysis_status = "completed"
 
