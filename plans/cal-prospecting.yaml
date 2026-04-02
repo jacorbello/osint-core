@@ -56,11 +56,9 @@ sources:
         rights, religious liberty, parental rights, or due process protections. Focus on
         actionable cases with identified institutions and specific policy violations.
       allowed_x_handles:
-        - TheFIREorg
         - CampusReform
         - GoldwaterInst
         - CalLiberty
-        - FIREprez
         - RealCandaceO
         - JonathanTurley
         - RobSchneider
@@ -88,10 +86,8 @@ sources:
         rights, religious liberty, parental rights, or due process protections. Focus on
         actionable cases with identified institutions and specific policy violations.
       allowed_x_handles:
-        - TheFIREorg
         - CampusReform
         - GoldwaterInst
-        - FIREprez
         - JonathanTurley
         - TexasScorecard
         - TCFPPolicy
@@ -119,10 +115,8 @@ sources:
         rights, religious liberty, parental rights, or due process protections. Focus on
         actionable cases with identified institutions and specific policy violations.
       allowed_x_handles:
-        - TheFIREorg
         - CampusReform
         - GoldwaterInst
-        - FIREprez
         - JonathanTurley
         - AlphaNewsMN
         - CtrAmExperiment
@@ -150,22 +144,11 @@ sources:
         rights, religious liberty, parental rights, or due process protections. Also monitor
         federal policy changes affecting campus speech and religious liberty nationwide.
       allowed_x_handles:
-        - TheFIREorg
         - CampusReform
         - GoldwaterInst
-        - FIREprez
         - JonathanTurley
         - Heritage
         - BeckettLaw
-
-  # ── RSS: FIRE (Foundation for Individual Rights and Expression) ──
-  - id: rss_fire
-    type: rss
-    url: "https://www.fire.org/rssfeed"
-    schedule_cron: "20 7,14 * * *"
-    weight: 1.5
-    params:
-      max_items: 30
 
   # ── RSS: Higher Ed Dive ──────────────────────────────────────
   - id: rss_higher_ed_dive
@@ -289,11 +272,6 @@ source_profiles:
     credibility: 3
     corroboration_required: true
     license: "oauth"
-  rss_fire:
-    reliability: B
-    credibility: 2
-    corroboration_required: false
-    license: "public"
   rss_higher_ed_dive:
     reliability: B
     credibility: 2
@@ -347,7 +325,6 @@ scoring:
     x_cal_texas: 0.4
     x_cal_minnesota: 0.4
     x_cal_dc: 0.4
-    rss_fire: 0.9
     rss_higher_ed_dive: 0.7
     rss_volokh: 0.8
     rss_courthouse_news: 0.85
