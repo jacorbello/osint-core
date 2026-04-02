@@ -31,7 +31,8 @@ From `docker-compose.dev.yaml`, the local development stack consists of six serv
 
 Additional production dependencies (not in compose):
 
-- **vLLM** -- LLM inference server for NLP enrichment and brief/report generation (`OSINT_VLLM_URL`).
+- **Groq** -- LLM API (gpt-oss-20b) for NLP enrichment, narrative generation, and deep analysis. Configured via `OSINT_LLM_PROVIDER=groq`. Uses strict structured output for NLP/narrative tasks and `json_object` response mode for deep analysis of large documents.
+- **vLLM** -- Fallback LLM inference server (`OSINT_VLLM_URL`), used when Groq returns 429/5xx errors. Selectable via `OSINT_LLM_PROVIDER=vllm`.
 - **MinIO** -- Object storage for PDF archival (briefs and prospecting reports).
 - **Resend** -- Transactional email API for prospecting report delivery.
 - **CourtListener** -- Legal citation verification API.
@@ -93,6 +94,27 @@ Enrichment Chain (per event):
 
 For CAL prospecting plans, the enrichment chains are wrapped in a Celery chord so that `osint.match_leads` fires only after all enrichment completes, avoiding race conditions with partial data.
 
+### Deep Analysis Stage
+
+After lead matching, CAL plans run an additional deep analysis stage before report generation:
+
+```
+osint.match_leads (enrich queue)
+    |
+    v
+osint.analyze_leads (enrich queue)
+    |-- Retrieve full policy documents from MinIO
+    |-- Extract text from HTML and PDF (via PyMuPDF) sources
+    |-- Chunk large documents at 20k characters
+    |-- Send chunks to Groq (gpt-oss-20b) for clause-level constitutional analysis
+    |-- Match precedent via CourtListener landmark case lookup
+    |-- Store results in Lead.deep_analysis JSONB field
+    |-- Filter non-actionable leads from downstream reports
+    |
+    v
+osint.generate_prospecting_report (osint queue)
+```
+
 ## Workers
 
 All workers are registered in `src/osint_core/workers/celery_app.py`. Tasks use `asyncio.new_event_loop()` to bridge sync Celery with async database and HTTP calls.
@@ -101,11 +123,12 @@ All workers are registered in `src/osint_core/workers/celery_app.py`. Tasks use 
 |---|---|---|
 | `ingest.py` | `osint.ingest_source` | Fetch items from a plan source, deduplicate, persist events and indicators, dispatch enrichment chains |
 | `enrich.py` | `osint.vectorize_event`, `osint.semantic_search`, `osint.correlate_event` | Embed event text into Qdrant (384-dim, all-MiniLM-L6-v2), run semantic similarity search, find correlated events via indicator overlap and vector similarity |
-| `nlp_enrich.py` | `osint.nlp_enrich_event` | Call vLLM for summary, relevance classification, entity extraction, and ATT&CK technique or constitutional-rights classification (CAL mode) |
+| `nlp_enrich.py` | `osint.nlp_enrich_event` | Call LLM (Groq or vLLM, per `OSINT_LLM_PROVIDER`) for summary, relevance classification, entity extraction, and ATT&CK technique or constitutional-rights classification (CAL mode) |
 | `score.py` | `osint.score_event`, `osint.rescore_all_events` | Compute relevance score (keyword + geo + source trust + NLP + recency + corroboration), map to severity, apply promotion rules, create alerts and chain notifications |
 | `notify.py` | `osint.send_notification` | Dispatch alerts via Gotify, Slack, webhook, or email (SMTP with Jinja2 HTML templates); supports PDF attachments from MinIO |
 | `digest.py` | `osint.compile_digest` | Aggregate events by time window (daily/weekly/shift), persist Brief record, optionally generate PDF and chain email notification |
-| `prospecting.py` | `osint.match_leads`, `osint.generate_prospecting_report`, `osint.collect_prospecting_sources` | Match enriched events to leads with confidence scoring; generate PDF prospecting reports with narrative sections (vLLM) and legal citation verification (CourtListener); email via Resend; trigger source collection |
+| `prospecting.py` | `osint.match_leads`, `osint.generate_prospecting_report`, `osint.collect_prospecting_sources` | Match enriched events to leads with confidence scoring; generate PDF prospecting reports with narrative sections and legal citation verification (CourtListener); email via Resend; trigger source collection |
+| `deep_analysis.py` | `osint.analyze_leads` | Retrieve policy documents from MinIO, extract text (HTML/PDF via PyMuPDF), chunk at 20k chars, run clause-level constitutional analysis via Groq (gpt-oss-20b), match precedent via CourtListener, store results in `Lead.deep_analysis` JSONB, filter non-actionable leads |
 | `retention.py` | `osint.purge_expired_events` | Delete events past retention threshold (ephemeral: 30d, standard: 365d), clean up Qdrant vectors, write audit log |
 | `k8s_dispatch.py` | `osint.enrich_entities` | Extract named entities via spaCy NER (PERSON, ORG, GPE, PRODUCT, LOC), upsert Entity records, link to events; future: K8s GPU job dispatch |
 
@@ -116,7 +139,7 @@ Tasks are routed to dedicated queues via `task_routes` in `celery_app.py`:
 | Queue     | Tasks |
 |-----------|-------|
 | `ingest`  | `osint.ingest_source`, `osint.collect_prospecting_sources` |
-| `enrich`  | `osint.vectorize_event`, `osint.semantic_search`, `osint.correlate_event`, `osint.enrich_entities`, `osint.nlp_enrich_event`, `osint.match_leads` |
+| `enrich`  | `osint.vectorize_event`, `osint.semantic_search`, `osint.correlate_event`, `osint.enrich_entities`, `osint.nlp_enrich_event`, `osint.match_leads`, `osint.analyze_leads` |
 | `score`   | `osint.score_event`, `osint.rescore_all_events` |
 | `notify`  | `osint.send_notification` |
 | `digest`  | `osint.compile_digest` |
@@ -147,15 +170,17 @@ Plan-driven entries are loaded dynamically by `PlanScheduler` (a custom `Persist
 | Alert Rules | `services/alert_rules.py` | Parse and evaluate alert rules from plan YAML. `AlertRule` dataclass, `evaluate_rules()`, `parse_rules_from_plan()` |
 | Notification | `services/notification.py` | Route matching by severity threshold and message formatting. `NotificationService`, `NotificationRoute` |
 | Resend Notifier | `services/resend_notifier.py` | Send PDF reports via Resend email API with HTML body and base64-encoded attachment. `ResendNotifier.send_report()` |
-| Brief Generator | `services/brief_generator.py` | Generate intelligence briefs via vLLM or Jinja2 template fallback. `BriefGenerator.generate()`, `fetch_brief_context()` (Postgres full-text search) |
+| Brief Generator | `services/brief_generator.py` | Generate intelligence briefs via LLM (Groq or vLLM) or Jinja2 template fallback. `BriefGenerator.generate()`, `fetch_brief_context()` (Postgres full-text search) |
 | Indicators | `services/indicators.py` | Regex-based IOC extraction and normalization for CVEs, domains, IPs, URLs, SHA-256/MD5 hashes. `extract_indicators()`, `normalize_indicator()` |
 | Lead Matcher | `services/lead_matcher.py` | Deduplicate events into leads with confidence scoring, fingerprinting (incident vs. policy), and source citation tracking. `LeadMatcher.match_event_to_lead()`, `compute_confidence()` |
 | Watch Matcher | `services/watch_matcher.py` | Evaluate whether events match active watches by geography (country code, bounding box), keywords, and severity threshold. `matches_watch()` |
 | Plan Engine | `services/plan_engine.py` | Validate plan YAML against JSON Schema (v1/v2), scan for embedded secrets, compute content hashes, build Celery Beat schedules from source cron expressions. `PlanEngine` |
 | Plan Store | `services/plan_store.py` | Versioned plan CRUD via async SQLAlchemy. `PlanStore` with `store_version()`, `get_active()`, `activate()`, `rollback()`, `get_next_version()` |
-| Prospecting Report | `services/prospecting_report.py` | Orchestrate lead selection, vLLM narrative generation, CourtListener citation verification, WeasyPrint PDF rendering, and MinIO archival. `ProspectingReportGenerator.generate_report()` |
+| Prospecting Report | `services/prospecting_report.py` | Orchestrate lead selection, LLM narrative generation (Groq or vLLM), CourtListener citation verification, WeasyPrint PDF rendering, and MinIO archival. `ProspectingReportGenerator.generate_report()` |
 | PDF Export | `services/pdf_export.py` | Render markdown to styled PDF via WeasyPrint, upload to MinIO. `render_brief_pdf()`, `upload_pdf_to_minio()`, `generate_and_upload_pdf()` |
 | CourtListener | `services/courtlistener.py` | Async client for CourtListener Citation Lookup API with rate limiting. `CourtListenerClient.verify_citations()` returns `VerifiedCitation` objects |
+| Deep Analyzer | `services/deep_analyzer.py` | Orchestrate deep analysis of leads: retrieve policy documents from MinIO, delegate text extraction and chunking, send to Groq for clause-level constitutional analysis, match precedent via CourtListener, persist results to `Lead.deep_analysis` JSONB. `DeepAnalyzer.analyze()` |
+| Document Extractor | `services/document_extractor.py` | Extract text from HTML and PDF documents (PyMuPDF for PDF, html-to-text for HTML), chunk large documents at 20k character boundaries. `DocumentExtractor.extract()`, `DocumentExtractor.chunk()` |
 | Geo | `services/geo.py` | Geographic lookup from static JSON data: ISO2-to-ISO3 conversion, country lookup by code or name, region resolution. `lookup_country()`, `lookup_gpe()`, `get_region()` |
 | Audit | `services/audit.py` | Append-only audit logging via `AuditLog` model. `create_audit_entry()`, `list_audit_entries()` |
 
