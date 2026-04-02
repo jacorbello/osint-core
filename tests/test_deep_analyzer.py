@@ -42,6 +42,7 @@ def _make_event(
     event.raw_excerpt = "https://example.edu/policy"
     event.title = "Test Policy"
     event.source_id = source_id
+    event.nlp_summary = "NLP summary of event."
     return event
 
 
@@ -72,10 +73,60 @@ SAMPLE_INCIDENT_ANALYSIS = {
     "actionable": True,
 }
 
+SAMPLE_SCREENING_RELEVANT = {
+    "relevant": True,
+    "language": "en",
+    "lead_title": "UC Berkeley Speech Policy",
+    "document_summary": "Policy regulating campus speech.",
+    "overall_assessment": "Contains provisions restricting free speech.",
+    "flagged_sections": ["§ 4.2 - Pronoun Requirements", "§ 5.1 - Protest Zones"],
+}
+
+SAMPLE_SCREENING_IRRELEVANT = {
+    "relevant": False,
+    "language": "en",
+    "lead_title": "UC Berkeley IT Procurement Policy",
+    "document_summary": "Administrative IT procurement procedures.",
+    "overall_assessment": "No constitutional issues found.",
+    "flagged_sections": [],
+}
+
+SAMPLE_SCREENING_NON_ENGLISH = {
+    "relevant": True,
+    "language": "es",
+    "lead_title": "Política Universitaria",
+    "document_summary": "Spanish language policy.",
+    "overall_assessment": "Cannot assess — non-English.",
+    "flagged_sections": [],
+}
+
+SAMPLE_PROVISION_RESULT_1 = {
+    "section_reference": "§ 4.2",
+    "quoted_language": "Students must use preferred pronouns.",
+    "constitutional_issue": "Compelled speech under First Amendment",
+    "constitutional_basis": "1A-free-speech",
+    "severity": "high",
+    "affected_population": "All students",
+    "facial_or_as_applied": "facial",
+    "sources_cited": ["Janus v. AFSCME"],
+}
+
+SAMPLE_PROVISION_RESULT_2 = {
+    "section_reference": "§ 5.1",
+    "quoted_language": "All protests must occur in designated zones.",
+    "constitutional_issue": "Restriction on assembly in public forum",
+    "constitutional_basis": "1A-assembly",
+    "severity": "medium",
+    "affected_population": "All students and faculty",
+    "facial_or_as_applied": "facial",
+    "sources_cited": ["Tinker v. Des Moines"],
+}
+
 
 class TestAnalyzePolicy:
     @pytest.mark.asyncio
     async def test_analyzes_policy_document(self) -> None:
+        """Existing test adapted for two-pass flow."""
         analyzer = DeepAnalyzer(precedent_map={})
         lead = _make_lead(lead_type="policy")
         event = _make_event()
@@ -85,61 +136,64 @@ class TestAnalyzePolicy:
                 analyzer,
                 "_retrieve_document",
                 new_callable=AsyncMock,
-                return_value=b"<p>Policy text</p>",
+                return_value=b"<p>Policy text with enough content to pass gates</p>" * 5,
             ),
             patch.object(analyzer, "_get_document_type", return_value="html"),
-            patch(
-                "osint_core.services.deep_analyzer.llm_chat_completion",
+            patch.object(
+                analyzer,
+                "_screen_document",
                 new_callable=AsyncMock,
-                return_value=json.dumps(SAMPLE_POLICY_ANALYSIS),
+                return_value=SAMPLE_SCREENING_RELEVANT,
+            ),
+            patch.object(
+                analyzer,
+                "_analyze_provision",
+                new_callable=AsyncMock,
+                side_effect=[SAMPLE_PROVISION_RESULT_1, SAMPLE_PROVISION_RESULT_2],
             ),
             patch.object(
                 analyzer,
                 "_attach_precedent",
                 new_callable=AsyncMock,
-                return_value=SAMPLE_POLICY_ANALYSIS,
+                side_effect=lambda a: a,
             ),
         ):
             result = await analyzer.analyze_lead(lead, event)
 
+        assert result is not None
         assert result["actionable"] is True
-        assert len(result["provisions"]) == 1
+        assert len(result["provisions"]) == 2  # two flagged sections
         assert result["provisions"][0]["section_reference"] == "§ 4.2"
+        assert result["provisions"][1]["section_reference"] == "§ 5.1"
 
     @pytest.mark.asyncio
     async def test_non_actionable_policy(self) -> None:
+        """Irrelevant document returns not_actionable via screening."""
         analyzer = DeepAnalyzer(precedent_map={})
         lead = _make_lead(lead_type="policy")
         event = _make_event()
-
-        empty_result = {
-            "provisions": [],
-            "document_summary": "Administrative policy.",
-            "overall_assessment": "No constitutional issues.",
-            "actionable": False,
-        }
 
         with (
             patch.object(
                 analyzer,
                 "_retrieve_document",
                 new_callable=AsyncMock,
-                return_value=b"<p>Admin stuff</p>",
+                return_value=b"<p>Admin stuff repeated many times</p>" * 5,
             ),
             patch.object(analyzer, "_get_document_type", return_value="html"),
-            patch(
-                "osint_core.services.deep_analyzer.llm_chat_completion",
-                new_callable=AsyncMock,
-                return_value=json.dumps(empty_result),
-            ),
             patch.object(
-                analyzer, "_attach_precedent", new_callable=AsyncMock, return_value=empty_result
+                analyzer,
+                "_screen_document",
+                new_callable=AsyncMock,
+                return_value=SAMPLE_SCREENING_IRRELEVANT,
             ),
         ):
             result = await analyzer.analyze_lead(lead, event)
 
+        assert result is not None
         assert result["actionable"] is False
         assert result["provisions"] == []
+        assert result["analysis_status"] == "not_actionable"
 
 
 class TestAnalyzeIncident:
@@ -179,3 +233,258 @@ class TestNoSourceMaterial:
 
         result = await analyzer.analyze_lead(lead, event)
         assert result is None
+
+
+# ---------------------------------------------------------------
+# Pass 1: Screening tests
+# ---------------------------------------------------------------
+
+
+class TestPass1Screening:
+    @pytest.mark.asyncio
+    async def test_screening_relevant_returns_flagged_sections(self) -> None:
+        analyzer = DeepAnalyzer(precedent_map={})
+        lead = _make_lead()
+        event = _make_event()
+
+        with patch(
+            "osint_core.services.deep_analyzer.llm_chat_completion",
+            new_callable=AsyncMock,
+            return_value=json.dumps(SAMPLE_SCREENING_RELEVANT),
+        ):
+            result = await analyzer._screen_document(lead, event, "Full document text here.")
+
+        assert result is not None
+        assert result["relevant"] is True
+        assert result["language"] == "en"
+        assert len(result["flagged_sections"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_screening_irrelevant_returns_no_sections(self) -> None:
+        analyzer = DeepAnalyzer(precedent_map={})
+        lead = _make_lead()
+        event = _make_event()
+
+        with patch(
+            "osint_core.services.deep_analyzer.llm_chat_completion",
+            new_callable=AsyncMock,
+            return_value=json.dumps(SAMPLE_SCREENING_IRRELEVANT),
+        ):
+            result = await analyzer._screen_document(lead, event, "Admin procurement policy.")
+
+        assert result is not None
+        assert result["relevant"] is False
+        assert result["flagged_sections"] == []
+
+
+# ---------------------------------------------------------------
+# Pass 2: Provision analysis tests
+# ---------------------------------------------------------------
+
+
+class TestPass2ProvisionAnalysis:
+    @pytest.mark.asyncio
+    async def test_analyze_provision_returns_structured_output(self) -> None:
+        analyzer = DeepAnalyzer(precedent_map={
+            "1A-free-speech": {
+                "compelled speech": [
+                    {"case": "Janus v. AFSCME", "citation": "585 U.S. 878"}
+                ]
+            }
+        })
+        lead = _make_lead()
+        event = _make_event()
+
+        with patch(
+            "osint_core.services.deep_analyzer.llm_chat_completion",
+            new_callable=AsyncMock,
+            return_value=json.dumps(SAMPLE_PROVISION_RESULT_1),
+        ):
+            result = await analyzer._analyze_provision(
+                lead, event,
+                full_doc="Full doc text with § 4.2 Students must use preferred pronouns.",
+                flagged_section="§ 4.2 - Pronoun Requirements",
+                corroborating_events=[],
+            )
+
+        assert result is not None
+        assert result["section_reference"] == "§ 4.2"
+        assert result["constitutional_basis"] == "1A-free-speech"
+        assert "sources_cited" in result
+
+    def test_extract_section_text_finds_match(self) -> None:
+        analyzer = DeepAnalyzer(precedent_map={})
+        full_text = (
+            "Preamble text.\n\n"
+            "§ 4.2 Pronoun Requirements\n"
+            "Students must use preferred pronouns in all communications.\n\n"
+            "§ 5.1 Protest Zones\n"
+            "All protests must occur in designated zones."
+        )
+        result = analyzer._extract_section_text(full_text, "§ 4.2 - Pronoun Requirements")
+        assert "Students must use preferred pronouns" in result
+
+    def test_extract_section_text_fuzzy_match(self) -> None:
+        analyzer = DeepAnalyzer(precedent_map={})
+        full_text = (
+            "Introduction text.\n\n"
+            "Section 12: Requirements for Student Conduct\n"
+            "All students must adhere to conduct standards.\n\n"
+            "Section 13: Academic Integrity\n"
+            "Cheating is prohibited."
+        )
+        # Fuzzy: ref uses different formatting than actual text
+        result = analyzer._extract_section_text(full_text, "Section 12 - Student Conduct Requirements")
+        assert "conduct standards" in result
+
+
+# ---------------------------------------------------------------
+# Two-pass flow integration tests
+# ---------------------------------------------------------------
+
+
+class TestTwoPassFlow:
+    @pytest.mark.asyncio
+    async def test_full_policy_analysis_two_pass(self) -> None:
+        """Screening + 2 provision calls = 3 total LLM calls."""
+        analyzer = DeepAnalyzer(precedent_map={})
+        lead = _make_lead()
+        event = _make_event()
+
+        doc_bytes = b"<p>Policy text with enough content to pass quality gates</p>" * 5
+
+        screening_response = json.dumps(SAMPLE_SCREENING_RELEVANT)
+        provision_response_1 = json.dumps(SAMPLE_PROVISION_RESULT_1)
+        provision_response_2 = json.dumps(SAMPLE_PROVISION_RESULT_2)
+
+        llm_mock = AsyncMock(side_effect=[screening_response, provision_response_1, provision_response_2])
+
+        with (
+            patch.object(
+                analyzer, "_retrieve_document",
+                new_callable=AsyncMock, return_value=doc_bytes,
+            ),
+            patch.object(analyzer, "_get_document_type", return_value="html"),
+            patch(
+                "osint_core.services.deep_analyzer.llm_chat_completion",
+                llm_mock,
+            ),
+            patch.object(
+                analyzer, "_attach_precedent",
+                new_callable=AsyncMock, side_effect=lambda a: a,
+            ),
+        ):
+            result = await analyzer.analyze_lead(lead, event)
+
+        assert result is not None
+        assert result["actionable"] is True
+        assert len(result["provisions"]) == 2
+        # 1 screening + 2 provision = 3 LLM calls
+        assert llm_mock.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_irrelevant_document_skips_pass2(self) -> None:
+        """Irrelevant screening result = only 1 LLM call."""
+        analyzer = DeepAnalyzer(precedent_map={})
+        lead = _make_lead()
+        event = _make_event()
+
+        doc_bytes = b"<p>Admin procurement policy text repeated here</p>" * 5
+
+        llm_mock = AsyncMock(return_value=json.dumps(SAMPLE_SCREENING_IRRELEVANT))
+
+        with (
+            patch.object(
+                analyzer, "_retrieve_document",
+                new_callable=AsyncMock, return_value=doc_bytes,
+            ),
+            patch.object(analyzer, "_get_document_type", return_value="html"),
+            patch(
+                "osint_core.services.deep_analyzer.llm_chat_completion",
+                llm_mock,
+            ),
+        ):
+            result = await analyzer.analyze_lead(lead, event)
+
+        assert result is not None
+        assert result["actionable"] is False
+        assert result["analysis_status"] == "not_actionable"
+        assert llm_mock.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_quality_gate_garbled_text_returns_extraction_failed(self) -> None:
+        analyzer = DeepAnalyzer(precedent_map={})
+        lead = _make_lead()
+        event = _make_event()
+
+        # Garbled bytes — lots of replacement chars
+        garbled = ("\ufffd" * 100).encode("utf-8")
+
+        with (
+            patch.object(
+                analyzer, "_retrieve_document",
+                new_callable=AsyncMock, return_value=garbled,
+            ),
+            patch.object(analyzer, "_get_document_type", return_value="html"),
+        ):
+            result = await analyzer.analyze_lead(lead, event)
+
+        assert result is not None
+        assert result["analysis_status"] == "extraction_failed"
+
+    @pytest.mark.asyncio
+    async def test_quality_gate_non_english_returns_non_english(self) -> None:
+        analyzer = DeepAnalyzer(precedent_map={})
+        lead = _make_lead()
+        event = _make_event()
+
+        # Text that passes encoding but is non-English
+        spanish_text = "Esta es una política universitaria sobre los procedimientos administrativos y la gestión de recursos humanos en la universidad. " * 5
+        doc_bytes = f"<p>{spanish_text}</p>".encode("utf-8")
+
+        with (
+            patch.object(
+                analyzer, "_retrieve_document",
+                new_callable=AsyncMock, return_value=doc_bytes,
+            ),
+            patch.object(analyzer, "_get_document_type", return_value="html"),
+            patch(
+                "osint_core.services.document_extractor.DocumentExtractor.detect_language",
+                return_value="es",
+            ),
+        ):
+            result = await analyzer.analyze_lead(lead, event)
+
+        assert result is not None
+        assert result["analysis_status"] == "non_english"
+
+    @pytest.mark.asyncio
+    async def test_minio_fails_falls_back_to_url(self) -> None:
+        """When MinIO retrieval fails, fetch from source URL."""
+        analyzer = DeepAnalyzer(precedent_map={})
+        lead = _make_lead()
+        event = _make_event()
+        event.metadata_["url"] = "https://example.edu/policy.html"
+
+        doc_html = "<p>Policy fetched from URL with enough content to pass gates</p>" * 5
+        fetch_mock = AsyncMock(return_value=doc_html.encode("utf-8"))
+
+        with (
+            patch.object(
+                analyzer, "_retrieve_document",
+                new_callable=AsyncMock, return_value=None,
+            ),
+            patch.object(
+                analyzer, "_fetch_url_content",
+                fetch_mock,
+            ),
+            patch.object(
+                analyzer, "_screen_document",
+                new_callable=AsyncMock, return_value=SAMPLE_SCREENING_IRRELEVANT,
+            ),
+        ):
+            result = await analyzer.analyze_lead(lead, event)
+            # Verify _fetch_url_content was called
+            fetch_mock.assert_called_once()
+
+        assert result is not None

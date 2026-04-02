@@ -23,21 +23,24 @@ SAMPLE_PLAN_CONTENT = {
     "scoring": {"source_reputation": {}},
 }
 
-SAMPLE_POLICY_RESULT = {
-    "provisions": [
-        {
-            "section_reference": "§ 5.1",
-            "quoted_language": "All students must attend mandatory training.",
-            "constitutional_issue": "Compelled speech in mandatory training",
-            "constitutional_basis": "1A-free-speech",
-            "severity": "high",
-            "affected_population": "All enrolled students",
-            "facial_or_as_applied": "facial",
-        }
-    ],
+SAMPLE_SCREENING_RESULT = {
+    "relevant": True,
+    "language": "en",
+    "lead_title": "Student Conduct Policy",
     "document_summary": "Student conduct policy with speech requirements.",
     "overall_assessment": "Contains one high-severity compelled speech provision.",
-    "actionable": True,
+    "flagged_sections": ["§ 5.1 - Mandatory Training"],
+}
+
+SAMPLE_PROVISION_RESULT = {
+    "section_reference": "§ 5.1",
+    "quoted_language": "All students must attend mandatory training.",
+    "constitutional_issue": "Compelled speech in mandatory training",
+    "constitutional_basis": "1A-free-speech",
+    "severity": "high",
+    "affected_population": "All enrolled students",
+    "facial_or_as_applied": "facial",
+    "sources_cited": ["West Virginia v. Barnette"],
 }
 
 
@@ -92,17 +95,26 @@ class TestFullPipeline:
         ctx.__aenter__ = AsyncMock(return_value=db)
         ctx.__aexit__ = AsyncMock(return_value=False)
 
+        # Document must be long enough to pass check_content gate (100 chars)
+        doc_bytes = b"<p>Student conduct policy with mandatory training requirements for all students.</p>" * 5
+
+        # Two-pass: first call is screening, second is provision analysis
+        llm_responses = [
+            json.dumps(SAMPLE_SCREENING_RESULT),
+            json.dumps(SAMPLE_PROVISION_RESULT),
+        ]
+
         with (
             patch("osint_core.workers.prospecting.async_session", return_value=ctx),
             patch(
                 "osint_core.services.deep_analyzer.DeepAnalyzer._retrieve_document",
                 new_callable=AsyncMock,
-                return_value=b"<p>Policy text</p>",
+                return_value=doc_bytes,
             ),
             patch(
                 "osint_core.services.deep_analyzer.llm_chat_completion",
                 new_callable=AsyncMock,
-                return_value=json.dumps(SAMPLE_POLICY_RESULT),
+                side_effect=llm_responses,
             ),
             patch(
                 "osint_core.services.deep_analyzer.CourtListenerClient.lookup_precedent",
