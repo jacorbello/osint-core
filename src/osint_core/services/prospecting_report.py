@@ -328,6 +328,17 @@ class ProspectingReportGenerator:
         all_legal_citations: list[dict[str, Any]] = []
 
         for lead in leads:
+            # Skip non-English policy translations (UC multilingual docs).
+            title = lead.title or ""
+            non_en_prefixes = ("Pansamantalang ", "Laban sa ", "Póliza ", "Política ")
+            has_cjk = any(ord(c) > 0x2E80 for c in title)
+            stripped = title.removeprefix(
+                "[University of California System] View Policy"
+            )
+            has_non_en_prefix = stripped.startswith(non_en_prefixes)
+            if has_cjk or has_non_en_prefix:
+                continue
+
             analysis_status = getattr(lead, "analysis_status", None)
             da = lead.deep_analysis if hasattr(lead, "deep_analysis") else None
 

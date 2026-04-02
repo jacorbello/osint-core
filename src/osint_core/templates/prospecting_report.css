@@ -207,6 +207,7 @@ h3 {
 }
 
 .confidence-fill {
+    display: block;
     height: 100%;
     background: #27ae60;
     border-radius: 4pt;
