@@ -251,12 +251,47 @@ async def _analyze_leads_async(plan_id: str) -> dict[str, Any]:
                 lead.analysis_status = "no_source_material"
                 continue
 
+            # Check for quality gate failures returned by analyzer
+            result_status = result.get("analysis_status", "")
+            if result_status in ("no_content", "extraction_failed", "non_english"):
+                lead.deep_analysis = result
+                lead.analysis_status = "failed"
+                continue
+
             lead.deep_analysis = result
-            lead.analysis_status = "completed"
+
+            # Update lead title from screening if available
+            lead_title = result.get("lead_title")
+            if lead_title:
+                lead.title = lead_title
+
+            provisions = result.get("provisions", [])
+
+            # Compute severity from provisions
+            if provisions:
+                lead.severity = DeepAnalyzer.compute_max_severity(provisions)
 
             # Downgrade non-actionable leads
             if not result.get("actionable", True):
                 lead.severity = "info"
+                lead.analysis_status = "completed"
+            else:
+                lead.analysis_status = "completed"
+
+            # Populate citations
+            metadata = event.metadata_ or {}
+            legal_precedent: list[dict[str, Any]] = []
+            for prov in provisions:
+                for case in prov.get("precedent", []):
+                    legal_precedent.append(case)
+
+            lead.citations = DeepAnalyzer.build_citations(
+                provisions,
+                legal_precedent,
+                source_url=metadata.get("url", ""),
+                document_title=lead.title or "",
+                minio_uri=metadata.get("minio_uri", ""),
+            )
 
             analyzed += 1
 

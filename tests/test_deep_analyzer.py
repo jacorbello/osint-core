@@ -488,3 +488,108 @@ class TestTwoPassFlow:
             fetch_mock.assert_called_once()
 
         assert result is not None
+
+
+# ---------------------------------------------------------------
+# Citations and Severity rollup
+# ---------------------------------------------------------------
+
+
+class TestCitationsAndSeverity:
+    def test_build_citations_from_provisions(self) -> None:
+        provisions = [
+            {
+                "section_reference": "§ 4.2",
+                "quoted_language": "Students must use preferred pronouns.",
+                "constitutional_basis": "1A-free-speech",
+                "severity": "high",
+                "sources_cited": ["Janus v. AFSCME"],
+            },
+            {
+                "section_reference": "§ 5.1",
+                "quoted_language": "All protests must occur in designated zones.",
+                "constitutional_basis": "1A-assembly",
+                "severity": "medium",
+                "sources_cited": ["Tinker v. Des Moines"],
+            },
+        ]
+        legal_precedent = [
+            {
+                "case_name": "Janus v. AFSCME",
+                "citation": "585 U.S. 878",
+                "courtlistener_url": "https://courtlistener.com/1",
+                "verified": True,
+                "holding_summary": "Compelled speech violates 1A",
+            },
+            {
+                "case_name": "Tinker v. Des Moines",
+                "citation": "393 U.S. 503",
+                "courtlistener_url": "https://courtlistener.com/2",
+                "verified": True,
+                "holding_summary": "Students retain speech rights",
+            },
+        ]
+
+        result = DeepAnalyzer.build_citations(
+            provisions,
+            legal_precedent,
+            source_url="https://example.edu/policy",
+            document_title="UC Berkeley Speech Policy",
+            minio_uri="minio://osint-artifacts/policy.html",
+        )
+
+        assert len(result["source_citations"]) == 2
+        assert len(result["legal_citations"]) == 2
+
+        # Check ref_ids are sequential starting from 1
+        all_ids = [c["ref_id"] for c in result["source_citations"]] + [
+            c["ref_id"] for c in result["legal_citations"]
+        ]
+        assert all_ids == [1, 2, 3, 4]
+
+        # Check source citation fields
+        src = result["source_citations"][0]
+        assert src["type"] == "policy_document"
+        assert src["title"] == "UC Berkeley Speech Policy"
+        assert src["section"] == "§ 4.2"
+        assert src["archived_artifact_id"] == "minio://osint-artifacts/policy.html"
+
+        # Check legal citation fields
+        legal = result["legal_citations"][0]
+        assert legal["type"] == "case_law"
+        assert legal["case_name"] == "Janus v. AFSCME"
+        assert legal["verified"] is True
+        assert legal["relevance"] == "Compelled speech violates 1A"
+
+    def test_build_citations_deduplicates_by_section(self) -> None:
+        provisions = [
+            {"section_reference": "§ 4.2", "severity": "high"},
+            {"section_reference": "§ 4.2", "severity": "medium"},
+            {"section_reference": "§ 5.1", "severity": "low"},
+        ]
+        result = DeepAnalyzer.build_citations(
+            provisions, [],
+            source_url="https://example.edu/policy",
+            document_title="Test",
+        )
+        assert len(result["source_citations"]) == 2
+        sections = [c["section"] for c in result["source_citations"]]
+        assert sections == ["§ 4.2", "§ 5.1"]
+
+    def test_compute_max_severity(self) -> None:
+        assert DeepAnalyzer.compute_max_severity(
+            [{"severity": "info"}, {"severity": "high"}, {"severity": "medium"}]
+        ) == "high"
+
+    def test_compute_max_severity_empty(self) -> None:
+        assert DeepAnalyzer.compute_max_severity([]) == "info"
+
+    def test_compute_max_severity_critical(self) -> None:
+        assert DeepAnalyzer.compute_max_severity(
+            [{"severity": "low"}, {"severity": "critical"}]
+        ) == "critical"
+
+    def test_compute_max_severity_all_same(self) -> None:
+        assert DeepAnalyzer.compute_max_severity(
+            [{"severity": "medium"}, {"severity": "medium"}]
+        ) == "medium"

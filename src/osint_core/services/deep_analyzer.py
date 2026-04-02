@@ -194,8 +194,84 @@ _SECTION_MARKER_RE = re.compile(
 )
 
 
+_SEVERITY_ORDER = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
 class DeepAnalyzer:
     """Orchestrates deep constitutional analysis of leads."""
+
+    @staticmethod
+    def compute_max_severity(provisions: list[dict[str, Any]]) -> str:
+        """Return the highest severity across *provisions*.
+
+        Ordering: info < low < medium < high < critical.
+        An empty list returns ``"info"``.
+        """
+        if not provisions:
+            return "info"
+        best = "info"
+        best_rank = 0
+        for p in provisions:
+            sev = p.get("severity", "info")
+            rank = _SEVERITY_ORDER.get(sev, 0)
+            if rank > best_rank:
+                best = sev
+                best_rank = rank
+        return best
+
+    @staticmethod
+    def build_citations(
+        provisions: list[dict[str, Any]],
+        legal_precedent: list[dict[str, Any]],
+        *,
+        source_url: str,
+        document_title: str,
+        minio_uri: str = "",
+    ) -> dict[str, Any]:
+        """Build the citations JSONB structure from analysis results.
+
+        Returns a dict with ``source_citations`` (deduplicated by
+        section_reference) and ``legal_citations``.
+        """
+        ref_id = 1
+
+        # Source citations — deduplicated by section_reference
+        seen_sections: set[str] = set()
+        source_citations: list[dict[str, Any]] = []
+        for prov in provisions:
+            section = prov.get("section_reference", "")
+            if section in seen_sections:
+                continue
+            seen_sections.add(section)
+            source_citations.append({
+                "ref_id": ref_id,
+                "type": "policy_document",
+                "title": document_title,
+                "url": source_url,
+                "section": section,
+                "accessed_at": "",
+                "archived_artifact_id": minio_uri,
+            })
+            ref_id += 1
+
+        # Legal citations from precedent
+        legal_citations: list[dict[str, Any]] = []
+        for case in legal_precedent:
+            legal_citations.append({
+                "ref_id": ref_id,
+                "type": "case_law",
+                "case_name": case.get("case_name", ""),
+                "citation": case.get("citation", ""),
+                "courtlistener_url": case.get("courtlistener_url", ""),
+                "verified": case.get("verified", False),
+                "relevance": case.get("holding_summary", ""),
+            })
+            ref_id += 1
+
+        return {
+            "source_citations": source_citations,
+            "legal_citations": legal_citations,
+        }
 
     def __init__(
         self,
