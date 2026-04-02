@@ -436,6 +436,7 @@ class DeepAnalyzer:
             "document_summary": screening.get("document_summary", ""),
             "overall_assessment": screening.get("overall_assessment", ""),
             "lead_title": screening.get("lead_title", ""),
+            "relevant": True,
             "actionable": len(unique) > 0,
             "analysis_status": "complete" if unique else "not_actionable",
         }

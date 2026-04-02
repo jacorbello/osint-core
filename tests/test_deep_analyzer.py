@@ -593,3 +593,92 @@ class TestCitationsAndSeverity:
         assert DeepAnalyzer.compute_max_severity(
             [{"severity": "medium"}, {"severity": "medium"}]
         ) == "medium"
+
+
+# ---------------------------------------------------------------
+# End-to-end integration test
+# ---------------------------------------------------------------
+
+
+class TestEndToEnd:
+    @pytest.mark.asyncio
+    async def test_full_pipeline_produces_report_ready_output(self):
+        """Verify full pipeline from HTML extraction through citations."""
+        analyzer = DeepAnalyzer(
+            precedent_map={"1A-free-speech": {"speech_codes": [
+                {"case": "Tinker v. Des Moines", "citation": "393 U.S. 503 (1969)"},
+            ]}},
+            courtlistener=AsyncMock(),
+        )
+        analyzer._courtlistener.lookup_precedent = AsyncMock(return_value=[])
+
+        # Create lead and event mocks
+        lead = MagicMock(id=uuid.uuid4(), title="[UC System] View PolicyPolitical Activities",
+                         institution="University of California System", jurisdiction="CA",
+                         lead_type="policy", event_ids=[uuid.uuid4()], citations=None,
+                         deep_analysis=None, analysis_status="pending", severity="info")
+        event = MagicMock(id=lead.event_ids[0], source_id="univ_uc", title="UC Policy",
+                          metadata_={"minio_uri": "minio://osint-artifacts/policies/abc.html",
+                                     "url": "https://policy.ucop.edu/doc/3000127",
+                                     "title": "Political Activities Policy"},
+                          raw_excerpt=None, created_at="2026-04-01T12:00:00Z")
+
+        html = b"""<html><body>
+        <h1>University of California Policy on Political Activities</h1>
+        <h2>Section 4.2 Use of Facilities</h2>
+        <p>No University facility shall be used for political activities other than
+        those open discussion and meeting areas provided for in campus regulations.</p>
+        <h2>Section 5.0 Administrative Procedures</h2>
+        <p>Standard procedures for facility reservations.</p>
+        </body></html>"""
+
+        screening = {
+            "relevant": True, "language": "en",
+            "lead_title": "UC Political Activities — Facial 1A Speech Restrictions",
+            "document_summary": "Policy restricts political activities on campus.",
+            "overall_assessment": "Likely unconstitutional facial restriction.",
+            "flagged_sections": [
+                "Section 4.2 - Use of Facilities (restricts political speech)",
+            ],
+        }
+        provision = {
+            "section_reference": "§ 4.2",
+            "quoted_language": "No University facility shall be used for political activities.",
+            "constitutional_issue": "Content-based restriction on political speech",
+            "constitutional_basis": "1A-free-speech",
+            "severity": "high",
+            "affected_population": "University community",
+            "facial_or_as_applied": "facial",
+            "sources_cited": [
+                {"type": "policy_document", "url": "https://policy.ucop.edu/doc/3000127", "section": "§ 4.2"},
+            ],
+        }
+
+        with (
+            patch.object(analyzer, "_retrieve_document", new_callable=AsyncMock, return_value=html),
+            patch("osint_core.services.deep_analyzer.llm_chat_completion",
+                  new_callable=AsyncMock, side_effect=[json.dumps(screening), json.dumps(provision)]),
+        ):
+            result = await analyzer.analyze_lead(lead, event)
+
+        # Verify complete output
+        assert result is not None
+        assert result["relevant"] is True
+        assert result["actionable"] is True
+        assert result["lead_title"] == "UC Political Activities — Facial 1A Speech Restrictions"
+        assert len(result["provisions"]) == 1
+        assert result["provisions"][0]["severity"] == "high"
+        assert result["provisions"][0]["quoted_language"] != ""
+
+        # Verify severity rollup
+        assert DeepAnalyzer.compute_max_severity(result["provisions"]) == "high"
+
+        # Verify citations can be built
+        citations = DeepAnalyzer.build_citations(
+            result["provisions"], [],
+            source_url="https://policy.ucop.edu/doc/3000127",
+            document_title=result["lead_title"],
+            minio_uri="minio://osint-artifacts/policies/abc.html",
+        )
+        assert len(citations["source_citations"]) >= 1
+        assert citations["source_citations"][0]["url"] == "https://policy.ucop.edu/doc/3000127"
