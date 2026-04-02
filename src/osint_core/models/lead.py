@@ -103,7 +103,7 @@ class Lead(UUIDMixin, TimestampMixin, Base):
         Index("ix_leads_reported_at", "reported_at"),
         Index("ix_leads_plan_id", "plan_id"),
         CheckConstraint(
-            "analysis_status IN ('pending', 'completed', 'no_source_material', 'failed')",
+            "analysis_status IN ('pending', 'completed', 'no_source_material', 'failed', 'not_actionable', 'extraction_failed', 'non_english', 'no_content')",
             name="ck_leads_analysis_status_valid",
         ),
         Index("ix_leads_analysis_status", "analysis_status"),
