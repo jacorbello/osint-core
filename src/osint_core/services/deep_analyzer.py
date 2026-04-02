@@ -496,7 +496,8 @@ class DeepAnalyzer:
                 timeout=60.0,
                 response_format={"type": "json_object"},
             )
-            return json.loads(content)
+            result: dict[str, Any] = json.loads(content)
+            return result
         except Exception as exc:
             logger.warning(
                 "deep_analysis_screening_failed",
@@ -623,7 +624,8 @@ class DeepAnalyzer:
                 timeout=60.0,
                 response_format={"type": "json_object"},
             )
-            return json.loads(content)
+            result: dict[str, Any] = json.loads(content)
+            return result
         except Exception as exc:
             logger.warning(
                 "deep_analysis_provision_failed",

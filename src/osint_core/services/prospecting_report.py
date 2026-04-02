@@ -400,10 +400,10 @@ class ProspectingReportGenerator:
                 sections = await _generate_narrative(lead)
 
                 # Source citations from lead metadata
-                source_cites: list[str] = []
+                shallow_cites: list[str] = []
                 if lead.citations:
-                    source_cites = lead.citations.get("sources", [])
-                    all_source_citations.extend(source_cites)
+                    shallow_cites = lead.citations.get("sources", [])
+                    all_source_citations.extend(shallow_cites)
 
                 # Verify legal citations via CourtListener
                 lead_legal_citations: list[dict[str, Any]] = []
@@ -456,7 +456,7 @@ class ProspectingReportGenerator:
                     "severity": lead.severity,
                     "confidence": lead.confidence,
                     "sections": sections,
-                    "source_citations": source_cites,
+                    "source_citations": shallow_cites,
                     "legal_citations": lead_legal_citations,
                     "source_url": source_url,
                 }

@@ -123,7 +123,7 @@ class DocumentExtractor:
         if len(text.strip()) < 20:
             return "unknown"
         try:
-            return _langdetect_detect(text[:1000])
+            return str(_langdetect_detect(text[:1000]))
         except Exception:
             return "unknown"
 
