@@ -1,0 +1,16 @@
+{
+  "name": "osint-core-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "web:dev": "npm run dev --workspace=apps/web",
+    "web:build": "npm run build --workspace=apps/web",
+    "web:preview": "npm run preview --workspace=apps/web",
+    "web:lint": "npm run lint --workspace=apps/web",
+    "web:test": "npm run test --workspace=apps/web",
+    "web:test:watch": "npm run test:watch --workspace=apps/web",
+    "web:test:coverage": "npm run test:coverage --workspace=apps/web"
+  }
+}

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 import osint_core.metrics as metrics  # noqa: F401 — register custom Prometheus metrics
 from osint_core.api.errors import ProblemError, problem_exception_handler
@@ -64,6 +65,14 @@ app = FastAPI(
 )
 
 init_fastapi_tracing(app)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.add_exception_handler(ProblemError, problem_exception_handler)  # type: ignore[arg-type]
 app.add_middleware(RateLimitMiddleware)
