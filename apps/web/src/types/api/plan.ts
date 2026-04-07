@@ -5,10 +5,10 @@ export interface PlanVersion {
   plan_id: string;
   version: number;
   content_hash: string;
-  content: Record<string, any>;
+  content: Record<string, unknown>;
   retention_class: string;
   git_commit_sha: string | null;
-  validation_result: Record<string, any>;
+  validation_result: Record<string, unknown>;
   is_active: boolean;
   created_at: string;
   created_by: string;
@@ -16,7 +16,7 @@ export interface PlanVersion {
   activated_by: string | null;
 }
 
-export interface PlanVersionResponse extends PlanVersion {}
+export type PlanVersionResponse = PlanVersion;
 
 export type PlanVersionList = CollectionResponse<PlanVersionResponse>;
 

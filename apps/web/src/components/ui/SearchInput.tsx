@@ -1,7 +1,7 @@
 import { forwardRef, InputHTMLAttributes } from 'react';
 import { cn } from '@/lib/utils/cn';
 
-export interface SearchInputProps extends InputHTMLAttributes<HTMLInputElement> {}
+export type SearchInputProps = InputHTMLAttributes<HTMLInputElement>;
 
 export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
   ({ className, ...props }, ref) => {

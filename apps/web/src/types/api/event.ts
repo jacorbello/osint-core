@@ -23,7 +23,7 @@ export interface Event {
   metadata: Record<string, unknown>;
 }
 
-export interface EventResponse extends Event {}
+export type EventResponse = Event;
 
 export type EventList = CollectionResponse<EventResponse>;
 

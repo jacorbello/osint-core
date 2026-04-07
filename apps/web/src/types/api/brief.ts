@@ -15,7 +15,7 @@ export interface Brief {
   indicator_ids: string[];
 }
 
-export interface BriefResponse extends Brief {}
+export type BriefResponse = Brief;
 
 export type BriefList = CollectionResponse<BriefResponse>;
 
