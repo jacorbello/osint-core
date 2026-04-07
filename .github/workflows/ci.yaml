@@ -419,8 +419,10 @@ jobs:
       always()
       && github.ref == 'refs/heads/main'
       && !inputs.run_migrations
-      && (needs.build.result == 'success' || needs.build-web.result == 'success')
-      && (needs.build.result != 'success' || needs.migrate.result == 'success')
+      && (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true')
+      && (needs.changes.outputs.backend != 'true' || needs.build.result == 'success')
+      && (needs.changes.outputs.frontend != 'true' || needs.build-web.result == 'success')
+      && (needs.changes.outputs.backend != 'true' || needs.migrate.result == 'success')
     concurrency:
       group: osint-infra-deploy
       cancel-in-progress: false

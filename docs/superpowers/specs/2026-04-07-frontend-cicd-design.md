@@ -118,7 +118,7 @@ Not included here. The ingress configuration lives in `cortech-infra` alongside 
 | Target | Command | Purpose |
 |--------|---------|---------|
 | `web-lint` | `cd apps/web && npm run lint` | Lint frontend (mirrors CI) |
-| `web-build-image` | `docker build -f apps/web/Dockerfile -t $(IMAGE)-web:$(SHA) apps/web` | Build Docker image locally |
+| `web-build-image` | `docker build -f apps/web/Dockerfile -t $(IMAGE_WEB):$(SHA) apps/web` | Build Docker image locally |
 | `web-check` | `web-lint` + `web-test` | Full frontend CI check locally |
 
 Existing targets (`web-dev`, `web-build`, `web-test`, `web-test-watch`, `web-test-coverage`, `web-preview`) are unchanged.

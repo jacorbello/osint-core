@@ -66,6 +66,9 @@ app = FastAPI(
 
 init_fastapi_tracing(app)
 
+app.add_exception_handler(ProblemError, problem_exception_handler)  # type: ignore[arg-type]
+app.add_middleware(RateLimitMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -73,9 +76,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.add_exception_handler(ProblemError, problem_exception_handler)  # type: ignore[arg-type]
-app.add_middleware(RateLimitMiddleware)
 
 app.include_router(health.router)
 app.include_router(me.router)
