@@ -39,13 +39,13 @@ def _to_sse_frame(topic: str, payload: StreamEventPayload) -> str:
     return f"event: {topic}\ndata: {payload.model_dump_json()}\n\n"
 
 
-def _redis_client():
-    return aioredis.from_url(
+def _redis_client() -> aioredis.Redis:
+    return aioredis.from_url(  # type: ignore[no-untyped-call,no-any-return]
         settings.redis_url,
         decode_responses=True,
         socket_connect_timeout=_REDIS_CONNECT_TIMEOUT_SECONDS,
         socket_timeout=_REDIS_IO_TIMEOUT_SECONDS,
-    )  # type: ignore[no-untyped-call]
+    )
 
 
 class MemoryRealtimeTransport:

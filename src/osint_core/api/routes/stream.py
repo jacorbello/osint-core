@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
@@ -35,7 +37,7 @@ async def stream_updates(
     """Open an SSE stream for realtime updates."""
     del current_user
 
-    async def _event_stream():
+    async def _event_stream() -> AsyncIterator[str]:
         async for frame in subscribe_events():
             yield frame
 
