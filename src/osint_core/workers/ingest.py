@@ -15,6 +15,7 @@ from celery import chain, chord, group
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from osint_core.api.realtime import publish_event
 from osint_core.connectors import registry
 from osint_core.connectors.base import SourceConfig
 from osint_core.db import async_session
@@ -388,6 +389,7 @@ async def _record_job(
         output["dispatch_failures"] = dispatch_failures
     async with async_session() as db:
         job = None
+        previous_status: str | None = None
         if celery_task_id:
             result = await db.execute(
                 select(Job)
@@ -396,6 +398,7 @@ async def _record_job(
             )
             job = result.scalar_one_or_none()
         if job:
+            previous_status = str(job.status)
             job.status = status
             job.plan_version_id = plan_version_id
             job.output = output
@@ -415,6 +418,18 @@ async def _record_job(
             )
             db.add(job)
         await db.commit()
+    if previous_status != status:
+        await publish_event(
+            event_type="job.updated",
+            resource="job",
+            resource_id=str(job.id),
+            payload={
+                "status": status,
+                "kind": "ingest",
+                "source_id": source_id,
+                "plan_id": plan_id,
+            },
+        )
 
 
 async def _record_failed_job(
@@ -428,6 +443,7 @@ async def _record_failed_job(
     now = datetime.now(UTC)
     async with async_session() as db:
         job = None
+        previous_status: str | None = None
         if celery_task_id:
             result = await db.execute(
                 select(Job)
@@ -436,6 +452,7 @@ async def _record_failed_job(
             )
             job = result.scalar_one_or_none()
         if job:
+            previous_status = str(job.status)
             job.status = "failed"
             job.error = error_msg
             if not job.started_at:
@@ -453,3 +470,15 @@ async def _record_failed_job(
             )
             db.add(job)
         await db.commit()
+    if previous_status != "failed":
+        await publish_event(
+            event_type="job.updated",
+            resource="job",
+            resource_id=str(job.id),
+            payload={
+                "status": "failed",
+                "kind": "ingest",
+                "source_id": source_id,
+                "plan_id": plan_id,
+            },
+        )

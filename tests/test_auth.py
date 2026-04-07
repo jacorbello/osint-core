@@ -214,3 +214,4 @@ def test_auth_enabled_in_settings():
         auth_disabled=False,
     )
     assert s.auth_disabled is False
+

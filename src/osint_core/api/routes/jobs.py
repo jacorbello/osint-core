@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from osint_core.api.deps import get_current_user, get_db
 from osint_core.api.errors import collection_page, problem_response, problem_response_docs
 from osint_core.api.middleware.auth import UserInfo
+from osint_core.api.realtime import publish_event
 from osint_core.llm import active_llm_model
 from osint_core.models.brief import Brief
 from osint_core.models.job import Job
@@ -118,6 +119,12 @@ async def create_job(
             job.status = "failed"
             job.error = str(exc)
             await db.commit()
+            await publish_event(
+                event_type="job.updated",
+                resource="job",
+                resource_id=job.id,
+                payload={"status": "failed", "kind": body.kind},
+            )
             return problem_response(
                 request,
                 status_code=503,
@@ -142,6 +149,12 @@ async def create_job(
         job.output = {"brief_id": str(brief.id)}
         await db.commit()
         await db.refresh(job)
+        await publish_event(
+            event_type="job.updated",
+            resource="job",
+            resource_id=job.id,
+            payload={"status": "succeeded", "kind": body.kind},
+        )
         response.headers["Location"] = f"/api/v1/jobs/{job.id}"
         return job
     else:
@@ -155,6 +168,12 @@ async def create_job(
     db.add(job)
     await db.commit()
     await db.refresh(job)
+    await publish_event(
+        event_type="job.updated",
+        resource="job",
+        resource_id=job.id,
+        payload={"status": str(job.status), "kind": str(job.job_type)},
+    )
     response.headers["Location"] = f"/api/v1/jobs/{job.id}"
     return job
 

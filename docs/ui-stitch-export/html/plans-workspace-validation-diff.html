@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Validation &amp; Diff Console | Sentinel OSINT</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary": "#ffeac0",
+                        "on-tertiary": "#3e2e00",
+                        "on-primary-container": "#00626e",
+                        "secondary-fixed-dim": "#bdc2ff",
+                        "secondary-fixed": "#e0e0ff",
+                        "error-container": "#93000a",
+                        "on-primary": "#00363d",
+                        "error": "#ffb4ab",
+                        "on-tertiary-container": "#6f5500",
+                        "on-error": "#690005",
+                        "on-surface-variant": "#bac9cc",
+                        "inverse-primary": "#006875",
+                        "surface-container-lowest": "#0c0e12",
+                        "inverse-on-surface": "#2f3035",
+                        "surface-container-high": "#282a2e",
+                        "primary-container": "#00e5ff",
+                        "surface-tint": "#00daf3",
+                        "primary": "#c3f5ff",
+                        "on-background": "#e2e2e8",
+                        "primary-fixed-dim": "#00daf3",
+                        "on-primary-fixed-variant": "#004f58",
+                        "surface-container": "#1e2024",
+                        "surface-bright": "#37393e",
+                        "on-secondary-container": "#a8afff",
+                        "tertiary-fixed": "#ffdf96",
+                        "on-primary-fixed": "#001f24",
+                        "background": "#111318",
+                        "surface-variant": "#333539",
+                        "on-secondary-fixed": "#000767",
+                        "outline": "#849396",
+                        "tertiary-container": "#fec931",
+                        "on-surface": "#e2e2e8",
+                        "on-secondary": "#1b247f",
+                        "surface-container-highest": "#333539",
+                        "secondary": "#bdc2ff",
+                        "on-tertiary-fixed-variant": "#594400",
+                        "surface-container-low": "#1a1c20",
+                        "inverse-surface": "#e2e2e8",
+                        "tertiary-fixed-dim": "#f3bf26",
+                        "secondary-container": "#343d96",
+                        "on-tertiary-fixed": "#251a00",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-fixed-variant": "#343d96",
+                        "primary-fixed": "#9cf0ff",
+                        "surface": "#111318",
+                        "surface-dim": "#111318",
+                        "outline-variant": "#3b494c"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            }
+        }
+    </script>
+<style type="text/tailwindcss">
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+            font-size: 20px;
+        }
+        body { font-family: 'Inter', sans-serif; }
+        h1, h2, h3, .font-headline { font-family: 'Space Grotesk', sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .diff-added { @apply bg-green-950/40 border-l-2 border-green-500/50; }
+        .diff-removed { @apply bg-red-950/40 border-l-2 border-red-500/50 opacity-60; }
+        .diff-modified { @apply bg-blue-950/30 border-l-2 border-blue-400/50; }
+        .line-num { @apply w-8 text-right pr-2 text-outline/30 select-none border-r border-outline-variant/10 mr-3; }
+        .editor-bg { background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 24px 24px; }
+    </style>
+</head>
+<body class="bg-background text-on-surface selection:bg-primary-container selection:text-on-primary-container overflow-hidden">
+<nav class="fixed left-0 top-0 h-full w-[72px] bg-[#111318] flex flex-col items-center py-6 shadow-[40px_0_0_rgba(189,194,255,0.02)] z-50">
+<div class="mb-10 text-[#00E5FF] font-bold text-lg uppercase tracking-widest font-headline">S</div>
+<div class="flex flex-col gap-6 flex-1">
+<button class="w-12 h-12 flex items-center justify-center transition-all scale-95 text-[#bdc2ff] opacity-60 hover:bg-[#282a2e] hover:text-[#00E5FF]">
+<span class="material-symbols-outlined">space_dashboard</span>
+</button>
+<button class="w-12 h-12 flex items-center justify-center transition-all scale-95 text-[#bdc2ff] opacity-60 hover:bg-[#282a2e] hover:text-[#00E5FF]">
+<span class="material-symbols-outlined">terminal</span>
+</button>
+<button class="w-12 h-12 flex items-center justify-center transition-all scale-95 text-[#c3f5ff] border-l-2 border-[#00E5FF] bg-[#282a2e]">
+<span class="material-symbols-outlined">account_tree</span>
+</button>
+<button class="w-12 h-12 flex items-center justify-center transition-all scale-95 text-[#bdc2ff] opacity-60 hover:bg-[#282a2e] hover:text-[#00E5FF]">
+<span class="material-symbols-outlined">biotech</span>
+</button>
+</div>
+<button class="w-12 h-12 flex items-center justify-center transition-all scale-95 text-[#bdc2ff] opacity-60 hover:bg-[#282a2e] hover:text-[#00E5FF]">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</nav>
+<header class="fixed top-0 left-[72px] right-0 h-14 bg-background/80 backdrop-blur-xl flex justify-between items-center px-6 z-40 border-b border-outline-variant/10">
+<div class="flex items-center gap-8">
+<span class="text-xl font-black text-[#c3f5ff] font-headline">Cipher Sentinel</span>
+<div class="h-4 w-[1px] bg-outline-variant/30"></div>
+<nav class="flex gap-1">
+<button class="px-4 py-1.5 rounded bg-primary-container/10 text-primary-container text-[10px] font-headline font-bold uppercase tracking-wider border border-primary-container/20">
+                Validation &amp; Diff Console
+            </button>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 px-3 py-1.5 bg-surface-container-lowest border border-outline-variant/20 rounded">
+<span class="material-symbols-outlined text-outline scale-75">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-[11px] w-48 text-on-surface-variant placeholder:text-outline/40" placeholder="Search plans or schemas..." type="text"/>
+</div>
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined">notifications</span></button>
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined">history</span></button>
+<div class="h-8 w-8 rounded-full bg-surface-container-high border border-outline-variant/20 flex items-center justify-center text-xs font-bold text-primary">JD</div>
+</div>
+</header>
+<main class="ml-[72px] pt-14 h-screen flex overflow-hidden">
+<aside class="w-[280px] bg-surface-container-low flex flex-col border-r border-outline-variant/10">
+<div class="p-4 flex justify-between items-center">
+<h2 class="text-[10px] font-bold uppercase tracking-[0.2em] text-outline">Plans Repository</h2>
+<button class="text-primary hover:bg-primary/10 p-1 rounded transition-colors">
+<span class="material-symbols-outlined !text-[18px]">add</span>
+</button>
+</div>
+<div class="px-3 mb-4">
+<div class="p-2.5 bg-error-container/10 border border-error/20 rounded flex gap-3 items-start">
+<span class="material-symbols-outlined text-error !text-[16px]">cloud_off</span>
+<div class="flex-1">
+<p class="text-[9px] font-mono text-error/80 uppercase">ERR_SYNC_042</p>
+<p class="text-[10px] text-on-error-container leading-tight mt-0.5">Remote cache mismatch detected.</p>
+</div>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto no-scrollbar px-2 space-y-1">
+<div class="p-3 bg-surface-container-highest/50 border border-primary-container/20 rounded-lg cursor-pointer">
+<div class="flex justify-between items-start mb-1.5">
+<span class="text-[10px] font-mono text-primary-fixed-dim">PLN-MAR-09</span>
+<span class="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[8px] font-black uppercase border border-primary/20">Active</span>
+</div>
+<h3 class="text-xs font-semibold text-on-surface leading-snug">Maritime Signal Ingestion</h3>
+<div class="flex justify-between items-center mt-3 pt-2 border-t border-outline-variant/10">
+<span class="text-[10px] text-on-surface-variant font-mono">v2.4.12-rc</span>
+<span class="text-[9px] text-tertiary-fixed-dim font-bold tracking-widest uppercase">Evidentiary</span>
+</div>
+</div>
+<div class="p-3 hover:bg-surface-container-high/40 rounded-lg transition-colors cursor-pointer group border border-transparent">
+<div class="flex justify-between items-start mb-1.5">
+<span class="text-[10px] font-mono text-outline">PLN-NGO-HR</span>
+</div>
+<h3 class="text-xs font-semibold text-on-surface/60 group-hover:text-on-surface leading-snug">NGO Satellite Watch</h3>
+<div class="flex justify-between items-center mt-3 pt-2">
+<span class="text-[10px] text-outline font-mono">v1.1.0-stable</span>
+<span class="text-[9px] text-outline/50 font-bold tracking-widest uppercase">Standard</span>
+</div>
+</div>
+</div>
+</aside>
+<section class="flex-1 bg-surface-container-lowest flex flex-col overflow-hidden relative editor-bg">
+<div class="h-12 border-b border-outline-variant/10 flex items-center px-4 justify-between bg-surface-container-low/50 backdrop-blur-md">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-outline !text-[18px]">code</span>
+<span class="text-[11px] font-mono text-outline font-medium">PLN-MAR-09_definition.yaml</span>
+</div>
+<div class="h-4 w-[1px] bg-outline-variant/20"></div>
+<div class="flex bg-surface-container-high rounded p-0.5 border border-outline-variant/10">
+<button class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-outline-variant">Editor</button>
+<button class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider bg-primary-container text-on-primary-container rounded-sm shadow-sm flex items-center gap-1.5">
+<span class="material-symbols-outlined !text-[14px]">difference</span> Comparison
+                    </button>
+</div>
+</div>
+<div class="flex gap-3">
+<button class="px-4 py-1.5 border border-outline-variant/20 hover:bg-surface-container-high text-on-surface text-[10px] font-bold rounded uppercase tracking-widest transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined !text-[16px]">save</span> Save
+                </button>
+<button class="px-4 py-1.5 bg-primary text-on-primary text-[10px] font-bold rounded shadow-lg shadow-primary/10 uppercase tracking-widest flex items-center gap-2">
+<span class="material-symbols-outlined !text-[16px]">bolt</span> Activate
+                </button>
+</div>
+</div>
+<div class="flex-1 flex overflow-hidden">
+<div class="flex-1 flex flex-col border-r border-outline-variant/20 overflow-hidden">
+<div class="h-8 bg-surface-container-low/30 border-b border-outline-variant/10 flex items-center px-4 justify-between">
+<span class="text-[9px] font-bold text-outline uppercase tracking-tighter">Reference: v2.4.11-stable</span>
+<span class="text-[9px] font-mono text-outline/40">sha256:4d2...</span>
+</div>
+<div class="flex-1 overflow-y-auto no-scrollbar p-4 font-mono text-[11px] leading-relaxed">
+<div class="flex"><span class="line-num">1</span><span class="text-secondary">plan_metadata:</span></div>
+<div class="flex"><span class="line-num">2</span><span>  id: PLN-MAR-09</span></div>
+<div class="flex"><span class="line-num">3</span><span>  name: Maritime Signal Ingestion</span></div>
+<div class="flex"><span class="line-num">4</span><span>  retention: evidentiary</span></div>
+<div class="flex diff-removed"><span class="line-num">5</span><span>  owner: system_admin</span></div>
+<div class="flex"><span class="line-num">6</span><span></span></div>
+<div class="flex"><span class="line-num">7</span><span class="text-secondary">ingestion_sources:</span></div>
+<div class="flex"><span class="line-num">8</span><span class="text-primary-fixed-dim">  - type: satellite_ais</span></div>
+<div class="flex diff-removed"><span class="line-num">9</span><span>    provider: orbital_insight_alpha</span></div>
+<div class="flex"><span class="line-num">10</span><span>    interval: 300s</span></div>
+</div>
+</div>
+<div class="flex-1 flex flex-col overflow-hidden bg-surface-container-lowest">
+<div class="h-8 bg-surface-container-high border-b border-outline-variant/10 flex items-center px-4 justify-between">
+<span class="text-[9px] font-bold text-primary-container uppercase tracking-tighter">Comparison: v2.4.12-rc (Staged)</span>
+<span class="text-[9px] font-mono text-primary/40">sha256:7f9...</span>
+</div>
+<div class="flex-1 overflow-y-auto no-scrollbar p-4 font-mono text-[11px] leading-relaxed">
+<div class="flex"><span class="line-num">1</span><span class="text-secondary">plan_metadata:</span></div>
+<div class="flex"><span class="line-num">2</span><span>  id: PLN-MAR-09</span></div>
+<div class="flex"><span class="line-num">3</span><span>  name: Maritime Signal Ingestion</span></div>
+<div class="flex"><span class="line-num">4</span><span>  retention: evidentiary</span></div>
+<div class="flex diff-added"><span class="line-num">5</span><span>  owner: cipher_sentinel_ops</span></div>
+<div class="flex"><span class="line-num">6</span><span></span></div>
+<div class="flex"><span class="line-num">7</span><span class="text-secondary">ingestion_sources:</span></div>
+<div class="flex"><span class="line-num">8</span><span class="text-primary-fixed-dim">  - type: satellite_ais</span></div>
+<div class="flex diff-modified"><span class="line-num">9</span><span>    provider: orbital_core_v2</span></div>
+<div class="flex"><span class="line-num">10</span><span>    interval: 300s</span></div>
+<div class="flex diff-added"><span class="line-num">11</span><span>    buffer: 120s</span></div>
+</div>
+</div>
+</div>
+<div class="h-64 border-t border-outline-variant/20 bg-surface-container flex flex-col shadow-[0_-8px_32px_rgba(0,0,0,0.4)] z-10">
+<div class="h-10 flex items-center px-4 bg-surface-container-highest/50 justify-between border-b border-outline-variant/10">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary-container !text-[18px]">verified</span>
+<span class="text-[11px] font-bold uppercase tracking-widest text-on-surface">Validation Engine Result</span>
+<div class="flex gap-2 ml-4">
+<span class="text-[9px] px-2 py-0.5 bg-green-500/10 text-green-400 border border-green-500/20 rounded-full font-black uppercase tracking-tighter">Valid</span>
+<span class="text-[9px] px-2 py-0.5 bg-tertiary/10 text-tertiary-fixed border border-tertiary/20 rounded-full font-black uppercase tracking-tighter">2 Warnings</span>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<span class="text-[10px] text-outline font-mono">EXEC_TIME: 142ms</span>
+<button class="text-primary hover:text-white transition-colors"><span class="material-symbols-outlined !text-[18px]">refresh</span></button>
+</div>
+</div>
+<div class="flex-1 p-4 grid grid-cols-2 gap-4 overflow-hidden">
+<div class="space-y-3 overflow-y-auto no-scrollbar">
+<div class="p-3 bg-surface-container-high rounded border border-outline-variant/10 hover:border-tertiary/30 transition-all cursor-pointer group">
+<div class="flex items-start gap-3">
+<span class="material-symbols-outlined text-tertiary !text-[18px] mt-0.5">warning</span>
+<div class="flex-1">
+<div class="flex justify-between items-start mb-1">
+<span class="text-[10px] font-mono text-tertiary/80 font-bold uppercase">WAR-209: Deprecated Source</span>
+<span class="text-[9px] text-outline px-1.5 bg-background rounded">Line 9</span>
+</div>
+<p class="text-[11px] text-on-surface-variant leading-relaxed">
+                                    Provider <code class="text-tertiary bg-tertiary/5 px-1">'orbital_insight_alpha'</code> is deprecated in API v2.5.
+                                </p>
+<div class="mt-3 flex gap-2">
+<button class="px-2.5 py-1 bg-tertiary text-on-tertiary text-[10px] font-bold rounded uppercase tracking-wider flex items-center gap-1 group-hover:scale-105 transition-transform">
+<span class="material-symbols-outlined !text-[14px]">auto_fix_high</span> Auto-Remediate
+                                    </button>
+<button class="px-2.5 py-1 text-on-surface-variant text-[10px] font-bold uppercase hover:text-primary">Locate in YAML</button>
+</div>
+</div>
+</div>
+</div>
+<div class="p-3 bg-surface-container-high rounded border border-outline-variant/10 hover:border-tertiary/30 transition-all cursor-pointer group">
+<div class="flex items-start gap-3">
+<span class="material-symbols-outlined text-tertiary !text-[18px] mt-0.5">security</span>
+<div class="flex-1">
+<div class="flex justify-between items-start mb-1">
+<span class="text-[10px] font-mono text-tertiary/80 font-bold uppercase">WAR-012: Logic Threshold</span>
+<span class="text-[9px] text-outline px-1.5 bg-background rounded">Line 24</span>
+</div>
+<p class="text-[11px] text-on-surface-variant leading-relaxed">
+                                    Loose scoring threshold (0.75) for <code class="text-on-surface bg-background px-1">evidentiary</code> retention class.
+                                </p>
+<div class="mt-2 flex gap-2">
+<button class="px-2.5 py-1 text-on-surface-variant text-[10px] font-bold uppercase hover:text-primary">Review Policy</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="bg-surface-container-lowest/50 rounded border border-outline-variant/10 p-4 flex flex-col">
+<h4 class="text-[10px] font-bold text-outline uppercase tracking-widest mb-4">Version Delta Summary</h4>
+<div class="flex-1 flex flex-col justify-center gap-6">
+<div class="grid grid-cols-3 gap-2 text-center">
+<div>
+<div class="text-xl font-headline font-bold text-green-400">+12</div>
+<div class="text-[9px] text-outline uppercase">Added</div>
+</div>
+<div class="border-x border-outline-variant/10">
+<div class="text-xl font-headline font-bold text-red-400">-5</div>
+<div class="text-[9px] text-outline uppercase">Removed</div>
+</div>
+<div>
+<div class="text-xl font-headline font-bold text-blue-400">~2</div>
+<div class="text-[9px] text-outline uppercase">Modified</div>
+</div>
+</div>
+<div class="space-y-2">
+<div class="flex justify-between items-center text-[10px]">
+<span class="text-outline">Schema Complexity</span>
+<span class="text-primary">+14%</span>
+</div>
+<div class="h-1 w-full bg-surface-container-high rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full w-[65%]"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<aside class="w-[320px] bg-surface flex flex-col border-l border-outline-variant/10">
+<div class="p-4 border-b border-outline-variant/10 bg-surface-container-low/30">
+<h2 class="text-[10px] font-bold uppercase tracking-[0.2em] text-outline mb-4">Plan Metadata</h2>
+<div class="space-y-4">
+<div class="flex justify-between items-baseline">
+<span class="text-[10px] text-outline uppercase tracking-tighter">Current Version</span>
+<span class="text-[11px] font-mono text-on-surface font-bold">v2.4.12-rc</span>
+</div>
+<div class="flex justify-between items-baseline">
+<span class="text-[10px] text-outline uppercase tracking-tighter">Commit SHA</span>
+<span class="text-[11px] font-mono text-primary-fixed-dim">git:af03982</span>
+</div>
+<div class="flex justify-between items-baseline">
+<span class="text-[10px] text-outline uppercase tracking-tighter">Last Active</span>
+<span class="text-[11px] font-mono text-on-surface">2h 42m ago</span>
+</div>
+<div class="p-2.5 bg-primary/5 border border-primary/10 rounded-sm">
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-primary !text-[16px]">verified_user</span>
+<span class="text-[10px] font-bold text-primary uppercase">Active Safety Check</span>
+</div>
+<p class="text-[10px] text-on-surface-variant leading-tight">Current version has 99.8% health score over last 24h.</p>
+</div>
+</div>
+</div>
+<div class="flex-1 flex flex-col min-h-0">
+<div class="p-4 flex justify-between items-center bg-surface-container-low/20">
+<h2 class="text-[10px] font-bold uppercase tracking-[0.2em] text-outline">Revision History</h2>
+<button class="text-outline-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined !text-[18px]">filter_list</span>
+</button>
+</div>
+<div class="flex-1 overflow-y-auto px-4 pb-6 space-y-4 relative">
+<div class="absolute left-[23px] top-6 bottom-6 w-[1px] bg-outline-variant/10"></div>
+<div class="relative flex gap-4">
+<div class="w-[18px] h-[18px] rounded-full bg-primary flex items-center justify-center z-10 ring-4 ring-background">
+<span class="material-symbols-outlined !text-[12px] text-on-primary" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<div class="flex-1 bg-surface-container-high p-3 rounded-lg border border-primary/30 shadow-sm shadow-primary/5">
+<div class="flex justify-between mb-1.5">
+<span class="text-[11px] font-black text-on-surface uppercase font-headline">v2.4.12-rc</span>
+<span class="text-[8px] bg-primary/20 text-primary px-1.5 py-0.5 rounded-full font-black uppercase border border-primary/20">Active</span>
+</div>
+<p class="text-[10px] text-on-surface-variant mb-3 leading-relaxed">AIS ingestion multi-threading rewrite.</p>
+<div class="flex justify-between items-center">
+<span class="text-[9px] text-outline font-medium uppercase tracking-tighter">Head Version</span>
+<span class="text-[9px] text-outline/50">2h ago</span>
+</div>
+</div>
+</div>
+<div class="relative flex gap-4">
+<div class="w-[18px] h-[18px] rounded-full bg-blue-500/20 border border-blue-500/50 flex items-center justify-center z-10 ring-4 ring-background">
+<div class="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
+</div>
+<div class="flex-1 bg-surface-container-highest/60 p-3 rounded-lg border border-blue-500/40 relative">
+<div class="flex justify-between mb-1.5">
+<span class="text-[11px] font-bold text-on-surface font-headline">v2.4.11-stable</span>
+<span class="text-[8px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full font-black uppercase border border-blue-500/20">Diff Source</span>
+</div>
+<p class="text-[10px] text-on-surface-variant mb-3 leading-relaxed">Minor fix for cloud cover filter.</p>
+<div class="flex justify-between items-center">
+<button class="text-[9px] font-black text-blue-300 uppercase hover:text-white transition-colors">Comparing...</button>
+<span class="text-[9px] text-outline/50">1d ago</span>
+</div>
+</div>
+</div>
+<div class="relative flex gap-4 group">
+<div class="w-[18px] h-[18px] rounded-full bg-surface-container-highest border border-outline-variant/30 z-10 ring-4 ring-background group-hover:border-primary/50 transition-colors"></div>
+<div class="flex-1 bg-surface-container-low/40 p-3 rounded-lg border border-transparent hover:border-outline-variant/20 hover:bg-surface-container-low transition-all cursor-pointer">
+<div class="flex justify-between mb-1">
+<span class="text-[11px] font-bold text-on-surface/60 font-headline group-hover:text-on-surface">v2.4.10-lts</span>
+</div>
+<p class="text-[10px] text-outline mb-3 leading-relaxed">Baseline security hardening.</p>
+<div class="flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="text-[9px] font-black text-primary uppercase">Compare</button>
+<button class="text-[9px] font-black text-outline uppercase hover:text-error">Rollback</button>
+</div>
+</div>
+</div>
+<div class="relative flex gap-4 animate-pulse">
+<div class="w-[18px] h-[18px] rounded-full bg-surface-container-highest z-10 ring-4 ring-background"></div>
+<div class="flex-1 space-y-2">
+<div class="h-3 bg-surface-container-highest rounded w-1/3"></div>
+<div class="h-10 bg-surface-container-highest/30 rounded w-full"></div>
+</div>
+</div>
+</div>
+</div>
+</aside>
+</main>
+
+</body></html>

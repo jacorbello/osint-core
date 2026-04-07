@@ -13,15 +13,18 @@ from osint_core.api.routes import (
     alerts,
     audit,
     briefs,
+    dashboard,
     entities,
     events,
     health,
     indicators,
     jobs,
     leads,
+    me,
     plan,
     preferences,
     search,
+    stream,
     watches,
 )
 from osint_core.config import settings
@@ -66,6 +69,8 @@ app.add_exception_handler(ProblemError, problem_exception_handler)  # type: igno
 app.add_middleware(RateLimitMiddleware)
 
 app.include_router(health.router)
+app.include_router(me.router)
+app.include_router(dashboard.router)
 app.include_router(plan.router)
 app.include_router(events.router)
 app.include_router(indicators.router)
@@ -73,6 +78,7 @@ app.include_router(entities.router)
 app.include_router(alerts.router)
 app.include_router(briefs.router)
 app.include_router(search.router)
+app.include_router(stream.router)
 app.include_router(jobs.router)
 app.include_router(audit.router)
 app.include_router(watches.router)

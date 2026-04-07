@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>SENTINEL | Events Explorer</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary": "#ffeac0",
+                        "surface-container-lowest": "#0c0e12",
+                        "surface-variant": "#333539",
+                        "secondary-fixed-dim": "#bdc2ff",
+                        "on-primary-container": "#00626e",
+                        "on-error": "#690005",
+                        "on-background": "#e2e2e8",
+                        "secondary": "#bdc2ff",
+                        "outline": "#849396",
+                        "error-container": "#93000a",
+                        "on-secondary-fixed": "#000767",
+                        "surface-container-low": "#1a1c20",
+                        "on-primary-fixed": "#001f24",
+                        "error": "#ffb4ab",
+                        "tertiary-fixed": "#ffdf96",
+                        "on-secondary": "#1b247f",
+                        "inverse-primary": "#006875",
+                        "inverse-surface": "#e2e2e8",
+                        "secondary-fixed": "#e0e0ff",
+                        "on-tertiary-container": "#6f5500",
+                        "inverse-on-surface": "#2f3035",
+                        "surface-container": "#1e2024",
+                        "primary-container": "#00e5ff",
+                        "surface-dim": "#111318",
+                        "surface-container-highest": "#333539",
+                        "on-tertiary": "#3e2e00",
+                        "background": "#111318",
+                        "on-primary-fixed-variant": "#004f58",
+                        "surface": "#111318",
+                        "on-primary": "#00363d",
+                        "secondary-container": "#343d96",
+                        "on-tertiary-fixed": "#251a00",
+                        "tertiary-fixed-dim": "#f3bf26",
+                        "surface-tint": "#00daf3",
+                        "primary": "#c3f5ff",
+                        "on-secondary-container": "#a8afff",
+                        "primary-fixed": "#9cf0ff",
+                        "on-surface": "#e2e2e8",
+                        "outline-variant": "#3b494c",
+                        "tertiary-container": "#fec931",
+                        "primary-fixed-dim": "#00daf3",
+                        "surface-bright": "#37393e",
+                        "on-tertiary-fixed-variant": "#594400",
+                        "on-error-container": "#ffdad6",
+                        "on-surface-variant": "#bac9cc",
+                        "surface-container-high": "#282a2e",
+                        "on-secondary-fixed-variant": "#343d96"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        body { font-family: 'Inter', sans-serif; background-color: #111318; color: #e2e2e8; }
+        .font-headline { font-family: 'Space Grotesk', sans-serif; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: #0c0e12; }
+        ::-webkit-scrollbar-thumb { background: #3b494c; border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: #00E5FF; }
+    </style>
+</head>
+<body class="overflow-hidden">
+<!-- SIDE NAVIGATION RAIL -->
+<aside class="w-[72px] h-screen fixed left-0 top-0 z-50 border-r-0 bg-[#111318] flex flex-col items-center py-6 font-['Space_Grotesk'] tracking-tight">
+<div class="mb-10 text-[#00E5FF] font-bold text-lg tracking-widest" title="SENTINEL OSINT-v2">
+            S
+        </div>
+<nav class="flex flex-col gap-8 flex-1">
+<button class="flex flex-col items-center text-[#bdc2ff] opacity-60 hover:bg-[#282a2e] hover:text-[#00E5FF] transition-colors scale-95 duration-150">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+</button>
+<button class="flex flex-col items-center text-[#00E5FF] border-l-2 border-[#00E5FF] bg-[#282a2e]/50 hover:bg-[#282a2e] hover:text-[#00E5FF] transition-colors scale-95 duration-150 py-2 w-[72px]">
+<span class="material-symbols-outlined" data-icon="event_note" style="font-variation-settings: 'FILL' 1;">event_note</span>
+</button>
+<button class="flex flex-col items-center text-[#bdc2ff] opacity-60 hover:bg-[#282a2e] hover:text-[#00E5FF] transition-colors scale-95 duration-150">
+<span class="material-symbols-outlined" data-icon="visibility">visibility</span>
+</button>
+<button class="flex flex-col items-center text-[#bdc2ff] opacity-60 hover:bg-[#282a2e] hover:text-[#00E5FF] transition-colors scale-95 duration-150">
+<span class="material-symbols-outlined" data-icon="sensors">sensors</span>
+</button>
+<button class="flex flex-col items-center text-[#bdc2ff] opacity-60 hover:bg-[#282a2e] hover:text-[#00E5FF] transition-colors scale-95 duration-150">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+</button>
+</nav>
+<div class="mt-auto flex flex-col gap-6 items-center">
+<button class="text-[#00E5FF] p-2 rounded-full border border-[#00E5FF]/20 hover:bg-[#00E5FF]/10 transition-all">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+</button>
+<button class="text-[#bdc2ff] opacity-60 hover:text-[#00E5FF] transition-colors">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+<button class="text-[#bdc2ff] opacity-60 hover:text-[#00E5FF] transition-colors">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+</button>
+</div>
+</aside>
+<!-- TOP NAVIGATION BAR -->
+<header class="fixed top-0 right-0 left-[72px] h-16 z-40 bg-[#111318]/80 backdrop-blur-xl flex justify-between items-center px-8 w-full font-['Space_Grotesk'] text-sm uppercase tracking-wider">
+<div class="flex items-center gap-8">
+<span class="font-black text-[#00E5FF]">SENTINEL NODE</span>
+<div class="flex gap-6">
+<a class="text-[#bdc2ff] opacity-70 hover:text-[#00E5FF] transition-all" href="#">Global</a>
+<a class="text-[#00E5FF] font-bold border-b-2 border-[#00E5FF] transition-all" href="#">Tactical</a>
+<a class="text-[#bdc2ff] opacity-70 hover:text-[#00E5FF] transition-all" href="#">Strategic</a>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2 px-3 py-1 bg-surface-container-high rounded text-[10px] font-bold text-primary-container animate-pulse">
+<span class="w-2 h-2 rounded-full bg-primary-container"></span>
+                STREAM ACTIVE
+            </div>
+<div class="flex items-center gap-4 text-[#bdc2ff]">
+<span class="material-symbols-outlined hover:text-[#00E5FF] cursor-pointer" data-icon="notifications">notifications</span>
+<span class="material-symbols-outlined hover:text-[#00E5FF] cursor-pointer" data-icon="shield">shield</span>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-[#00E5FF]/30">
+<img class="w-full h-full object-cover" data-alt="Cybersecurity administrator portrait with technical digital interface lighting overlay" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBNFVlz0MS8Pbhm9hDt2n7m1085fQCD6ZJnTif_oS-wRo7dJCVMkwPV1WKyw-wje03iv4YANm__XB3hF53MSyNbrw75vNsSyZtvJxmatgX9ueQSrU36oygoIW5-EnVZLebXlhaL5anXUm7CqDuL7pDhUJeSrJoFe2EzTYl7z4O3U5-Md6Nd3Rp_v0OJ0sBK-6Yd6VKF7n7vWKtewdpCZRUJdixhxvmvLL_fxsxI5dZ2Omfq6OI9NI6E1Sdg8RvjPClIp0JrseLA-49z"/>
+</div>
+</div>
+</div>
+</header>
+<!-- MAIN APP CANVAS -->
+<main class="ml-[72px] mt-16 h-[calc(100vh-64px)] flex overflow-hidden">
+<!-- LEFT SIDEBAR: FACETS -->
+<aside class="w-[240px] flex-shrink-0 bg-surface-container-low overflow-y-auto border-r border-outline-variant/10">
+<div class="p-4 flex flex-col gap-6">
+<!-- Error Banner Example -->
+<div class="bg-error-container/20 border-l-4 border-error p-3 text-xs">
+<div class="flex items-center gap-2 text-error font-bold mb-1">
+<span class="material-symbols-outlined text-[14px]" data-icon="warning">warning</span>
+                        ERR_INT_04
+                    </div>
+<p class="text-on-surface-variant leading-relaxed opacity-80">Failed to fetch event facets from upstream node cluster</p>
+</div>
+<!-- Facet Groups -->
+<div class="space-y-6">
+<section>
+<h3 class="text-[10px] font-headline font-bold text-secondary-fixed-dim tracking-[0.2em] uppercase mb-3">Event Type</h3>
+<div class="space-y-1">
+<div class="flex justify-between items-center py-1.5 px-2 bg-surface-container-high text-xs group cursor-pointer">
+<span class="flex items-center gap-2"><span class="material-symbols-outlined text-primary-fixed-dim text-sm" data-icon="key">key</span> AUTH_FAIL</span>
+<span class="text-[10px] font-headline opacity-50">1,204</span>
+</div>
+<div class="flex justify-between items-center py-1.5 px-2 hover:bg-surface-container/50 text-xs group cursor-pointer transition-colors">
+<span class="flex items-center gap-2 text-on-surface-variant"><span class="material-symbols-outlined text-sm" data-icon="dns">dns</span> NODE_OFFLINE</span>
+<span class="text-[10px] font-headline opacity-50">842</span>
+</div>
+<div class="flex justify-between items-center py-1.5 px-2 hover:bg-surface-container/50 text-xs group cursor-pointer transition-colors">
+<span class="flex items-center gap-2 text-on-surface-variant"><span class="material-symbols-outlined text-sm" data-icon="database">database</span> DB_QUERY_ANOMALY</span>
+<span class="text-[10px] font-headline opacity-50">321</span>
+</div>
+</div>
+</section>
+<section>
+<h3 class="text-[10px] font-headline font-bold text-secondary-fixed-dim tracking-[0.2em] uppercase mb-3">Severity</h3>
+<div class="space-y-1">
+<div class="flex items-center gap-2 p-2 text-xs text-error font-medium hover:bg-surface-container/50 cursor-pointer">
+<span class="w-1.5 h-1.5 rounded-full bg-error"></span> CRITICAL <span class="ml-auto text-[10px] opacity-50">12</span>
+</div>
+<div class="flex items-center gap-2 p-2 text-xs text-[#ffb4ab] font-medium hover:bg-surface-container/50 cursor-pointer">
+<span class="w-1.5 h-1.5 rounded-full bg-[#ffb4ab]"></span> HIGH <span class="ml-auto text-[10px] opacity-50">54</span>
+</div>
+<div class="flex items-center gap-2 p-2 text-xs text-tertiary-container font-medium hover:bg-surface-container/50 cursor-pointer">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary-container"></span> MEDIUM <span class="ml-auto text-[10px] opacity-50">198</span>
+</div>
+</div>
+</section>
+<section>
+<h3 class="text-[10px] font-headline font-bold text-secondary-fixed-dim tracking-[0.2em] uppercase mb-3">Location</h3>
+<div class="space-y-1">
+<div class="flex justify-between items-center py-1.5 px-2 hover:bg-surface-container/50 text-xs cursor-pointer">
+<span class="text-on-surface-variant">Germany (DE)</span>
+<span class="text-[10px] opacity-50">4.2k</span>
+</div>
+<div class="flex justify-between items-center py-1.5 px-2 hover:bg-surface-container/50 text-xs cursor-pointer">
+<span class="text-on-surface-variant">United States (US)</span>
+<span class="text-[10px] opacity-50">3.8k</span>
+</div>
+<div class="flex justify-between items-center py-1.5 px-2 hover:bg-surface-container/50 text-xs cursor-pointer">
+<span class="text-on-surface-variant">Russia (RU)</span>
+<span class="text-[10px] opacity-50">1.5k</span>
+</div>
+</div>
+</section>
+</div>
+</div>
+</aside>
+<!-- CENTER PANEL: DATA GRID -->
+<section class="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">
+<!-- TOOLBAR -->
+<div class="h-14 flex-shrink-0 flex items-center justify-between px-6 border-b border-outline-variant/10 bg-surface-container-lowest">
+<div class="flex items-center gap-4 flex-1">
+<div class="relative max-w-md w-full">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline-variant text-sm" data-icon="search">search</span>
+<input class="w-full bg-surface-container-low border-0 text-xs font-mono placeholder:text-outline-variant/50 focus:ring-1 focus:ring-primary-container pl-10 py-2 rounded" placeholder="QUERY: events.severity &gt;= HIGH" type="text"/>
+</div>
+<div class="h-6 w-px bg-outline-variant/20 mx-2"></div>
+<select class="bg-transparent border-0 text-[11px] font-headline text-on-surface-variant focus:ring-0 cursor-pointer">
+<option>SORT: occurred_at (DESC)</option>
+<option>SORT: score (DESC)</option>
+<option>SORT: severity (HIGH-LOW)</option>
+</select>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex bg-surface-container-low rounded p-0.5 border border-outline-variant/10">
+<button class="px-3 py-1 text-[10px] font-bold bg-surface-container-highest text-primary-container rounded shadow-sm">COMFORTABLE</button>
+<button class="px-3 py-1 text-[10px] font-bold text-on-surface-variant hover:text-on-surface">COMPACT</button>
+</div>
+<button class="flex items-center gap-2 px-3 py-1.5 bg-surface-container text-[11px] font-headline hover:bg-surface-container-high border border-outline-variant/20 rounded">
+<span class="material-symbols-outlined text-sm" data-icon="calendar_today">calendar_today</span>
+                        LAST 24H
+                    </button>
+<button class="flex items-center gap-2 px-3 py-1.5 bg-primary-container/10 text-primary-container text-[11px] font-headline border border-primary-container/20 rounded hover:bg-primary-container/20 transition-all">
+<span class="material-symbols-outlined text-sm" data-icon="download">download</span>
+                        EXPORT
+                    </button>
+</div>
+</div>
+<!-- TABLE AREA -->
+<div class="flex-1 overflow-auto">
+<table class="w-full border-separate border-spacing-0 text-left">
+<thead class="sticky top-0 z-10 bg-surface-container-lowest/90 backdrop-blur-md">
+<tr class="text-[10px] font-headline font-bold uppercase tracking-wider text-outline">
+<th class="p-3 w-10 border-b border-outline-variant/10"><input class="rounded-sm bg-transparent border-outline-variant/50 text-primary-container focus:ring-0" type="checkbox"/></th>
+<th class="p-3 border-b border-outline-variant/10">Event Type</th>
+<th class="p-3 border-b border-outline-variant/10">Source ID</th>
+<th class="p-3 border-b border-outline-variant/10 min-w-[200px]">Signal Analysis</th>
+<th class="p-3 border-b border-outline-variant/10">Severity</th>
+<th class="p-3 border-b border-outline-variant/10">Score</th>
+<th class="p-3 border-b border-outline-variant/10">Occurred At</th>
+<th class="p-3 border-b border-outline-variant/10">Geo</th>
+<th class="p-3 border-b border-outline-variant/10">NLP Rel</th>
+</tr>
+</thead>
+<tbody class="text-xs">
+<!-- ROW 1 (Active/Selected) -->
+<tr class="bg-surface-container-high/40 border-l-2 border-primary-container group">
+<td class="p-3 border-b border-outline-variant/5"><input checked="" class="rounded-sm bg-transparent border-outline-variant/50 text-primary-container focus:ring-0" type="checkbox"/></td>
+<td class="p-3 border-b border-outline-variant/5">
+<span class="flex items-center gap-2 text-primary-fixed-dim">
+<span class="material-symbols-outlined text-[16px]" data-icon="lock_reset" style="font-variation-settings: 'FILL' 1;">lock_reset</span>
+                                    AUTH_FAIL
+                                </span>
+</td>
+<td class="p-3 border-b border-outline-variant/5 font-mono text-[10px] opacity-70">US-EAST-091</td>
+<td class="p-3 border-b border-outline-variant/5">
+<div class="font-bold text-on-surface truncate">Repeated Brute Force Attempt</div>
+<div class="text-[11px] text-on-surface-variant truncate opacity-60">Multiple credential mismatches detected on primary VPN endpoint...</div>
+</td>
+<td class="p-3 border-b border-outline-variant/5">
+<span class="px-2 py-0.5 rounded-full bg-error-container text-on-error-container text-[10px] font-bold">HIGH</span>
+</td>
+<td class="p-3 border-b border-outline-variant/5 font-headline font-bold text-primary-container">0.82</td>
+<td class="p-3 border-b border-outline-variant/5 opacity-60 font-mono text-[10px]">2023-11-20 14:22:01</td>
+<td class="p-3 border-b border-outline-variant/5 opacity-80">DE <span class="text-[10px] opacity-50 ml-1">Europe</span></td>
+<td class="p-3 border-b border-outline-variant/5">
+<div class="w-16 bg-surface-container-highest h-1 rounded-full overflow-hidden">
+<div class="bg-primary-container h-full w-[88%]"></div>
+</div>
+</td>
+</tr>
+<!-- ROW 2 -->
+<tr class="hover:bg-surface-container-low/50 group transition-colors">
+<td class="p-3 border-b border-outline-variant/5"><input class="rounded-sm bg-transparent border-outline-variant/50 text-primary-container focus:ring-0" type="checkbox"/></td>
+<td class="p-3 border-b border-outline-variant/5">
+<span class="flex items-center gap-2 text-on-surface-variant group-hover:text-primary-fixed-dim">
+<span class="material-symbols-outlined text-[16px]" data-icon="language">language</span>
+                                    WEB_SCRAPE
+                                </span>
+</td>
+<td class="p-3 border-b border-outline-variant/5 font-mono text-[10px] opacity-70">EU-WEST-042</td>
+<td class="p-3 border-b border-outline-variant/5">
+<div class="font-bold text-on-surface truncate">Aggressive IP Range Scan</div>
+<div class="text-[11px] text-on-surface-variant truncate opacity-60">Automated traversal of public API endpoints from non-standard ASNs...</div>
+</td>
+<td class="p-3 border-b border-outline-variant/5">
+<span class="px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant text-[10px] font-bold">INFO</span>
+</td>
+<td class="p-3 border-b border-outline-variant/5 font-headline font-bold text-outline">0.14</td>
+<td class="p-3 border-b border-outline-variant/5 opacity-60 font-mono text-[10px]">2023-11-20 14:21:44</td>
+<td class="p-3 border-b border-outline-variant/5 opacity-80">FR <span class="text-[10px] opacity-50 ml-1">Europe</span></td>
+<td class="p-3 border-b border-outline-variant/5">
+<div class="w-16 bg-surface-container-highest h-1 rounded-full overflow-hidden">
+<div class="bg-outline h-full w-[20%]"></div>
+</div>
+</td>
+</tr>
+<!-- ROW 3 -->
+<tr class="hover:bg-surface-container-low/50 group transition-colors">
+<td class="p-3 border-b border-outline-variant/5"><input class="rounded-sm bg-transparent border-outline-variant/50 text-primary-container focus:ring-0" type="checkbox"/></td>
+<td class="p-3 border-b border-outline-variant/5">
+<span class="flex items-center gap-2 text-on-surface-variant group-hover:text-primary-fixed-dim">
+<span class="material-symbols-outlined text-[16px]" data-icon="cloud">cloud</span>
+                                    CLOUD_EXFIL
+                                </span>
+</td>
+<td class="p-3 border-b border-outline-variant/5 font-mono text-[10px] opacity-70">AP-SOUTH-210</td>
+<td class="p-3 border-b border-outline-variant/5">
+<div class="font-bold text-on-surface truncate">Bucket Permissions Modified</div>
+<div class="text-[11px] text-on-surface-variant truncate opacity-60">S3 bucket policies shifted to PUBLIC read from unidentified principal...</div>
+</td>
+<td class="p-3 border-b border-outline-variant/5">
+<span class="px-2 py-0.5 rounded-full bg-error text-on-error text-[10px] font-bold">CRITICAL</span>
+</td>
+<td class="p-3 border-b border-outline-variant/5 font-headline font-bold text-primary-container">0.97</td>
+<td class="p-3 border-b border-outline-variant/5 opacity-60 font-mono text-[10px]">2023-11-20 14:19:58</td>
+<td class="p-3 border-b border-outline-variant/5 opacity-80">IN <span class="text-[10px] opacity-50 ml-1">Asia</span></td>
+<td class="p-3 border-b border-outline-variant/5">
+<div class="w-16 bg-surface-container-highest h-1 rounded-full overflow-hidden">
+<div class="bg-primary-container h-full w-[95%]"></div>
+</div>
+</td>
+</tr>
+<!-- Loading Skeleton Row -->
+<tr class="opacity-30">
+<td class="p-3 border-b border-outline-variant/5"></td>
+<td class="p-3 border-b border-outline-variant/5"><div class="h-4 w-20 bg-outline-variant/20 animate-pulse rounded"></div></td>
+<td class="p-3 border-b border-outline-variant/5"><div class="h-4 w-16 bg-outline-variant/20 animate-pulse rounded"></div></td>
+<td class="p-3 border-b border-outline-variant/5"><div class="h-4 w-48 bg-outline-variant/20 animate-pulse rounded mb-1"></div><div class="h-2 w-32 bg-outline-variant/20 animate-pulse rounded"></div></td>
+<td class="p-3 border-b border-outline-variant/5"><div class="h-5 w-12 bg-outline-variant/20 animate-pulse rounded-full"></div></td>
+<td class="p-3 border-b border-outline-variant/5"><div class="h-4 w-8 bg-outline-variant/20 animate-pulse rounded"></div></td>
+<td class="p-3 border-b border-outline-variant/5" colspan="3"><div class="h-4 w-full bg-outline-variant/10 animate-pulse rounded"></div></td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- PAGINATION FOOTER -->
+<footer class="h-12 flex-shrink-0 flex items-center justify-between px-6 bg-surface-container-low border-t border-outline-variant/10 text-[10px] font-headline">
+<div class="flex items-center gap-6">
+<span class="text-on-surface-variant opacity-70">Showing 1-50 of <span class="font-bold text-on-surface">1,204,592</span> records</span>
+<div class="flex items-center gap-2">
+<span class="text-on-surface-variant opacity-50">Limit:</span>
+<select class="bg-surface-container-lowest border-0 text-[10px] rounded py-0.5 focus:ring-0">
+<option>50</option>
+<option>100</option>
+<option>500</option>
+</select>
+</div>
+</div>
+<div class="flex items-center gap-1">
+<button class="p-1 px-2 hover:bg-surface-container-high rounded disabled:opacity-30" disabled=""><span class="material-symbols-outlined text-[16px]" data-icon="first_page">first_page</span></button>
+<button class="p-1 px-2 hover:bg-surface-container-high rounded disabled:opacity-30" disabled=""><span class="material-symbols-outlined text-[16px]" data-icon="chevron_left">chevron_left</span></button>
+<div class="flex items-center gap-1 mx-2">
+<span class="px-2 py-1 bg-primary-container text-on-primary-container font-bold rounded">1</span>
+<button class="px-2 py-1 hover:bg-surface-container-high rounded transition-colors">2</button>
+<button class="px-2 py-1 hover:bg-surface-container-high rounded transition-colors">3</button>
+<span class="px-1 text-outline">...</span>
+<button class="px-2 py-1 hover:bg-surface-container-high rounded transition-colors">24k</button>
+</div>
+<button class="p-1 px-2 hover:bg-surface-container-high rounded"><span class="material-symbols-outlined text-[16px]" data-icon="chevron_right">chevron_right</span></button>
+<button class="p-1 px-2 hover:bg-surface-container-high rounded"><span class="material-symbols-outlined text-[16px]" data-icon="last_page">last_page</span></button>
+</div>
+</footer>
+</section>
+<!-- RIGHT SIDEBAR: DETAIL DRAWER -->
+<aside class="w-[380px] flex-shrink-0 bg-surface-container-lowest border-l border-outline-variant/20 flex flex-col overflow-hidden">
+<!-- Header -->
+<header class="p-6 pb-4 border-b border-outline-variant/10 bg-surface-container/30 backdrop-blur">
+<div class="flex justify-between items-start mb-4">
+<span class="px-2 py-0.5 bg-primary-container/20 text-primary-container text-[10px] font-bold rounded">SIGNAL_UUID_88219</span>
+<button class="text-outline hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined" data-icon="close">close</span>
+</button>
+</div>
+<h2 class="text-lg font-headline font-bold text-on-surface mb-2 leading-tight">Repeated Brute Force Attempt</h2>
+<div class="flex items-center gap-3">
+<span class="flex items-center gap-1 text-[10px] text-error font-bold">
+<span class="material-symbols-outlined text-[14px]" data-icon="error">error</span> HIGH SEVERITY
+                    </span>
+<span class="w-1 h-1 rounded-full bg-outline-variant"></span>
+<span class="text-[10px] text-on-surface-variant font-mono uppercase">DE-BER-NODE-09</span>
+</div>
+</header>
+<!-- Tabs -->
+<div class="flex border-b border-outline-variant/10 text-[10px] font-headline font-bold uppercase tracking-[0.1em]">
+<button class="flex-1 py-3 text-primary-container border-b-2 border-primary-container bg-primary-container/5">Alerts <span class="ml-1 opacity-50">(3)</span></button>
+<button class="flex-1 py-3 text-on-surface-variant hover:text-on-surface border-b-2 border-transparent transition-all">Entities <span class="ml-1 opacity-50">(14)</span></button>
+<button class="flex-1 py-3 text-on-surface-variant hover:text-on-surface border-b-2 border-transparent transition-all">Indicators <span class="ml-1 opacity-50">(2)</span></button>
+</div>
+<!-- Body Content -->
+<div class="flex-1 overflow-y-auto p-6 space-y-8">
+<section>
+<h3 class="text-[10px] font-headline font-bold text-secondary-fixed-dim tracking-widest uppercase mb-4">AI Insight</h3>
+<div class="bg-surface-container-high/50 p-4 rounded-xl border border-outline-variant/10 relative overflow-hidden">
+<div class="absolute top-0 right-0 p-2 opacity-10">
+<span class="material-symbols-outlined text-4xl" data-icon="auto_awesome">auto_awesome</span>
+</div>
+<p class="text-xs leading-relaxed text-on-surface-variant mb-4">
+                            Sentinel Intelligence Node has analyzed the cluster of 1,204 attempts. The failure pattern suggests a <span class="text-primary-container font-bold">dictionary-style attack</span> targeting the administrative service accounts from a known proxy subnet.
+                        </p>
+<div class="flex items-center gap-4">
+<div class="flex-1">
+<div class="text-[9px] uppercase text-outline mb-1">Threat Confidence</div>
+<div class="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
+<div class="bg-primary-container h-full w-[92%]"></div>
+</div>
+</div>
+<div class="text-[14px] font-headline font-bold text-primary-container">92%</div>
+</div>
+</div>
+</section>
+<section>
+<h3 class="text-[10px] font-headline font-bold text-secondary-fixed-dim tracking-widest uppercase mb-4">Raw Excerpt</h3>
+<pre class="bg-surface-container-lowest p-4 rounded-lg text-[10px] font-mono text-on-surface-variant/80 border border-outline-variant/10 overflow-x-auto">[2023-11-20T14:22:01.002Z] WARN: SSH 
+auth_fail; user="admin"; 
+remote="192.168.1.104"; 
+port=54431; 
+fingerprint="SHA256:8y2...91a";
+strategy="bruteforce_detect";
+counter="1204";
+                    </pre>
+</section>
+<section>
+<h3 class="text-[10px] font-headline font-bold text-secondary-fixed-dim tracking-widest uppercase mb-4">Geospatial Origin</h3>
+<div class="h-40 bg-surface-container rounded-lg relative overflow-hidden group">
+<img class="w-full h-full object-cover opacity-50 grayscale group-hover:grayscale-0 transition-all duration-700" data-alt="Satellite night map of Berlin showing city lights and major urban infrastructure with tactical UI overlay" data-location="Berlin" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA9ZzTzpXbcgwcqAhPJ_Q5NAl0y1c5M6FI2oaroy8AL2IqieT3swvh4xjIenrH33H49R7nVmtBcMAI803ONdL7Y9_h3xkkY34hZNrLow_GZBdLYCP6_JHhTRQ4jBltQP4PeWze2a8u2yzOqpMNIDYhJtroLIFel3G2f8FpTzHEdSZC8nrEtVPF_RbL0HaE7fWXsUx3DqtuTqheCmZ4WbuukZr-isU1pllNBkNnx4SVxxtdUXl9_lWSO-EZXMT99NTWxFledWq5OKCKI"/>
+<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+<div class="w-8 h-8 rounded-full bg-primary-container/20 border border-primary-container flex items-center justify-center">
+<div class="w-2 h-2 rounded-full bg-primary-container animate-ping"></div>
+</div>
+</div>
+<div class="absolute bottom-2 left-2 bg-surface-container-lowest/80 backdrop-blur text-[9px] font-mono p-1 px-2 border border-outline-variant/20">
+                            COORD: 52.5200° N, 13.4050° E
+                        </div>
+</div>
+</section>
+</div>
+<!-- Footer Action -->
+<div class="p-6 bg-surface-container border-t border-outline-variant/10">
+<button class="w-full py-3 bg-gradient-to-r from-primary to-primary-container text-on-primary text-xs font-headline font-bold rounded-lg shadow-lg hover:shadow-primary-container/20 transition-all active:scale-95">
+                    INITIATE COUNTER-RECON
+                </button>
+</div>
+</aside>
+</main>
+<!-- FAB (Suppressed on details, but keeping for reference if needed elsewhere) -->
+<!-- Hidden here as per UX Goal of suppressing FAB on focused Detail views -->
+</body></html>

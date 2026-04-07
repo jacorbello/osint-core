@@ -24,6 +24,8 @@ class Settings(BaseSettings):
 
     # --- Redis ---
     redis_url: str = "redis://redis:6379/0"
+    realtime_backend: str = "redis"
+    realtime_channel_prefix: str = "osint:realtime"
 
     # --- Celery ---
     celery_broker_url: str = "redis://redis:6379/1"
