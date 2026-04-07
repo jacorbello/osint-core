@@ -209,7 +209,8 @@ class RssConnector(BaseConnector):
             raw = getattr(entry, attr, None)
             if raw:
                 try:
-                    return parsedate_to_datetime(raw).replace(tzinfo=UTC)
+                    dt: datetime = parsedate_to_datetime(raw).replace(tzinfo=UTC)
+                    return dt
                 except (ValueError, TypeError):
                     pass
 
