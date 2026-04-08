@@ -5,61 +5,68 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Surface colors
-        background: '#111318',
-        surface: '#111318',
-        'surface-dim': '#111318',
-        'surface-bright': '#37393e',
-        'surface-container-lowest': '#0c0e12',
-        'surface-container-low': '#1a1c20',
-        'surface-container': '#1e2024',
-        'surface-container-high': '#282a2e',
-        'surface-container-highest': '#333539',
-        'surface-variant': '#333539',
-        
-        // Primary (cyan)
-        primary: '#c3f5ff',
-        'primary-container': '#00e5ff',
-        'on-primary': '#00363d',
-        'on-primary-container': '#00626e',
-        
-        // Secondary (purple)
-        secondary: '#bdc2ff',
-        'secondary-container': '#343d96',
-        'on-secondary': '#1b247f',
-        'on-secondary-container': '#a8afff',
-        
-        // Tertiary (amber)
-        tertiary: '#ffeac0',
-        'tertiary-container': '#fec931',
-        'on-tertiary': '#3e2e00',
-        'on-tertiary-container': '#6f5500',
-        
-        // Error
-        error: '#ffb4ab',
-        'error-container': '#93000a',
-        'on-error': '#690005',
-        'on-error-container': '#ffdad6',
-        
+        // Surface colors — blue-tinted neutrals
+        background: '#0f1114',
+        surface: '#13161b',
+        'surface-dim': '#0a0c10',
+        'surface-bright': '#252a34',
+        'surface-container-lowest': '#0a0c10',
+        'surface-container-low': '#13161b',
+        'surface-container': '#181b22',
+        'surface-container-high': '#1e2229',
+        'surface-container-highest': '#252a34',
+        'surface-variant': '#1e2229',
+
+        // Primary — Intelligence Slate blue
+        primary: '#5b8def',
+        'primary-container': '#3d6fd1',
+        'on-primary': '#ffffff',
+        'on-primary-container': '#c5d7fa',
+
+        // Critical / Error — muted red
+        critical: '#e06c75',
+        error: '#e06c75',
+        'error-container': '#4a1c20',
+        'on-error': '#ffffff',
+        'on-error-container': '#f5c6c9',
+
+        // Warning — muted amber
+        warning: '#e5c07b',
+        'warning-container': '#4a3d1c',
+        'on-warning': '#1a1400',
+        'on-warning-container': '#f5e6c0',
+
+        // Success — muted green
+        success: '#98c379',
+        'success-container': '#1c3a1c',
+        'on-success': '#ffffff',
+        'on-success-container': '#c6e6b8',
+
         // Text
-        'on-background': '#e2e2e8',
-        'on-surface': '#e2e2e8',
-        'on-surface-variant': '#bac9cc',
-        
+        'text-primary': '#d4dae5',
+        'text-secondary': 'rgba(180, 190, 210, 0.65)',
+        'text-tertiary': 'rgba(180, 190, 210, 0.4)',
+        'text-muted': 'rgba(180, 190, 210, 0.25)',
+        'on-background': '#d4dae5',
+        'on-surface': '#d4dae5',
+        'on-surface-variant': 'rgba(180, 190, 210, 0.65)',
+
         // Borders
-        outline: '#849396',
-        'outline-variant': '#3b494c',
+        outline: 'rgba(180, 190, 210, 0.25)',
+        'outline-variant': 'rgba(180, 190, 210, 0.12)',
       },
       fontFamily: {
-        headline: ['Space Grotesk', 'sans-serif'],
-        body: ['Inter', 'sans-serif'],
-        label: ['Inter', 'sans-serif'],
+        headline: ['IBM Plex Sans', 'sans-serif'],
+        body: ['IBM Plex Sans', 'sans-serif'],
+        label: ['IBM Plex Sans', 'sans-serif'],
+        mono: ['IBM Plex Mono', 'monospace'],
       },
       borderRadius: {
-        DEFAULT: '0.125rem',
-        lg: '0.25rem',
-        xl: '0.5rem',
-        full: '0.75rem',
+        DEFAULT: '4px',
+        sm: '4px',
+        md: '8px',
+        lg: '12px',
+        full: '9999px',
       },
     },
   },
