@@ -4,20 +4,46 @@ import { AppShell } from '@/components/layout/AppShell';
 import { renderWithRouterAndProviders } from '@/test/renderWithProviders';
 
 describe('AppShell', () => {
-  it('renders shell chrome and route content for dashboard', () => {
+  it('renders sidebar, top bar, and route content', () => {
     renderWithRouterAndProviders(
       <Routes>
         <Route path="/" element={<AppShell />}>
           <Route path="dashboard" element={<h1>Dashboard test page</h1>} />
         </Route>
       </Routes>,
-      {
-      router: { initialEntries: ['/dashboard'] },
-      }
+      { router: { initialEntries: ['/dashboard'] } }
     );
 
-    expect(screen.getByText('SENTINEL NODE')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Dashboard test page' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Dashboard test page' })).toBeTruthy();
+    expect(screen.getByRole('navigation')).toBeTruthy();
+  });
+
+  it('renders with CSS Grid layout', () => {
+    const { container } = renderWithRouterAndProviders(
+      <Routes>
+        <Route path="/" element={<AppShell />}>
+          <Route index element={<div>Home</div>} />
+        </Route>
+      </Routes>,
+      { router: { initialEntries: ['/'] } }
+    );
+
+    const grid = container.firstChild as HTMLElement;
+    expect(grid.style.gridTemplateColumns).toBe('200px 1fr');
+    expect(grid.style.gridTemplateRows).toBe('44px 1fr');
+  });
+
+  it('no hardcoded ml-[72px] offset', () => {
+    const { container } = renderWithRouterAndProviders(
+      <Routes>
+        <Route path="/" element={<AppShell />}>
+          <Route index element={<div>Home</div>} />
+        </Route>
+      </Routes>,
+      { router: { initialEntries: ['/'] } }
+    );
+
+    expect(container.innerHTML).not.toContain('ml-[72px]');
   });
 
   it('renders sidebar with intelligence cycle navigation', () => {
