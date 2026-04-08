@@ -6,11 +6,18 @@ const tabs = [
   { id: 'strategic', label: 'Strategic' },
 ];
 
-export function TopBar() {
+interface TopBarProps {
+  sidebarWidth?: number;
+}
+
+export function TopBar({ sidebarWidth = 200 }: TopBarProps) {
   const activeTab = 'tactical';
 
   return (
-    <header className="fixed top-0 right-0 left-[72px] h-16 z-40 bg-surface/80 backdrop-blur-xl flex justify-between items-center px-8 w-full font-headline text-sm uppercase tracking-wider">
+    <header
+      className="fixed top-0 right-0 h-16 z-40 bg-surface/80 backdrop-blur-xl flex justify-between items-center px-8 w-full font-headline text-sm uppercase tracking-wider transition-all duration-200"
+      style={{ left: sidebarWidth }}
+    >
       <div className="flex items-center gap-8">
         <span className="font-black text-primary-container">SENTINEL NODE</span>
         <div className="flex gap-6">
