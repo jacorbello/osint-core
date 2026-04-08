@@ -1,64 +1,101 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { createBrowserRouter } from 'react-router-dom';
 import { AppShell } from '@/components/layout/AppShell';
 import { DashboardPage } from '@/features/dashboard/components/DashboardPage';
+import { WatchesPage } from '@/features/watches/components/WatchesPage';
+import { AlertsPage } from '@/features/alerts/components/AlertsPage';
+import { LeadsPage } from '@/features/leads/components/LeadsPage';
+import { IntelligenceMapPage } from '@/features/map/components/IntelligenceMapPage';
+import { PlaceholderPage } from '@/components/feedback/PlaceholderPage';
 
 export const router = createBrowserRouter([
   {
     path: '/',
     element: <AppShell />,
     children: [
-      { 
-        index: true, 
-        element: <Navigate to="/dashboard" replace /> 
+      {
+        index: true,
+        element: <DashboardPage />,
       },
-      { 
-        path: 'dashboard', 
-        element: <DashboardPage />
+      {
+        path: 'watches',
+        element: <WatchesPage />,
       },
-      { 
-        path: 'events', 
+      {
+        path: 'sources',
         element: (
-          <div className="p-8">
-            <h1 className="text-2xl font-headline text-primary-container">Events Explorer</h1>
-            <p className="mt-4 text-on-surface-variant">Events page coming in Phase 2</p>
-          </div>
-        )
+          <PlaceholderPage
+            icon="source"
+            title="Sources"
+            description="Source management coming soon"
+            phase="Collection"
+          />
+        ),
       },
-      { 
-        path: 'events/:eventId', 
-        element: (
-          <div className="p-8">
-            <h1 className="text-2xl font-headline text-primary-container">Event Detail</h1>
-            <p className="mt-4 text-on-surface-variant">Event detail page coming in Phase 2</p>
-          </div>
-        )
+      {
+        path: 'alerts',
+        element: <AlertsPage />,
       },
-      { 
-        path: 'plans', 
+      {
+        path: 'investigations/:id',
         element: (
-          <div className="p-8">
-            <h1 className="text-2xl font-headline text-primary-container">Plans Workspace</h1>
-            <p className="mt-4 text-on-surface-variant">Plans page coming in Phase 3</p>
-          </div>
-        )
+          <PlaceholderPage
+            icon="search_insights"
+            title="Investigations"
+            description="Investigation workspace coming soon"
+            phase="Analysis"
+          />
+        ),
       },
-      { 
-        path: 'briefs', 
+      {
+        path: 'entities/:id',
         element: (
-          <div className="p-8">
-            <h1 className="text-2xl font-headline text-primary-container">Briefs Library</h1>
-            <p className="mt-4 text-on-surface-variant">Briefs page coming in Phase 3</p>
-          </div>
-        )
+          <PlaceholderPage
+            icon="hub"
+            title="Entities"
+            description="Entity resolution coming soon"
+            phase="Analysis"
+          />
+        ),
       },
-      { 
-        path: 'briefs/:briefId', 
+      {
+        path: 'leads',
+        element: <LeadsPage />,
+      },
+      {
+        path: 'reports',
         element: (
-          <div className="p-8">
-            <h1 className="text-2xl font-headline text-primary-container">Brief Detail</h1>
-            <p className="mt-4 text-on-surface-variant">Brief detail page coming in Phase 3</p>
-          </div>
-        )
+          <PlaceholderPage
+            icon="summarize"
+            title="Reports"
+            description="Report generation coming soon"
+            phase="Production"
+          />
+        ),
+      },
+      {
+        path: 'exports',
+        element: (
+          <PlaceholderPage
+            icon="download"
+            title="Exports"
+            description="Data export coming soon"
+            phase="Production"
+          />
+        ),
+      },
+      {
+        path: 'map',
+        element: <IntelligenceMapPage />,
+      },
+      {
+        path: 'settings',
+        element: (
+          <PlaceholderPage
+            icon="settings"
+            title="Settings"
+            description="Platform settings coming soon"
+          />
+        ),
       },
     ],
   },
