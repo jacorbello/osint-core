@@ -20,7 +20,7 @@ import redis.asyncio as aioredis
 try:
     from curl_cffi import requests as cffi_requests
 except ImportError:
-    cffi_requests = None  # type: ignore[assignment]
+    cffi_requests = None  # type: ignore[assignment,unused-ignore]
 import redis.exceptions
 import soupsieve
 import structlog
