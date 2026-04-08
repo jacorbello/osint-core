@@ -3,9 +3,9 @@ export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export function getSeverityColor(severity: Severity): string {
   const colors: Record<Severity, string> = {
     critical: 'bg-error text-on-error',
-    high: 'bg-tertiary-container text-on-tertiary-container',
-    medium: 'bg-secondary-container text-on-secondary-container',
-    low: 'bg-primary-container text-on-primary-container',
+    high: 'bg-warning-container text-on-warning-container',
+    medium: 'bg-primary-container text-on-primary-container',
+    low: 'bg-surface-container-high text-text-tertiary',
     info: 'bg-surface-container-high text-on-surface',
   };
   return colors[severity] || colors.info;
@@ -14,9 +14,9 @@ export function getSeverityColor(severity: Severity): string {
 export function getSeverityBorderColor(severity: Severity): string {
   const colors: Record<Severity, string> = {
     critical: 'border-error',
-    high: 'border-tertiary-container',
-    medium: 'border-secondary-container',
-    low: 'border-primary-container',
+    high: 'border-warning',
+    medium: 'border-primary',
+    low: 'border-outline',
     info: 'border-outline-variant',
   };
   return colors[severity] || colors.info;
@@ -25,9 +25,9 @@ export function getSeverityBorderColor(severity: Severity): string {
 export function getSeverityTextColor(severity: Severity): string {
   const colors: Record<Severity, string> = {
     critical: 'text-error',
-    high: 'text-tertiary-container',
-    medium: 'text-secondary-container',
-    low: 'text-primary-container',
+    high: 'text-warning',
+    medium: 'text-primary',
+    low: 'text-text-tertiary',
     info: 'text-on-surface-variant',
   };
   return colors[severity] || colors.info;

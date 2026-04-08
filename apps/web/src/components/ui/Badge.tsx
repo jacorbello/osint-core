@@ -13,8 +13,8 @@ export function Badge({ className, variant = 'default', ...props }: BadgeProps) 
         {
           'bg-surface-container-high text-on-surface': variant === 'default',
           'bg-primary-container text-on-primary-container': variant === 'primary',
-          'bg-secondary-container text-on-secondary-container': variant === 'secondary',
-          'bg-tertiary-container text-on-tertiary-container': variant === 'tertiary',
+          'bg-surface-container text-text-secondary': variant === 'secondary',
+          'bg-warning-container text-on-warning-container': variant === 'tertiary',
           'bg-error-container text-on-error-container': variant === 'error',
         },
         className

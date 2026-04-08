@@ -5,9 +5,9 @@ import { renderWithProviders } from '@/test/renderWithProviders';
 describe('SeverityBadge', () => {
   it.each([
     { severity: 'critical', expectedClass: 'bg-error' },
-    { severity: 'high', expectedClass: 'bg-tertiary-container' },
-    { severity: 'medium', expectedClass: 'bg-secondary-container' },
-    { severity: 'low', expectedClass: 'bg-primary-container' },
+    { severity: 'high', expectedClass: 'bg-warning-container' },
+    { severity: 'medium', expectedClass: 'bg-primary-container' },
+    { severity: 'low', expectedClass: 'bg-surface-container-high' },
     { severity: 'info', expectedClass: 'bg-surface-container-high' },
   ] as const)(
     'renders $severity severity with expected visual class',

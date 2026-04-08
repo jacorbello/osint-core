@@ -9,9 +9,9 @@ interface ScorePillProps {
 export function ScorePill({ score, className }: ScorePillProps) {
   const getScoreColor = (value: number): string => {
     if (value >= 0.8) return 'bg-error text-on-error';
-    if (value >= 0.6) return 'bg-tertiary-container text-on-tertiary-container';
-    if (value >= 0.4) return 'bg-secondary-container text-on-secondary-container';
-    return 'bg-primary-container text-on-primary-container';
+    if (value >= 0.6) return 'bg-warning-container text-on-warning-container';
+    if (value >= 0.4) return 'bg-primary-container text-on-primary-container';
+    return 'bg-success-container text-on-success-container';
   };
 
   return (
