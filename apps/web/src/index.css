@@ -4,7 +4,7 @@
 
 @layer base {
   body {
-    @apply font-body bg-background text-on-background;
+    @apply font-body bg-background text-text-primary;
   }
   
   .material-symbols-outlined {
@@ -17,14 +17,14 @@
   }
   
   ::-webkit-scrollbar-track {
-    @apply bg-surface-container-lowest;
+    @apply bg-surface-dim;
   }
-  
+
   ::-webkit-scrollbar-thumb {
-    @apply bg-outline-variant rounded;
+    @apply bg-outline rounded;
   }
-  
+
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-primary-container;
+    @apply bg-primary;
   }
 }
