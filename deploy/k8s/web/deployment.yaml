@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: osint-web
+  namespace: osint
+  labels:
+    app: osint-web
+    component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: osint-web
+  template:
+    metadata:
+      labels:
+        app: osint-web
+        component: frontend
+    spec:
+      containers:
+        - name: web
+          image: harbor.corbello.io/osint/osint-web:latest  # overridden by kustomize
+          ports:
+            - containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 80
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 80
+            periodSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

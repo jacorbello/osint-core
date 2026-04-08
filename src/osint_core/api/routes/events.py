@@ -121,14 +121,14 @@ async def list_events(
 
 
 def _apply_event_filters(
-    stmt,
+    stmt: Any,
     *,
     source_id: str | None,
     severity: str | None,
     date_from: datetime | None,
     date_to: datetime | None,
     attack_technique: str | None,
-):
+) -> Any:
     if source_id is not None:
         stmt = stmt.where(Event.source_id == source_id)
     if severity is not None:
@@ -323,7 +323,9 @@ async def get_event_related(
 
     alerts: list[AlertResponse] = []
     if "alerts" in requested:
-        alert_result = await db.execute(select(Alert).where(Alert.event_ids.any(event_id)))
+        alert_result = await db.execute(
+            select(Alert).where(Alert.event_ids.any(event_id))  # type: ignore[arg-type]
+        )
         alerts = [AlertResponse.model_validate(item) for item in alert_result.scalars().all()]
 
     entities: list[EntityResponse] = []

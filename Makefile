@@ -3,7 +3,7 @@
 IMAGE := harbor.corbello.io/osint/osint-core
 SHA   := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 
-.PHONY: help format lint typecheck test check check-full build push scan dev dev-down dev-down-clean logs precommit clean
+.PHONY: help format lint typecheck test check check-full build push scan dev dev-down dev-down-clean logs precommit clean web-lint web-build-image web-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -53,3 +53,29 @@ clean: ## Remove Python cache artifacts
 	find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
+
+web-dev: ## Start frontend dev server
+	npm run web:dev
+
+web-build: ## Build frontend for production
+	npm run web:build
+
+web-test: ## Run frontend unit tests
+	npm run web:test
+
+web-test-watch: ## Run frontend unit tests in watch mode
+	npm run web:test:watch
+
+web-test-coverage: ## Run frontend unit tests with coverage
+	npm run web:test:coverage
+
+web-preview: ## Preview frontend production build
+	npm run web:preview
+
+web-lint: ## Lint frontend (mirrors CI)
+	cd apps/web && npm run lint
+
+web-build-image: ## Build frontend Docker image tagged with git SHA
+	docker build -f apps/web/Dockerfile -t $(IMAGE)-web:$(SHA) -t $(IMAGE)-web:local apps/web
+
+web-check: web-lint web-test ## Run all frontend checks (mirrors CI)

@@ -5,10 +5,6 @@ on:
     branches: [main]
   push:
     branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "LICENSE"
   workflow_dispatch:
     inputs:
       run_migrations:
@@ -21,11 +17,44 @@ env:
   IMAGE_WORKER: harbor.corbello.io/osint/osint-core-worker
   IMAGE_BEAT: harbor.corbello.io/osint/osint-core-beat
   IMAGE_CACHE: harbor.corbello.io/osint/osint-core-cache
+  IMAGE_WEB: harbor.corbello.io/osint/osint-web
+  IMAGE_WEB_CACHE: harbor.corbello.io/osint/osint-web-cache
 
 jobs:
+  # ── Stage 0: Detect changed paths ─────────────────────────────
+  changes:
+    if: ${{ !inputs.run_migrations }}
+    runs-on: osint-core-runner
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'src/**'
+              - 'tests/**'
+              - 'migrations/**'
+              - 'Dockerfile'
+              - 'pyproject.toml'
+              - 'alembic.ini'
+              - '.github/workflows/ci.yaml'
+              - 'Makefile'
+            frontend:
+              - 'apps/web/**'
+              - '.github/workflows/ci.yaml'
+              - 'Makefile'
+
   # ── Stage 1: Lint (parallel with test) ──────────────────────────
   lint:
-    if: ${{ !inputs.run_migrations }}
+    needs: changes
+    if: ${{ !inputs.run_migrations && needs.changes.outputs.backend == 'true' }}
     runs-on: osint-core-runner
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +80,8 @@ jobs:
 
   # ── Stage 1: Test (parallel with lint) ──────────────────────────
   test:
-    if: ${{ !inputs.run_migrations }}
+    needs: changes
+    if: ${{ !inputs.run_migrations && needs.changes.outputs.backend == 'true' }}
     runs-on: osint-core-runner
     steps:
       - uses: actions/checkout@v4
@@ -75,8 +105,11 @@ jobs:
   # ── Stage 2: Build + push Docker image (main only) ─────────────
   build:
     runs-on: osint-core-runner
-    needs: [lint, test]
-    if: github.ref == 'refs/heads/main' && !inputs.run_migrations
+    needs: [changes, lint, test]
+    if: >-
+      github.ref == 'refs/heads/main'
+      && !inputs.run_migrations
+      && needs.changes.outputs.backend == 'true'
     outputs:
       digest_api: ${{ steps.build_api.outputs.digest }}
       digest_worker: ${{ steps.build_worker.outputs.digest }}
@@ -214,7 +247,7 @@ jobs:
   # ── Stage 3.5: Run database migrations (main only) ──────────────
   migrate:
     runs-on: osint-core-runner
-    needs: [build, scan]
+    needs: [changes, build, scan]
     if: >-
       always()
       && github.ref == 'refs/heads/main'
@@ -251,15 +284,145 @@ jobs:
           OSINT_DATABASE_URL: ${{ secrets.OSINT_DATABASE_URL }}
         run: python -m alembic current
 
+  # ── Stage 1: Lint frontend (parallel with backend) ────────────
+  lint-web:
+    needs: changes
+    if: ${{ !inputs.run_migrations && needs.changes.outputs.frontend == 'true' }}
+    runs-on: osint-core-runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: apps/web
+
+      - name: Lint (eslint)
+        run: npm run lint
+        working-directory: apps/web
+
+  # ── Stage 1: Test frontend (parallel with backend) ────────────
+  test-web:
+    needs: changes
+    if: ${{ !inputs.run_migrations && needs.changes.outputs.frontend == 'true' }}
+    runs-on: osint-core-runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: apps/web
+
+      - name: Test (vitest)
+        run: npm run test
+        working-directory: apps/web
+
+  # ── Stage 2: Build + push frontend Docker image (main only) ───
+  build-web:
+    runs-on: osint-core-runner
+    needs: [changes, lint-web, test-web]
+    if: >-
+      github.ref == 'refs/heads/main'
+      && !inputs.run_migrations
+      && needs.changes.outputs.frontend == 'true'
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      short_sha: ${{ steps.vars.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set variables
+        id: vars
+        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Harbor
+        uses: docker/login-action@v3
+        with:
+          registry: harbor.corbello.io
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Build and push web
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/web
+          push: true
+          tags: |
+            ${{ env.IMAGE_WEB }}:${{ github.sha }}
+            ${{ env.IMAGE_WEB }}:${{ steps.vars.outputs.short_sha }}
+            ${{ env.IMAGE_WEB }}:latest
+          cache-from: type=registry,ref=${{ env.IMAGE_WEB_CACHE }}
+          cache-to: type=registry,ref=${{ env.IMAGE_WEB_CACHE }},mode=max
+
+  # ── Stage 3: Security scan frontend (main only, non-blocking) ─
+  scan-web:
+    runs-on: osint-core-runner
+    needs: build-web
+    continue-on-error: true
+    if: >-
+      github.ref == 'refs/heads/main'
+      && needs.build-web.result == 'success'
+      && !inputs.run_migrations
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull image
+        run: docker pull "${{ env.IMAGE_WEB }}@${{ needs.build-web.outputs.digest }}"
+
+      - name: Run Trivy vulnerability scanner
+        env:
+          TRIVY_DB_REPOSITORY: "ghcr.io/aquasecurity/trivy-db"
+        run: |
+          docker run --rm \
+            -e TRIVY_DB_REPOSITORY \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/workspace" \
+            aquasec/trivy:0.56.1 image \
+              --timeout 5m0s \
+              --format sarif \
+              --output /workspace/trivy-results-web.sarif \
+              --severity HIGH,CRITICAL \
+              --ignore-unfixed \
+              --exit-code 1 \
+              "${{ env.IMAGE_WEB }}@${{ needs.build-web.outputs.digest }}"
+
+      - name: Upload Trivy scan to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('trivy-results-web.sarif') != ''
+        with:
+          sarif_file: trivy-results-web.sarif
+          category: trivy-web
+
   # ── Stage 4: Deploy to K8s via GitOps (main only) ──────────────
   deploy:
     runs-on: osint-core-runner
-    needs: [build, scan, migrate]
+    needs: [changes, build, scan, migrate, build-web, scan-web]
     if: >-
-      github.ref == 'refs/heads/main'
-      && needs.build.result == 'success'
-      && needs.migrate.result == 'success'
+      always()
+      && github.ref == 'refs/heads/main'
       && !inputs.run_migrations
+      && (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true')
+      && (needs.changes.outputs.backend != 'true' || needs.build.result == 'success')
+      && (needs.changes.outputs.frontend != 'true' || needs.build-web.result == 'success')
+      && (needs.changes.outputs.backend != 'true' || needs.migrate.result == 'success')
     concurrency:
       group: osint-infra-deploy
       cancel-in-progress: false
@@ -273,8 +436,6 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.DEPLOY_KEY_INFRA }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          # Pinned GitHub SSH host keys (from https://api.github.com/meta)
-          # Avoids TOFU risk of ssh-keyscan at runtime
           cat > /tmp/github_known_hosts <<'KEYS'
           github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
           github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=
@@ -284,44 +445,68 @@ jobs:
       - name: Install kustomize
         uses: imranismail/setup-kustomize@v2.1.0
 
-      - name: Clone cortech-infra and update image tag
+      - name: Clone cortech-infra and update image tags
         env:
           GIT_SSH_COMMAND: "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/tmp/github_known_hosts"
-          SHORT_SHA: ${{ needs.build.outputs.short_sha }}
+          SHORT_SHA: ${{ needs.build.outputs.short_sha || needs.build-web.outputs.short_sha }}
           FULL_SHA: ${{ github.sha }}
-          DIGEST: ${{ needs.build.outputs.digest_api }}
+          DIGEST_API: ${{ needs.build.outputs.digest_api }}
+          DIGEST_WEB: ${{ needs.build-web.outputs.digest }}
+          BACKEND_CHANGED: ${{ needs.build.result == 'success' }}
+          FRONTEND_CHANGED: ${{ needs.build-web.result == 'success' }}
           RUN_ID: ${{ github.run_id }}
         run: |
           rm -rf /tmp/cortech-infra
           git clone git@github.com:jacorbello/cortech-infra.git /tmp/cortech-infra
           cd /tmp/cortech-infra
 
-          # kustomize edit operates on the current directory
-          (cd apps/osint/overlays/production && kustomize edit set image ${{ env.IMAGE }}:${SHORT_SHA})
+          OVERLAY="apps/osint/overlays/production"
 
-          # No-op if image tag is already current
+          # Update backend image if backend was built
+          if [ "$BACKEND_CHANGED" = "true" ]; then
+            (cd "$OVERLAY" && kustomize edit set image harbor.corbello.io/osint/osint-core:${SHORT_SHA})
+          fi
+
+          # Update frontend image if frontend was built
+          if [ "$FRONTEND_CHANGED" = "true" ]; then
+            (cd "$OVERLAY" && kustomize edit set image harbor.corbello.io/osint/osint-web:${SHORT_SHA})
+          fi
+
+          # No-op if image tags are already current
           if git diff --quiet; then
-            echo "::notice::Image tag already up to date — no deploy needed."
+            echo "::notice::Image tags already up to date — no deploy needed."
             exit 0
           fi
 
           # Assert only the expected file changed
           CHANGED=$(git diff --name-only)
-          if [ "$CHANGED" != "apps/osint/overlays/production/kustomization.yaml" ]; then
+          if [ "$CHANGED" != "${OVERLAY}/kustomization.yaml" ]; then
             echo "::error::Unexpected files changed: ${CHANGED}"
             exit 1
           fi
 
+          # Build commit message
+          MSG="deploy(osint): update"
+          if [ "$BACKEND_CHANGED" = "true" ]; then
+            MSG="$MSG osint-core"
+          fi
+          if [ "$FRONTEND_CHANGED" = "true" ]; then
+            [ "$BACKEND_CHANGED" = "true" ] && MSG="$MSG +" || true
+            MSG="$MSG osint-web"
+          fi
+          MSG="$MSG to ${SHORT_SHA}"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add apps/osint/overlays/production/kustomization.yaml
-          git commit -m "deploy(osint): update osint-core to ${SHORT_SHA}
+          git add "${OVERLAY}/kustomization.yaml"
+          git commit -m "$MSG
 
           Source: jacorbello/osint-core@${FULL_SHA}
           Workflow: https://github.com/jacorbello/osint-core/actions/runs/${RUN_ID}
-          ArgoCD: osint-platform (apps/osint/overlays/production)
-          Digest: ${DIGEST}"
+          ArgoCD: osint-platform (${OVERLAY})
+          Backend digest: ${DIGEST_API:-skipped}
+          Frontend digest: ${DIGEST_WEB:-skipped}"
 
           # Push with one retry on conflict
           if ! git push origin main; then

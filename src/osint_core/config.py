@@ -108,7 +108,15 @@ class Settings(BaseSettings):
     plan_dir: str = "/app/plans"
     log_level: str = "INFO"
     api_prefix: str = "/api/v1"
-    cors_origins: list[str] = Field(default=["*"])
+    cors_origins: list[str] = Field(
+        default=[
+            "https://osint.corbello.io",
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001",
+        ]
+    )
 
 
 settings = Settings()

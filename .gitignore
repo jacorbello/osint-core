@@ -22,6 +22,8 @@ var/
 wheels/
 *.egg-info/
 *.egg
+!apps/web/src/lib/
+!apps/web/src/lib/**
 
 # Virtual environments
 .venv/
@@ -84,3 +86,9 @@ docker-compose.override.yml
 .worktrees/
 .worktrees/
 .claude/
+
+# Frontend
+apps/web/node_modules
+apps/web/dist
+apps/web/.env.local
+apps/web/.env.production
