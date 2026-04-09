@@ -1,7 +1,7 @@
 import { useDashboardSummaryQuery } from '../api/dashboardQueries';
 import { SummaryStrip } from './SummaryStrip';
 import { OperationalMapPanel } from './OperationalMapPanel';
-import { RealtimeActivityRail } from './RealtimeActivityRail';
+import { ActivityFeed } from './ActivityFeed';
 import { PriorityAlertsList } from './PriorityAlertsList';
 import { LeadsTableWidget } from './LeadsTableWidget';
 import type { ProblemDetails } from '@/types/api/common';
@@ -32,7 +32,7 @@ export function DashboardPage() {
         {/* Map + activity rail row */}
         <div className="flex gap-4 h-[540px] flex-shrink-0">
           <OperationalMapPanel />
-          <RealtimeActivityRail />
+          <ActivityFeed />
         </div>
 
         {/* Table grid */}

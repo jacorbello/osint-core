@@ -78,13 +78,13 @@ describe('DashboardPage', () => {
     });
   });
 
-  it('renders realtime activity rail', async () => {
+  it('renders activity feed', async () => {
     vi.spyOn(dashboardApi, 'getDashboardSummary').mockResolvedValue(mockSummary);
 
     renderWithRouterAndProviders(<DashboardPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Realtime Activity')).toBeInTheDocument();
+      expect(screen.getByText('Activity')).toBeInTheDocument();
     });
   });
 
