@@ -37,6 +37,7 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
   return <SidebarContext.Provider value={value}>{children}</SidebarContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useSidebar(): SidebarContextValue {
   const ctx = useContext(SidebarContext);
   if (!ctx) {
