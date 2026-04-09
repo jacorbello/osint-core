@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useLeadsQuery } from '@/features/leads/api/leadsQueries';
 import { formatRelativeTime } from '@/lib/utils/format';
 import { cn } from '@/lib/utils/cn';
@@ -8,11 +9,11 @@ import type { LeadStatusEnum } from '@/types/api/lead';
 import type { ProblemDetails } from '@/types/api/common';
 
 
-function StatusText({ status }: { status: LeadStatusEnum }) {
+function StatusBadge({ status }: { status: LeadStatusEnum }) {
   const colors: Partial<Record<LeadStatusEnum, string>> = {
     new: 'text-primary',
     reviewing: 'text-secondary',
-    qualified: 'text-on-secondary-container',
+    qualified: 'text-success',
     contacted: 'text-tertiary-container',
     retained: 'text-on-primary-container',
     declined: 'text-error',
@@ -27,14 +28,19 @@ function StatusText({ status }: { status: LeadStatusEnum }) {
 
 function ConfidenceBar({ confidence }: { confidence: number | null }) {
   if (confidence === null) {
-    return <span className="text-[9px] text-outline">—</span>;
+    return <span className="text-[9px] text-outline">&mdash;</span>;
   }
   const pct = Math.round(confidence * 100);
-  const fillColor = pct >= 70 ? 'bg-primary-container' : 'bg-tertiary-container';
+  const fillColor =
+    pct >= 70
+      ? 'bg-primary'
+      : pct >= 40
+        ? 'bg-warning'
+        : 'bg-text-muted';
 
   return (
     <div className="flex items-center gap-2">
-      <div className="w-10 h-1.5 bg-surface-container-high rounded overflow-hidden">
+      <div className="w-10 h-1 bg-surface-container-high rounded overflow-hidden">
         <div className={cn('h-full rounded', fillColor)} style={{ width: `${pct}%` }} />
       </div>
       <span className="text-[9px] text-on-surface-variant">{pct}%</span>
@@ -43,18 +49,21 @@ function ConfidenceBar({ confidence }: { confidence: number | null }) {
 }
 
 export function LeadsTableWidget() {
-  const { data, isLoading, error } = useLeadsQuery({ limit: 10 });
+  const { data, isLoading, error } = useLeadsQuery({ limit: 7 });
 
   return (
     <div className="bg-surface-container-low rounded-lg border border-outline-variant/10 overflow-hidden flex flex-col h-[350px]">
       <div className="p-4 border-b border-outline-variant/10 flex justify-between items-center flex-shrink-0">
         <h3 className="font-headline font-bold text-sm tracking-tight flex items-center gap-2 text-on-surface">
           <span className="material-symbols-outlined text-primary text-lg">person_pin_circle</span>
-          High Value Leads
+          Recent Leads
         </h3>
-        <button className="text-[10px] font-bold text-primary uppercase hover:underline tracking-wider">
-          Export CSV
-        </button>
+        <Link
+          to="/leads"
+          className="text-[10px] font-bold text-primary uppercase hover:underline tracking-wider"
+        >
+          View all &rarr;
+        </Link>
       </div>
 
       <div className="flex-1 overflow-auto">
@@ -83,8 +92,8 @@ export function LeadsTableWidget() {
           <table className="w-full text-left border-collapse">
             <thead className="sticky top-0 bg-surface-container-high shadow-sm">
               <tr className="text-[9px] font-bold uppercase text-outline tracking-wider">
-                <th className="px-4 py-2">Lead Type</th>
-                <th className="px-4 py-2">Jurisdiction</th>
+                <th className="px-4 py-2">Lead</th>
+                <th className="px-4 py-2">Type</th>
                 <th className="px-4 py-2">Conf.</th>
                 <th className="px-4 py-2">Status</th>
                 <th className="px-4 py-2">Updated</th>
@@ -99,17 +108,17 @@ export function LeadsTableWidget() {
                     idx % 2 === 0 ? 'bg-surface-container-lowest' : ''
                   )}
                 >
-                  <td className="px-4 py-3 font-medium text-on-surface">
-                    {lead.lead_type.toUpperCase()}
+                  <td className="px-4 py-3 font-medium text-on-surface max-w-[160px] truncate">
+                    {lead.title}
                   </td>
                   <td className="px-4 py-3 text-outline">
-                    {lead.jurisdiction ?? '—'}
+                    {lead.lead_type.toUpperCase()}
                   </td>
                   <td className="px-4 py-3">
                     <ConfidenceBar confidence={lead.confidence} />
                   </td>
                   <td className="px-4 py-3">
-                    <StatusText status={lead.status} />
+                    <StatusBadge status={lead.status} />
                   </td>
                   <td className="px-4 py-3 text-outline whitespace-nowrap">
                     {formatRelativeTime(lead.last_updated_at)}
