@@ -2,7 +2,7 @@ import { useDashboardSummaryQuery } from '../api/dashboardQueries';
 import { SummaryStrip } from './SummaryStrip';
 import { OperationalMapPanel } from './OperationalMapPanel';
 import { RealtimeActivityRail } from './RealtimeActivityRail';
-import { AlertsTableWidget } from './AlertsTableWidget';
+import { PriorityAlertsList } from './PriorityAlertsList';
 import { LeadsTableWidget } from './LeadsTableWidget';
 import type { ProblemDetails } from '@/types/api/common';
 
@@ -37,7 +37,7 @@ export function DashboardPage() {
 
         {/* Table grid */}
         <div className="grid grid-cols-2 gap-4 flex-shrink-0">
-          <AlertsTableWidget />
+          <PriorityAlertsList />
           <LeadsTableWidget />
         </div>
       </div>
