@@ -8,6 +8,10 @@ export interface LeadsListParams {
   jurisdiction?: string;
   lead_type?: LeadTypeEnum;
   plan_id?: string;
+  confidence_min?: number;
+  confidence_max?: number;
+  sort_by?: string;
+  sort_dir?: 'asc' | 'desc';
 }
 
 export async function getLeads(params: LeadsListParams = {}): Promise<LeadList> {
