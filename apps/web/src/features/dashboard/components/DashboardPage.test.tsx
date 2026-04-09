@@ -88,13 +88,13 @@ describe('DashboardPage', () => {
     });
   });
 
-  it('renders priority alerts widget', async () => {
+  it('renders system alerts widget', async () => {
     vi.spyOn(dashboardApi, 'getDashboardSummary').mockResolvedValue(mockSummary);
 
     renderWithRouterAndProviders(<DashboardPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Priority Alerts')).toBeInTheDocument();
+      expect(screen.getByText('System Alerts')).toBeInTheDocument();
     });
   });
 });

@@ -1,6 +1,6 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { AppShell } from '@/components/layout/AppShell';
-import { DashboardPage } from '@/features/dashboard/components/DashboardPage';
+import { OverviewPage } from '@/features/dashboard/components/OverviewPage';
 import { WatchesPage } from '@/features/watches/components/WatchesPage';
 import { AlertsPage } from '@/features/alerts/components/AlertsPage';
 import { LeadsPage } from '@/features/leads/components/LeadsPage';
@@ -14,7 +14,7 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <DashboardPage />,
+        element: <OverviewPage />,
       },
       {
         path: 'watches',

@@ -3,8 +3,8 @@ import { createMemoryRouter, Outlet, RouterProvider } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { router } from './router';
 
-vi.mock('@/features/dashboard/components/DashboardPage', () => ({
-  DashboardPage: () => <div data-testid="overview-page">OverviewPage</div>,
+vi.mock('@/features/dashboard/components/OverviewPage', () => ({
+  OverviewPage: () => <div data-testid="overview-page">OverviewPage</div>,
 }));
 vi.mock('@/features/watches/components/WatchesPage', () => ({
   WatchesPage: () => <div data-testid="watches-page">WatchesPage</div>,
