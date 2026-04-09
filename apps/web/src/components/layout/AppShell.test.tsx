@@ -2,6 +2,12 @@ import { screen } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
 import { AppShell } from '@/components/layout/AppShell';
 import { renderWithRouterAndProviders } from '@/test/renderWithProviders';
+import { vi } from 'vitest';
+
+// Mock useSSEFeed used by TopBar
+vi.mock('@/features/stream/hooks/useSSEFeed', () => ({
+  useSSEFeed: () => ({ events: [], connected: true }),
+}));
 
 describe('AppShell', () => {
   it('renders sidebar, top bar, and route content', () => {
@@ -14,6 +20,8 @@ describe('AppShell', () => {
       { router: { initialEntries: ['/dashboard'] } }
     );
 
+    // TopBar renders dynamic page title instead of branding
+    expect(screen.getByRole('heading', { name: 'Overview' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Dashboard test page' })).toBeTruthy();
     expect(screen.getByRole('navigation')).toBeTruthy();
   });
@@ -53,14 +61,12 @@ describe('AppShell', () => {
           <Route path="dashboard" element={<div>content</div>} />
         </Route>
       </Routes>,
-      {
-      router: { initialEntries: ['/dashboard'] },
-      }
+      { router: { initialEntries: ['/dashboard'] } }
     );
 
-    expect(screen.getByText('OSINT Core')).toBeInTheDocument();
-    expect(screen.getByText('COLLECT')).toBeInTheDocument();
-    expect(screen.getByText('ANALYZE')).toBeInTheDocument();
-    expect(screen.getByText('PRODUCE')).toBeInTheDocument();
+    expect(screen.getByText('OSINT Core')).toBeTruthy();
+    expect(screen.getByText('COLLECT')).toBeTruthy();
+    expect(screen.getByText('ANALYZE')).toBeTruthy();
+    expect(screen.getByText('PRODUCE')).toBeTruthy();
   });
 });

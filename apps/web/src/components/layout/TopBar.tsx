@@ -1,58 +1,86 @@
+import { useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils/cn';
+import { useSSEFeed } from '@/features/stream/hooks/useSSEFeed';
 
-const tabs = [
-  { id: 'global', label: 'Global' },
-  { id: 'tactical', label: 'Tactical' },
-  { id: 'strategic', label: 'Strategic' },
-];
+const ROUTE_TITLES: Record<string, string> = {
+  '/': 'Overview',
+  '/dashboard': 'Overview',
+  '/watches': 'Watches',
+  '/sources': 'Sources',
+  '/alerts': 'Alerts',
+  '/investigations': 'Investigations',
+  '/entities': 'Entities',
+  '/leads': 'Leads',
+  '/reports': 'Reports',
+  '/exports': 'Exports',
+  '/map': 'Intelligence Map',
+  '/settings': 'Settings',
+};
 
-interface TopBarProps {
-  sidebarWidth?: number;
+function getPageTitle(pathname: string): string {
+  if (ROUTE_TITLES[pathname]) return ROUTE_TITLES[pathname];
+
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments.length > 0) {
+    const parent = `/${segments[0]}`;
+    if (ROUTE_TITLES[parent]) return ROUTE_TITLES[parent];
+  }
+
+  return 'Overview';
 }
 
-export function TopBar({ sidebarWidth = 200 }: TopBarProps) {
-  const activeTab = 'tactical';
+export function TopBar() {
+  const location = useLocation();
+  const { connected } = useSSEFeed('/api/stream');
+  const pageTitle = getPageTitle(location.pathname);
 
   return (
     <header
-      className="fixed top-0 right-0 h-16 z-40 bg-surface/80 backdrop-blur-xl flex justify-between items-center px-8 w-full font-headline text-sm uppercase tracking-wider transition-all duration-200"
-      style={{ left: sidebarWidth }}
+      className="h-[44px] bg-surface border-b border-outline-variant flex items-center justify-between px-6"
     >
-      <div className="flex items-center gap-8">
-        <span className="font-black text-primary-container">SENTINEL NODE</span>
-        <div className="flex gap-6">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              className={cn(
-                'transition-all',
-                activeTab === tab.id
-                  ? 'text-primary-container font-bold border-b-2 border-primary-container'
-                  : 'text-secondary opacity-70 hover:text-primary-container'
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Page title */}
+      <h1 className="text-sm font-headline font-semibold text-on-surface">
+        {pageTitle}
+      </h1>
 
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-2 px-3 py-1 bg-surface-container-high rounded text-[10px] font-bold text-primary-container animate-pulse">
-          <span className="w-2 h-2 rounded-full bg-primary-container"></span>
-          STREAM ACTIVE
+      <div className="flex items-center gap-4">
+        {/* Cmd+K search trigger */}
+        <button
+          type="button"
+          aria-label="Open search"
+          className="flex items-center gap-2 h-7 px-3 rounded bg-surface-container text-text-muted text-xs font-body border border-outline-variant hover:border-outline transition-colors cursor-pointer"
+        >
+          <span className="text-text-tertiary">{'\u2318'}K</span>
+          <span>Search...</span>
+        </button>
+
+        {/* Connection status */}
+        <div className="flex items-center gap-1.5 text-xs font-body" data-testid="connection-status">
+          <span
+            className={cn(
+              'w-2 h-2 rounded-full',
+              connected ? 'bg-success' : 'bg-error'
+            )}
+          />
+          <span className={cn(
+            connected ? 'text-on-surface-variant' : 'text-error'
+          )}>
+            {connected ? 'Connected' : 'Disconnected'}
+          </span>
         </div>
-        <div className="flex items-center gap-4 text-secondary">
-          <button className="hover:text-primary-container cursor-pointer transition-colors">
-            <span className="material-symbols-outlined">notifications</span>
-          </button>
-          <button className="hover:text-primary-container cursor-pointer transition-colors">
-            <span className="material-symbols-outlined">shield</span>
-          </button>
-          <div className="w-8 h-8 rounded-full overflow-hidden border border-primary-container/30 bg-surface-container-high flex items-center justify-center">
-            <span className="material-symbols-outlined text-primary-container text-sm">person</span>
-          </div>
-        </div>
+
+        {/* Notification bell */}
+        <button
+          type="button"
+          aria-label="Notifications"
+          className="relative text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
+        >
+          <span className="material-symbols-outlined text-[20px]">notifications</span>
+          <span
+            className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-error"
+            data-testid="notification-indicator"
+          />
+        </button>
       </div>
     </header>
   );
