@@ -1,8 +1,6 @@
-import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils/cn';
-
-const STORAGE_KEY = 'osint-sidebar-collapsed';
+import { useSidebar } from './SidebarContext';
 
 interface NavItem {
   path: string;
@@ -42,35 +40,15 @@ const sections: NavSection[] = [
   },
 ];
 
-function getInitialCollapsed(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-interface SidebarProps {
-  onCollapseChange?: (collapsed: boolean) => void;
-}
-
-export function Sidebar({ onCollapseChange }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(getInitialCollapsed);
+export function Sidebar() {
+  const { collapsed, toggleCollapsed } = useSidebar();
   const location = useLocation();
-
-  function toggleCollapsed() {
-    const next = !collapsed;
-    setCollapsed(next);
-    localStorage.setItem(STORAGE_KEY, String(next));
-    onCollapseChange?.(next);
-  }
 
   return (
     <aside
       data-testid="sidebar"
       className={cn(
-        'h-screen fixed left-0 top-0 z-50 bg-surface flex flex-col font-headline tracking-tight transition-all duration-200 overflow-hidden border-r border-outline-variant',
-        collapsed ? 'w-12' : 'w-[200px]'
+        'h-screen bg-surface flex flex-col font-headline tracking-tight overflow-hidden border-r border-outline-variant'
       )}
     >
       {/* Branding */}
