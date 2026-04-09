@@ -35,7 +35,7 @@ export type JobStatusEnum = 'queued' | 'running' | 'succeeded' | 'failed' | 'par
 
 export type LeadStatusEnum = 'new' | 'reviewing' | 'qualified' | 'contacted' | 'retained' | 'declined' | 'stale';
 
-export type WatchStatusEnum = 'active' | 'paused' | 'archived';
+export type WatchStatusEnum = 'active' | 'paused' | 'expired' | 'promoted';
 
 export type RetentionClassEnum = 'ephemeral' | 'standard' | 'evidentiary';
 
