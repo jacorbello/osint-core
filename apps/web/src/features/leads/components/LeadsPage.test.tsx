@@ -106,12 +106,12 @@ describe('LeadsPage', () => {
     mockUseLeadsQuery.mockReturnValue(mockQueryReturn(mockLeads));
     renderWithRouterAndProviders(<LeadsPage />);
 
-    expect(screen.getByText('Lead')).toBeInTheDocument();
-    expect(screen.getByText('Type')).toBeInTheDocument();
-    expect(screen.getByText('Jurisdiction')).toBeInTheDocument();
-    expect(screen.getByText('Confidence')).toBeInTheDocument();
-    expect(screen.getByText('Status')).toBeInTheDocument();
-    expect(screen.getByText('Updated')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /Lead/ })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /Type/ })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /Jurisdiction/ })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /Confidence/ })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /Status/ })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /Updated/ })).toBeInTheDocument();
   });
 
   it('renders lead data in table rows', () => {
