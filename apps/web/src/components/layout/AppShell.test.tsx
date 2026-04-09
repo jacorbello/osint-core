@@ -19,4 +19,22 @@ describe('AppShell', () => {
     expect(screen.getByText('SENTINEL NODE')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Dashboard test page' })).toBeInTheDocument();
   });
+
+  it('renders sidebar with intelligence cycle navigation', () => {
+    renderWithRouterAndProviders(
+      <Routes>
+        <Route path="/" element={<AppShell />}>
+          <Route path="dashboard" element={<div>content</div>} />
+        </Route>
+      </Routes>,
+      {
+      router: { initialEntries: ['/dashboard'] },
+      }
+    );
+
+    expect(screen.getByText('OSINT Core')).toBeInTheDocument();
+    expect(screen.getByText('COLLECT')).toBeInTheDocument();
+    expect(screen.getByText('ANALYZE')).toBeInTheDocument();
+    expect(screen.getByText('PRODUCE')).toBeInTheDocument();
+  });
 });
