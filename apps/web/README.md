@@ -34,7 +34,7 @@ src/
 │   └── providers.tsx      # Query client provider
 ├── components/
 │   ├── ui/                # Radix wrappers (Button, Input, Dialog, etc.)
-│   ├── layout/            # AppShell, TopBar, SideNav
+│   ├── layout/            # AppShell, TopBar, Sidebar
 │   ├── data-display/      # KeyValueList, Badge, Timestamp, etc.
 │   ├── feedback/          # EmptyState, ErrorBanner, Skeleton
 │   ├── events/            # (Phase 2) Event-specific components
