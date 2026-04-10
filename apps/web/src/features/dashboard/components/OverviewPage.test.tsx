@@ -5,6 +5,15 @@ import * as dashboardApi from '../api/dashboardApi';
 import type { DashboardSummaryResponse } from '@/types/api/ui';
 
 vi.mock('../api/dashboardApi');
+vi.mock('react-leaflet', () => ({
+  MapContainer: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="leaflet-map">{children}</div>
+  ),
+  TileLayer: () => <div />,
+  CircleMarker: () => <div />,
+  useMapEvents: () => null,
+}));
+vi.mock('leaflet/dist/leaflet.css', () => ({}));
 vi.mock('@/features/alerts/api/alertsQueries', () => ({
   useAlertsQuery: () => ({ data: undefined, isLoading: false, error: null }),
 }));
@@ -67,13 +76,13 @@ describe('OverviewPage', () => {
     });
   });
 
-  it('renders MiniMap placeholder', async () => {
+  it('renders MiniMap in left column', async () => {
     vi.spyOn(dashboardApi, 'getDashboardSummary').mockResolvedValue(mockSummary);
 
     renderWithRouterAndProviders(<OverviewPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('mini-map-placeholder')).toBeInTheDocument();
+      expect(screen.getByTestId('minimap-collapsed')).toBeInTheDocument();
     });
   });
 
