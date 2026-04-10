@@ -3,6 +3,7 @@ import { StatusCard, type BreakdownItem } from '@/components/data-display/Status
 import { PriorityAlertsList } from './PriorityAlertsList';
 import { LeadsTableWidget } from './LeadsTableWidget';
 import { ActivityFeed } from './ActivityFeed';
+import { MiniMap } from './MiniMap';
 import { SkeletonBlock } from '@/components/feedback/SkeletonBlock';
 import { ErrorBanner } from '@/components/feedback/ErrorBanner';
 import type { ProblemDetails } from '@/types/api/common';
@@ -87,25 +88,6 @@ function StatusCardsRow({
   );
 }
 
-function MiniMapPlaceholder() {
-  return (
-    <div
-      className="bg-surface-container-low rounded-lg border border-outline-variant/10 p-4 flex items-center justify-center min-h-[120px]"
-      data-testid="mini-map-placeholder"
-    >
-      <div className="text-center">
-        <span className="material-symbols-outlined text-2xl text-outline mb-1 block">map</span>
-        <p className="text-xs text-on-surface-variant">
-          Map &mdash;{' '}
-          <a href="/map" className="text-primary hover:underline">
-            expand to /map
-          </a>
-        </p>
-      </div>
-    </div>
-  );
-}
-
 export function OverviewPage() {
   const { data: summary, isLoading, error } = useDashboardSummaryQuery();
 
@@ -129,7 +111,7 @@ export function OverviewPage() {
         <div className="flex-1 overflow-y-auto flex flex-col gap-4 min-w-0">
           <PriorityAlertsList />
           <LeadsTableWidget />
-          <MiniMapPlaceholder />
+          <MiniMap />
         </div>
 
         {/* Right rail - ActivityFeed scrolls independently */}
