@@ -48,6 +48,11 @@ export function TopBar() {
         <button
           type="button"
           aria-label="Open search"
+          onClick={() => {
+            document.dispatchEvent(
+              new KeyboardEvent('keydown', { key: 'k', metaKey: true })
+            );
+          }}
           className="flex items-center gap-2 h-7 px-3 rounded bg-surface-container text-text-muted text-xs font-body border border-outline-variant hover:border-outline transition-colors cursor-pointer"
         >
           <span className="text-text-tertiary">{'\u2318'}K</span>

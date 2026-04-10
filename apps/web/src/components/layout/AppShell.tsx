@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import { SidebarProvider, useSidebar } from './SidebarContext';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
+import { CommandPalette } from '@/components/ui/CommandPalette';
 
 function AppShellInner() {
   const { collapsed } = useSidebar();
@@ -21,6 +22,7 @@ function AppShellInner() {
       <main className="overflow-auto">
         <Outlet />
       </main>
+      <CommandPalette />
     </div>
   );
 }
