@@ -1,26 +1,12 @@
 import { useMemo } from 'react';
 import { MapFilterPanel, type MapMarkerItem } from './MapFilterPanel';
-import { useAlertsQuery } from '@/features/alerts/api/alertsQueries';
-import { useLeadsQuery } from '@/features/leads/api/leadsQueries';
-import { useWatchesListQuery } from '@/features/watches/api/watchesQueries';
+import { useEventsListQuery } from '@/features/events/api/eventsQueries';
 import { MapCanvas } from './MapCanvas';
 import { useMapState } from '../hooks/useMapState';
 
 /** Default center (Washington DC) and zoom */
 const DEFAULT_CENTER: [number, number] = [38.9, -77.0];
 const DEFAULT_ZOOM = 4;
-
-/**
- * Deterministic lat/lng from a string id.
- * Real data would come from the API; this generates stable positions for demo.
- */
-function hashToCoord(id: string, base: number, range: number): number {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  }
-  return base + (((hash % 1000) + 1000) % 1000) / 1000 * range;
-}
 
 export function IntelligenceMapPage() {
   const {
@@ -35,59 +21,24 @@ export function IntelligenceMapPage() {
     setBounds,
   } = useMapState();
 
-  const { data: alertsData } = useAlertsQuery({ limit: 200 });
-  const { data: leadsData } = useLeadsQuery({ limit: 200 });
-  const { data: watchesData } = useWatchesListQuery({ limit: 200 });
+  const { data: eventsData } = useEventsListQuery({ limit: 500 });
 
   const markers: MapMarkerItem[] = useMemo(() => {
-    const items: MapMarkerItem[] = [];
+    if (!eventsData?.items) return [];
 
-    if (alertsData?.items) {
-      for (const alert of alertsData.items) {
-        items.push({
-          id: alert.id,
-          type: 'alerts',
-          title: alert.title,
-          severity: alert.severity,
-          lat: hashToCoord(alert.id, 25, 25),
-          lng: hashToCoord(alert.id + 'lng', -120, 60),
-          timestamp: alert.last_fired_at,
-          summary: alert.summary,
-        });
-      }
-    }
-
-    if (leadsData?.items) {
-      for (const lead of leadsData.items) {
-        items.push({
-          id: lead.id,
-          type: 'leads',
-          title: lead.title,
-          severity: lead.severity ?? 'medium',
-          lat: hashToCoord(lead.id, 25, 25),
-          lng: hashToCoord(lead.id + 'lng', -120, 60),
-          timestamp: lead.last_updated_at,
-          summary: lead.summary,
-        });
-      }
-    }
-
-    if (watchesData?.items) {
-      for (const watch of watchesData.items) {
-        items.push({
-          id: watch.id,
-          type: 'watches',
-          title: watch.name,
-          severity: watch.severity_threshold ?? 'low',
-          lat: hashToCoord(watch.id, 25, 25),
-          lng: hashToCoord(watch.id + 'lng', -120, 60),
-          timestamp: watch.created_at,
-        });
-      }
-    }
-
-    return items;
-  }, [alertsData, leadsData, watchesData]);
+    return eventsData.items
+      .filter((event) => event.latitude != null && event.longitude != null)
+      .map((event) => ({
+        id: event.id,
+        type: 'events' as const,
+        title: event.title ?? 'Untitled event',
+        severity: event.severity ?? 'medium',
+        lat: event.latitude!,
+        lng: event.longitude!,
+        timestamp: event.occurred_at ?? event.ingested_at,
+        summary: event.summary,
+      }));
+  }, [eventsData]);
 
   const filteredMarkers = useMemo(() => {
     return markers.filter((m) => {

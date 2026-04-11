@@ -2,12 +2,8 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithRouterAndProviders } from '@/test/renderWithProviders';
 import { IntelligenceMapPage } from './IntelligenceMapPage';
-import * as alertsApi from '@/features/alerts/api/alertsApi';
-import * as leadsApi from '@/features/leads/api/leadsApi';
-import * as watchesApi from '@/features/watches/api/watchesApi';
-import type { AlertResponse, AlertList } from '@/types/api/alert';
-import type { LeadResponse, LeadList } from '@/types/api/lead';
-import type { WatchResponse, WatchList } from '@/types/api/watch';
+import * as eventsApi from '@/features/events/api/eventsApi';
+import type { EventResponse, EventList } from '@/types/api/event';
 
 // Mock react-leaflet since jsdom doesn't support canvas/map rendering
 vi.mock('react-leaflet', () => ({
@@ -46,78 +42,40 @@ vi.mock('leaflet', () => ({
 vi.mock('./map.css', () => ({}));
 vi.mock('leaflet/dist/leaflet.css', () => ({}));
 
-vi.mock('@/features/alerts/api/alertsApi');
-vi.mock('@/features/leads/api/leadsApi');
-vi.mock('@/features/watches/api/watchesApi');
+vi.mock('@/features/events/api/eventsApi');
 
-function makeAlert(overrides: Partial<AlertResponse> = {}): AlertResponse {
+function makeEvent(overrides: Partial<EventResponse> = {}): EventResponse {
   return {
     id: crypto.randomUUID(),
-    fingerprint: 'fp-test',
+    event_type: 'acled',
+    source_id: 'source-1',
+    title: 'Test event',
+    summary: 'Event summary',
+    raw_excerpt: null,
+    occurred_at: '2026-04-01T10:00:00Z',
+    ingested_at: '2026-04-01T10:05:00Z',
+    score: null,
     severity: 'high',
-    title: 'Test alert',
-    summary: 'Alert summary',
-    event_ids: [],
-    indicator_ids: [],
-    entity_ids: [],
-    route_name: 'watch-1',
-    status: 'open',
-    occurrences: 3,
-    first_fired_at: '2026-04-01T10:00:00Z',
-    last_fired_at: '2026-04-08T12:00:00Z',
-    acked_at: null,
-    acked_by: null,
+    dedupe_fingerprint: 'fp-test',
     plan_version_id: null,
-    created_at: '2026-04-01T10:00:00Z',
+    country_code: 'US',
+    latitude: 38.9,
+    longitude: -77.0,
+    region: 'North America',
+    source_category: null,
+    nlp_relevance: null,
+    nlp_summary: null,
+    metadata: {},
     ...overrides,
   };
 }
 
-function makeLead(overrides: Partial<LeadResponse> = {}): LeadResponse {
-  return {
-    id: crypto.randomUUID(),
-    lead_type: 'incident',
-    status: 'new',
-    title: 'Test lead',
-    summary: 'Lead summary',
-    constitutional_basis: [],
-    jurisdiction: 'US-CA',
-    institution: null,
-    severity: 'medium',
-    confidence: 0.85,
-    dedupe_fingerprint: 'fp-lead',
-    plan_id: null,
-    event_ids: [],
-    entity_ids: [],
-    report_id: null,
-    first_surfaced_at: '2026-04-02T10:00:00Z',
-    last_updated_at: '2026-04-08T12:00:00Z',
-    reported_at: null,
-    created_at: '2026-04-02T10:00:00Z',
-    ...overrides,
-  };
-}
-
-function makeAlertList(items: AlertResponse[]): AlertList {
+function makeEventList(items: EventResponse[]): EventList {
   return { items, page: { offset: 0, limit: items.length, total: items.length, has_more: false } };
 }
 
-function makeLeadList(items: LeadResponse[]): LeadList {
-  return { items, page: { offset: 0, limit: items.length, total: items.length, has_more: false } };
-}
-
-function makeWatchList(items: WatchResponse[]): WatchList {
-  return { items, page: { offset: 0, limit: items.length, total: items.length, has_more: false } };
-}
-
-function setupMocks(opts: {
-  alerts?: AlertResponse[];
-  leads?: LeadResponse[];
-  watches?: WatchResponse[];
-} = {}) {
-  vi.spyOn(alertsApi, 'getAlerts').mockResolvedValue(makeAlertList(opts.alerts ?? []));
-  vi.spyOn(leadsApi, 'getLeads').mockResolvedValue(makeLeadList(opts.leads ?? []));
-  vi.spyOn(watchesApi, 'getWatches').mockResolvedValue(makeWatchList(opts.watches ?? []));
+function setupMocks(opts: { events?: EventResponse[] } = {}) {
+  vi.spyOn(eventsApi, 'getEvents').mockResolvedValue(makeEventList(opts.events ?? []));
 }
 
 describe('IntelligenceMapPage', () => {
@@ -134,50 +92,35 @@ describe('IntelligenceMapPage', () => {
     expect(screen.getByTestId('intelligence-map-page')).toBeInTheDocument();
   });
 
-  it('renders filter panel with all layer toggles', async () => {
+  it('renders filter panel with events layer toggle', async () => {
     setupMocks();
     renderWithRouterAndProviders(<IntelligenceMapPage />);
 
     expect(screen.getByTestId('map-filter-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('layer-toggle-alerts')).toBeInTheDocument();
-    expect(screen.getByTestId('layer-toggle-leads')).toBeInTheDocument();
-    expect(screen.getByTestId('layer-toggle-watches')).toBeInTheDocument();
-    expect(screen.getByTestId('layer-toggle-signals')).toBeInTheDocument();
+    expect(screen.getByTestId('layer-toggle-events')).toBeInTheDocument();
   });
 
-  it('filter state initializes with all layers on', () => {
+  it('filter state initializes with events layer on', () => {
     setupMocks();
     renderWithRouterAndProviders(<IntelligenceMapPage />);
 
-    const alertToggle = screen.getByTestId('layer-toggle-alerts');
-    const leadsToggle = screen.getByTestId('layer-toggle-leads');
-    const watchesToggle = screen.getByTestId('layer-toggle-watches');
-    const signalsToggle = screen.getByTestId('layer-toggle-signals');
-
-    expect(alertToggle).toHaveAttribute('aria-pressed', 'true');
-    expect(leadsToggle).toHaveAttribute('aria-pressed', 'true');
-    expect(watchesToggle).toHaveAttribute('aria-pressed', 'true');
-    expect(signalsToggle).toHaveAttribute('aria-pressed', 'true');
+    const eventsToggle = screen.getByTestId('layer-toggle-events');
+    expect(eventsToggle).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('layer toggles toggle independently', async () => {
+  it('events layer toggle works', async () => {
     const user = userEvent.setup();
     setupMocks();
     renderWithRouterAndProviders(<IntelligenceMapPage />);
 
-    const alertToggle = screen.getByTestId('layer-toggle-alerts');
-    expect(alertToggle).toHaveAttribute('aria-pressed', 'true');
+    const eventsToggle = screen.getByTestId('layer-toggle-events');
+    expect(eventsToggle).toHaveAttribute('aria-pressed', 'true');
 
-    await user.click(alertToggle);
-    expect(alertToggle).toHaveAttribute('aria-pressed', 'false');
+    await user.click(eventsToggle);
+    expect(eventsToggle).toHaveAttribute('aria-pressed', 'false');
 
-    // Other toggles remain on
-    expect(screen.getByTestId('layer-toggle-leads')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('layer-toggle-watches')).toHaveAttribute('aria-pressed', 'true');
-
-    // Toggle back on
-    await user.click(alertToggle);
-    expect(alertToggle).toHaveAttribute('aria-pressed', 'true');
+    await user.click(eventsToggle);
+    expect(eventsToggle).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('severity filter buttons toggle', async () => {
@@ -195,24 +138,45 @@ describe('IntelligenceMapPage', () => {
     expect(critBtn).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('renders markers from data', async () => {
-    const alerts = [makeAlert({ title: 'Alert One' }), makeAlert({ title: 'Alert Two' })];
-    const leads = [makeLead({ title: 'Lead One' })];
-    setupMocks({ alerts, leads });
+  it('renders markers from events with coordinates', async () => {
+    const events = [
+      makeEvent({ title: 'Event One', latitude: 38.9, longitude: -77.0 }),
+      makeEvent({ title: 'Event Two', latitude: 51.5, longitude: -0.1 }),
+    ];
+    setupMocks({ events });
 
     renderWithRouterAndProviders(<IntelligenceMapPage />);
 
     await waitFor(() => {
       const markers = screen.getAllByTestId('map-marker');
-      expect(markers.length).toBe(3);
+      expect(markers.length).toBe(2);
     });
   });
 
-  it('layer toggle hides markers of that type', async () => {
+  it('excludes events without coordinates from map', async () => {
+    const events = [
+      makeEvent({ title: 'With coords', latitude: 38.9, longitude: -77.0 }),
+      makeEvent({ title: 'No lat', latitude: null, longitude: -77.0 }),
+      makeEvent({ title: 'No lng', latitude: 38.9, longitude: null }),
+      makeEvent({ title: 'No coords', latitude: null, longitude: null }),
+    ];
+    setupMocks({ events });
+
+    renderWithRouterAndProviders(<IntelligenceMapPage />);
+
+    await waitFor(() => {
+      const markers = screen.getAllByTestId('map-marker');
+      expect(markers.length).toBe(1);
+    });
+  });
+
+  it('events layer toggle hides all markers', async () => {
     const user = userEvent.setup();
-    const alerts = [makeAlert({ title: 'Alert One' })];
-    const leads = [makeLead({ title: 'Lead One' })];
-    setupMocks({ alerts, leads });
+    const events = [
+      makeEvent({ title: 'Event One', latitude: 38.9, longitude: -77.0 }),
+      makeEvent({ title: 'Event Two', latitude: 51.5, longitude: -0.1 }),
+    ];
+    setupMocks({ events });
 
     renderWithRouterAndProviders(<IntelligenceMapPage />);
 
@@ -220,21 +184,20 @@ describe('IntelligenceMapPage', () => {
       expect(screen.getAllByTestId('map-marker').length).toBe(2);
     });
 
-    // Turn off alerts layer
-    await user.click(screen.getByTestId('layer-toggle-alerts'));
+    await user.click(screen.getByTestId('layer-toggle-events'));
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('map-marker').length).toBe(1);
+      expect(screen.queryAllByTestId('map-marker').length).toBe(0);
     });
   });
 
   it('severity filter reduces visible markers', async () => {
     const user = userEvent.setup();
-    const alerts = [
-      makeAlert({ title: 'Critical Alert', severity: 'critical' }),
-      makeAlert({ title: 'Low Alert', severity: 'low' }),
+    const events = [
+      makeEvent({ title: 'Critical Event', severity: 'critical', latitude: 38.9, longitude: -77.0 }),
+      makeEvent({ title: 'Low Event', severity: 'low', latitude: 51.5, longitude: -0.1 }),
     ];
-    setupMocks({ alerts });
+    setupMocks({ events });
 
     renderWithRouterAndProviders(<IntelligenceMapPage />);
 
@@ -242,7 +205,6 @@ describe('IntelligenceMapPage', () => {
       expect(screen.getAllByTestId('map-marker').length).toBe(2);
     });
 
-    // Filter to only critical
     await user.click(screen.getByTestId('severity-filter-critical'));
 
     await waitFor(() => {
@@ -252,8 +214,8 @@ describe('IntelligenceMapPage', () => {
 
   it('marker click populates selection detail', async () => {
     const user = userEvent.setup();
-    const alert = makeAlert({ title: 'Clicked Alert', severity: 'high', summary: 'Alert detail text' });
-    setupMocks({ alerts: [alert] });
+    const event = makeEvent({ title: 'Clicked Event', severity: 'high', summary: 'Event detail text' });
+    setupMocks({ events: [event] });
 
     renderWithRouterAndProviders(<IntelligenceMapPage />);
 
@@ -261,7 +223,6 @@ describe('IntelligenceMapPage', () => {
       expect(screen.getByTestId('map-marker')).toBeInTheDocument();
     });
 
-    // Before click, no selection
     expect(screen.getByTestId('no-selection')).toBeInTheDocument();
 
     await user.click(screen.getByTestId('map-marker'));
@@ -270,14 +231,14 @@ describe('IntelligenceMapPage', () => {
       expect(screen.getByTestId('selection-detail')).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId('selection-title')).toHaveTextContent('Clicked Alert');
+    expect(screen.getByTestId('selection-title')).toHaveTextContent('Clicked Event');
   });
 
-  it('selection detail shows Open link', async () => {
+  it('selection detail shows Open link to events page', async () => {
     const user = userEvent.setup();
-    const alertId = 'alert-123';
-    const alert = makeAlert({ id: alertId, title: 'Link Test' });
-    setupMocks({ alerts: [alert] });
+    const eventId = 'event-123';
+    const event = makeEvent({ id: eventId, title: 'Link Test' });
+    setupMocks({ events: [event] });
 
     renderWithRouterAndProviders(<IntelligenceMapPage />);
 
@@ -292,14 +253,14 @@ describe('IntelligenceMapPage', () => {
     });
 
     const link = screen.getByTestId('open-detail-link');
-    expect(link).toHaveAttribute('href', `/alerts/${alertId}`);
+    expect(link).toHaveAttribute('href', `/events/${eventId}`);
     expect(link).toHaveTextContent('Open');
   });
 
   it('clear selection button works', async () => {
     const user = userEvent.setup();
-    const alert = makeAlert({ title: 'Clear Test' });
-    setupMocks({ alerts: [alert] });
+    const event = makeEvent({ title: 'Clear Test' });
+    setupMocks({ events: [event] });
 
     renderWithRouterAndProviders(<IntelligenceMapPage />);
 

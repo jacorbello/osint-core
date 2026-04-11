@@ -7,10 +7,7 @@ import './map.css';
 
 /** Color-coded circle markers per data type */
 const MARKER_COLORS: Record<LayerType, string> = {
-  alerts: '#ef4444',    // red
-  leads: '#3b82f6',     // blue
-  watches: '#22c55e',   // green
-  signals: '#f59e0b',   // amber
+  events: '#3b82f6',    // blue
 };
 
 function createIcon(type: LayerType): L.DivIcon {
@@ -24,10 +21,7 @@ function createIcon(type: LayerType): L.DivIcon {
 }
 
 const ICONS: Record<LayerType, L.DivIcon> = {
-  alerts: createIcon('alerts'),
-  leads: createIcon('leads'),
-  watches: createIcon('watches'),
-  signals: createIcon('signals'),
+  events: createIcon('events'),
 };
 
 interface MapCanvasProps {

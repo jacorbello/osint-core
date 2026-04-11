@@ -4,10 +4,7 @@ import type { SeverityEnum } from '@/types/api/common';
 
 export function useMapState() {
   const [layers, setLayers] = useState<Record<LayerType, boolean>>({
-    alerts: true,
-    leads: true,
-    watches: true,
-    signals: true,
+    events: true,
   });
 
   const [severityFilters, setSeverityFilters] = useState<SeverityEnum[]>([]);
