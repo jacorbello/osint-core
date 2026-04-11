@@ -253,7 +253,7 @@ describe('IntelligenceMapPage', () => {
     });
 
     const link = screen.getByTestId('open-detail-link');
-    expect(link).toHaveAttribute('href', `/events/${eventId}`);
+    expect(link).toHaveAttribute('href', `/${eventId}`);
     expect(link).toHaveTextContent('Open');
   });
 

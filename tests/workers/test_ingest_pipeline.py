@@ -453,6 +453,65 @@ async def test_ingest_with_indicators_no_greenlet_error():
 
 
 @pytest.mark.asyncio
+async def test_ingest_preserves_geo_fields():
+    """RawItem geographic fields are copied through to the persisted Event."""
+    plan = _make_plan()
+    item = RawItem(
+        title="Geo Item",
+        url="https://example.com/geo",
+        raw_data={"key": "geo"},
+        summary="Summary",
+        occurred_at=datetime(2025, 1, 1, tzinfo=UTC),
+        severity="medium",
+        latitude=48.8566,
+        longitude=2.3522,
+        country_code="FR",
+        region="Île-de-France",
+    )
+    mock_db = _make_mock_db()
+    patches = _patch_all(mock_db, plan, [item])
+    task_self = _mock_task_self()
+
+    event_ids = [uuid.uuid4()]
+    event_id_iter = iter(event_ids)
+    original_add = mock_db.add
+    added_events = []
+
+    def side_effect_add(obj):
+        if hasattr(obj, "event_type"):
+            obj.id = next(event_id_iter)
+            added_events.append(obj)
+        return original_add(obj)
+
+    mock_db.add = MagicMock(side_effect=side_effect_add)
+
+    mock_chain = MagicMock()
+    mock_chain.return_value.apply_async = MagicMock()
+
+    with (
+        patch("osint_core.workers.ingest.async_session", patches["async_session"]),
+        patch("osint_core.workers.ingest.plan_store", patches["plan_store"]),
+        patch("osint_core.workers.ingest.registry", patches["registry"]),
+        patch("osint_core.workers.ingest.score_event_task", patches["score_event_task"]),
+        patch("osint_core.workers.ingest.vectorize_event_task", patches["vectorize_event_task"]),
+        patch("osint_core.workers.ingest.correlate_event_task", patches["correlate_event_task"]),
+        patch("osint_core.workers.ingest.nlp_enrich_task", MagicMock()),
+        patch("osint_core.workers.ingest.chain", mock_chain),
+        patch("osint_core.workers.ingest.group", MagicMock()),
+        patch("osint_core.workers.ingest.extract_indicators", return_value=[]),
+    ):
+        result = await _ingest_source_async(task_self, "src-1", "plan-1")
+
+    assert result["ingested"] == 1
+    assert len(added_events) == 1
+    event = added_events[0]
+    assert event.latitude == 48.8566
+    assert event.longitude == 2.3522
+    assert event.country_code == "FR"
+    assert event.region == "Île-de-France"
+
+
+@pytest.mark.asyncio
 async def test_cal_plan_dispatches_match_leads_task():
     """CAL prospecting plan triggers match_leads_task via chord after enrichment."""
     plan = _make_plan(
