@@ -18,7 +18,7 @@ const LEAD_STATUSES: { value: LeadStatusEnum | ''; label: string }[] = [
   { value: 'new', label: 'New' },
   { value: 'reviewing', label: 'Reviewing' },
   { value: 'qualified', label: 'Qualified' },
-  { value: 'dismissed', label: 'Dismissed' },
+  { value: 'declined', label: 'Declined' },
 ];
 
 interface LeadsFiltersProps {
