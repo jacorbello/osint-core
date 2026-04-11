@@ -34,7 +34,7 @@ const SEVERITY_OPTIONS: SeverityEnum[] = ['critical', 'high', 'medium', 'low'];
 function getTypeRoute(type: LayerType): string {
   switch (type) {
     case 'events':
-      return '/';
+      return '/events';
     default:
       return '/';
   }
