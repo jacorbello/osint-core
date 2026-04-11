@@ -169,6 +169,10 @@ async def _ingest_source_async(
                         dedupe_fingerprint=fingerprint,
                         metadata_=item.raw_data,
                         plan_version_id=plan.id,
+                        latitude=item.latitude,
+                        longitude=item.longitude,
+                        country_code=item.country_code,
+                        region=item.region,
                     )
                     db.add(event)
 

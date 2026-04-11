@@ -3,7 +3,7 @@ import { getSeverityColor } from '@/lib/utils/severity';
 import { formatRelativeTime } from '@/lib/utils/format';
 import type { SeverityEnum } from '@/types/api/common';
 
-export type LayerType = 'alerts' | 'leads' | 'watches' | 'signals';
+export type LayerType = 'events';
 
 export interface MapMarkerItem {
   id: string;
@@ -26,22 +26,15 @@ interface MapFilterPanelProps {
 }
 
 const LAYER_CONFIG: { type: LayerType; label: string; icon: string; color: string }[] = [
-  { type: 'alerts', label: 'Alerts', icon: 'warning', color: 'text-error' },
-  { type: 'leads', label: 'Leads', icon: 'person_search', color: 'text-primary' },
-  { type: 'watches', label: 'Watches', icon: 'visibility', color: 'text-tertiary' },
-  { type: 'signals', label: 'Signals', icon: 'sensors', color: 'text-secondary' },
+  { type: 'events', label: 'Events', icon: 'public', color: 'text-primary' },
 ];
 
 const SEVERITY_OPTIONS: SeverityEnum[] = ['critical', 'high', 'medium', 'low'];
 
 function getTypeRoute(type: LayerType): string {
   switch (type) {
-    case 'alerts':
-      return '/alerts';
-    case 'leads':
-      return '/leads';
-    case 'watches':
-      return '/watches';
+    case 'events':
+      return '/events';
     default:
       return '/';
   }
