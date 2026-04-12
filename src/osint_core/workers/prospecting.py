@@ -518,10 +518,10 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
         if sent:
             email_latency_ms = round((time.monotonic() - email_start) * 1000)
             logger.info(
-                "report_email_delivered",
-                artifact_uri=result.artifact_uri,
-                recipient_count=len(recipients),
-                latency_ms=email_latency_ms,
+                "report_email_delivered: artifact_uri=%s recipient_count=%d latency_ms=%d",
+                result.artifact_uri,
+                len(recipients),
+                email_latency_ms,
             )
             break
 
