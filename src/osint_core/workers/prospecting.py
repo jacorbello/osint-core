@@ -440,6 +440,12 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
     a Resend failure does not discard the already-archived PDF or undo
     the lead-status updates performed inside ``generate_report``.
     """
+    from osint_core.metrics import (
+        report_email_total,
+        report_generation_duration_seconds,
+        report_generation_total,
+        report_leads_total,
+    )
     from osint_core.services.plan_store import PlanStore
     from osint_core.services.prospecting_report import ProspectingReportGenerator
     from osint_core.services.resend_notifier import ResendNotifier
@@ -452,6 +458,7 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
 
         if result is None:
             logger.info("prospecting_report_skipped: no new leads")
+            report_generation_total.labels(outcome="skipped").inc()
             return {"status": "skipped", "reason": "no_new_leads"}
 
         # Load plan content for per-plan recipients
@@ -532,7 +539,13 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
             attempt,
         )
 
+    # --- Emit Prometheus metrics ---
     elapsed = time.monotonic() - start
+    report_generation_duration_seconds.observe(elapsed)
+    report_leads_total.labels(stage="rendered").set(result.lead_count)
+    report_email_total.labels(outcome="sent" if sent else "failed").inc()
+    report_generation_total.labels(outcome="completed").inc()
+
     logger.info(
         "prospecting_report_complete: lead_count=%d artifact_uri=%s "
         "email_sent=%s recipients=%d elapsed=%.2fs task_attempt=%d",
@@ -627,6 +640,9 @@ def generate_prospecting_report_task(self: Any) -> dict[str, Any]:
             _generate_report_async(attempt=self.request.retries),
         )
     except Exception as exc:
+        from osint_core.metrics import report_generation_total
+
+        report_generation_total.labels(outcome="failed").inc()
         logger.exception("Prospecting report generation failed")
         raise self.retry(
             exc=exc,
