@@ -18,6 +18,7 @@ from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.llm import llm_chat_completion
+from osint_core.metrics import report_leads_total
 from osint_core.models.lead import Lead
 from osint_core.models.report import Report
 from osint_core.services.courtlistener import CourtListenerClient
@@ -361,6 +362,9 @@ class ProspectingReportGenerator:
         skipped = _group_skipped_leads(all_leads)
         leads = _filter_reportable_leads(all_leads)
 
+        # Emit selected-leads metric (total leads queried from DB)
+        report_leads_total.labels(stage="selected").set(len(all_leads))
+
         # Build lead contexts with narrative sections
         lead_contexts = []
         rendered_lead_ids: set[Any] = set()
@@ -478,6 +482,11 @@ class ProspectingReportGenerator:
 
             lead_contexts.append(lead_ctx)
             rendered_lead_ids.add(lead.id)
+
+        # Emit skipped-leads metric: all leads not rendered (filtered + skipped)
+        report_leads_total.labels(stage="skipped").set(
+            len(all_leads) - len(rendered_lead_ids),
+        )
 
         # Build summary stats from rendered leads only (lead_contexts),
         # not from the pre-filter `leads` list, so cover page stats match

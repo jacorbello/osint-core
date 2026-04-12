@@ -31,3 +31,28 @@ celery_queue_depth = Gauge(
     "Celery queue depth",
     ["queue"],
 )
+
+# --- Report pipeline metrics ---
+
+report_generation_duration_seconds = Histogram(
+    "osint_report_generation_duration_seconds",
+    "Time to generate a prospecting report end-to-end",
+)
+
+report_leads_total = Gauge(
+    "osint_report_leads_total",
+    "Lead counts per report generation cycle",
+    ["stage"],
+)
+
+report_email_total = Counter(
+    "osint_report_email_total",
+    "Email delivery outcomes for prospecting reports",
+    ["outcome"],
+)
+
+report_generation_total = Counter(
+    "osint_report_generation_total",
+    "Report generation outcomes",
+    ["outcome"],
+)

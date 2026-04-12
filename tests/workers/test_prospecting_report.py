@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from osint_core import metrics
 from osint_core.workers.prospecting import (
     _EMAIL_MAX_RETRIES,
     _collect_sources_async,
@@ -533,3 +534,211 @@ class TestCollectSourcesTask:
 
         assert result["status"] == "skipped"
         assert result["reason"] == "no_sources"
+
+
+class TestReportMetricsEmission:
+    """Tests that report pipeline emits Prometheus metrics at key points."""
+
+    @pytest.mark.asyncio()
+    @patch("osint_core.workers.prospecting.async_session")
+    async def test_skipped_report_increments_generation_total(
+        self, mock_session: MagicMock,
+    ) -> None:
+        """When no leads exist, report_generation_total{outcome=skipped} increments."""
+        mock_db = AsyncMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        before = metrics.report_generation_total.labels(outcome="skipped")._value.get()
+
+        with (
+            patch(
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
+                autospec=True,
+            ) as mock_gen_cls,
+            patch(
+                "osint_core.services.plan_store.PlanStore",
+                autospec=True,
+            ) as mock_store_cls,
+        ):
+            mock_gen_cls.return_value.generate_report = AsyncMock(return_value=None)
+            mock_store_cls.return_value.get_active = AsyncMock(return_value=None)
+            await _generate_report_async()
+
+        after = metrics.report_generation_total.labels(outcome="skipped")._value.get()
+        assert after == before + 1
+
+    @pytest.mark.asyncio()
+    @patch("osint_core.workers.prospecting.async_session")
+    async def test_successful_report_emits_duration_and_generation_total(
+        self,
+        mock_session: MagicMock,
+        mock_report_result: MagicMock,
+    ) -> None:
+        """A successful report observes duration and increments completed counter."""
+        mock_db = AsyncMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        before_count = metrics.report_generation_total.labels(
+            outcome="completed",
+        )._value.get()
+        before_sum = metrics.report_generation_duration_seconds._sum.get()
+
+        with (
+            patch(
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
+                autospec=True,
+            ) as mock_gen_cls,
+            patch(
+                "osint_core.services.resend_notifier.ResendNotifier",
+                autospec=True,
+            ) as mock_notifier_cls,
+            patch(
+                "osint_core.services.plan_store.PlanStore",
+                autospec=True,
+            ) as mock_store_cls,
+            patch("osint_core.config.settings") as mock_settings,
+        ):
+            mock_gen_cls.return_value.generate_report = AsyncMock(
+                return_value=mock_report_result,
+            )
+            mock_notifier_cls.return_value.send_report = AsyncMock(return_value=True)
+            mock_store_cls.return_value.get_active = AsyncMock(return_value=None)
+            mock_settings.resend_recipients = "test@example.com"
+
+            await _generate_report_async()
+
+        after_count = metrics.report_generation_total.labels(
+            outcome="completed",
+        )._value.get()
+        after_sum = metrics.report_generation_duration_seconds._sum.get()
+
+        assert after_count == before_count + 1
+        assert after_sum > before_sum
+
+    @pytest.mark.asyncio()
+    @patch("osint_core.workers.prospecting.async_session")
+    async def test_successful_email_increments_sent_counter(
+        self,
+        mock_session: MagicMock,
+        mock_report_result: MagicMock,
+    ) -> None:
+        """A successful email send increments report_email_total{outcome=sent}."""
+        mock_db = AsyncMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        before = metrics.report_email_total.labels(outcome="sent")._value.get()
+
+        with (
+            patch(
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
+                autospec=True,
+            ) as mock_gen_cls,
+            patch(
+                "osint_core.services.resend_notifier.ResendNotifier",
+                autospec=True,
+            ) as mock_notifier_cls,
+            patch(
+                "osint_core.services.plan_store.PlanStore",
+                autospec=True,
+            ) as mock_store_cls,
+            patch("osint_core.config.settings") as mock_settings,
+        ):
+            mock_gen_cls.return_value.generate_report = AsyncMock(
+                return_value=mock_report_result,
+            )
+            mock_notifier_cls.return_value.send_report = AsyncMock(return_value=True)
+            mock_store_cls.return_value.get_active = AsyncMock(return_value=None)
+            mock_settings.resend_recipients = "test@example.com"
+
+            await _generate_report_async()
+
+        after = metrics.report_email_total.labels(outcome="sent")._value.get()
+        assert after == before + 1
+
+    @pytest.mark.asyncio()
+    @patch("osint_core.workers.prospecting.asyncio.sleep", new_callable=AsyncMock)
+    @patch("osint_core.workers.prospecting.async_session")
+    async def test_failed_email_increments_failed_counter(
+        self,
+        mock_session: MagicMock,
+        mock_sleep: AsyncMock,
+        mock_report_result: MagicMock,
+    ) -> None:
+        """All email retries exhausted increments report_email_total{outcome=failed}."""
+        mock_db = AsyncMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        before = metrics.report_email_total.labels(outcome="failed")._value.get()
+
+        with (
+            patch(
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
+                autospec=True,
+            ) as mock_gen_cls,
+            patch(
+                "osint_core.services.resend_notifier.ResendNotifier",
+                autospec=True,
+            ) as mock_notifier_cls,
+            patch(
+                "osint_core.services.plan_store.PlanStore",
+                autospec=True,
+            ) as mock_store_cls,
+            patch("osint_core.config.settings") as mock_settings,
+        ):
+            mock_gen_cls.return_value.generate_report = AsyncMock(
+                return_value=mock_report_result,
+            )
+            mock_notifier_cls.return_value.send_report = AsyncMock(return_value=False)
+            mock_store_cls.return_value.get_active = AsyncMock(return_value=None)
+            mock_settings.resend_recipients = "test@example.com"
+
+            await _generate_report_async()
+
+        after = metrics.report_email_total.labels(outcome="failed")._value.get()
+        assert after == before + 1
+
+    @pytest.mark.asyncio()
+    @patch("osint_core.workers.prospecting.async_session")
+    async def test_report_leads_total_set_on_success(
+        self,
+        mock_session: MagicMock,
+        mock_report_result: MagicMock,
+    ) -> None:
+        """Lead count gauges are set when report generates successfully."""
+        mock_db = AsyncMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        # Set lead_count to a known value on the mock result
+        mock_report_result.lead_count = 5
+
+        with (
+            patch(
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
+                autospec=True,
+            ) as mock_gen_cls,
+            patch(
+                "osint_core.services.resend_notifier.ResendNotifier",
+                autospec=True,
+            ) as mock_notifier_cls,
+            patch(
+                "osint_core.services.plan_store.PlanStore",
+                autospec=True,
+            ) as mock_store_cls,
+            patch("osint_core.config.settings") as mock_settings,
+        ):
+            mock_gen_cls.return_value.generate_report = AsyncMock(
+                return_value=mock_report_result,
+            )
+            mock_notifier_cls.return_value.send_report = AsyncMock(return_value=True)
+            mock_store_cls.return_value.get_active = AsyncMock(return_value=None)
+            mock_settings.resend_recipients = "test@example.com"
+
+            await _generate_report_async()
+
+        rendered = metrics.report_leads_total.labels(stage="rendered")._value.get()
+        assert rendered == 5

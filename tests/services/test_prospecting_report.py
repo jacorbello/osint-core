@@ -1267,3 +1267,80 @@ class TestCitationsAppendixAccumulation:
         legal_cites = ctx.get("all_legal_citations") or []
         assert source_cites.count("https://same-source.example.com") == 1
         assert sum(1 for c in legal_cites if c["case_name"] == "Same Case") == 1
+
+
+class TestLeadSelectionMetrics:
+    """Tests that generate_report emits Prometheus lead-selection gauges."""
+
+    @pytest.mark.asyncio()
+    async def test_selected_gauge_set_to_total_leads(self) -> None:
+        """report_leads_total{stage=selected} is set to the total lead count."""
+        lead_a = _make_lead(title="Lead A", analysis_status="pending")
+        lead_b = _make_lead(title="Lead B", analysis_status="pending")
+        db = _mock_db([lead_a, lead_b])
+        generator = ProspectingReportGenerator()
+
+        stage_mocks: dict[str, MagicMock] = {}
+        mock_gauge = MagicMock()
+        def _stage_factory(**kw: str) -> MagicMock:
+            return stage_mocks.setdefault(kw["stage"], MagicMock())
+
+        mock_gauge.labels.side_effect = _stage_factory
+
+        with patch(f"{_MOD}.report_leads_total", mock_gauge), \
+             patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            import weasyprint
+            with patch.object(weasyprint, "HTML") as mock_wp:
+                mock_wp.return_value.write_pdf.return_value = b"%PDF-fake"
+                await generator.generate_report(db)
+
+        # Verify selected was set to total leads (2)
+        assert "selected" in stage_mocks
+        stage_mocks["selected"].set.assert_called_with(2)
+
+    @pytest.mark.asyncio()
+    async def test_skipped_gauge_reflects_unrendered_leads(self) -> None:
+        """report_leads_total{stage=skipped} equals total minus rendered."""
+        rendered = _make_lead(
+            title="Rendered",
+            analysis_status="completed",
+            deep_analysis={"actionable": True, "incident_summary": "ok"},
+            citations={"source_citations": [{"url": "https://example.com"}]},
+        )
+        skipped = _make_lead(
+            title="Skipped",
+            analysis_status="extraction_failed",
+        )
+        non_actionable = _make_lead(
+            title="Not actionable",
+            analysis_status="completed",
+            deep_analysis={"actionable": False, "incident_summary": "no"},
+            citations={"source_citations": []},
+        )
+        db = _mock_db([rendered, skipped, non_actionable])
+        generator = ProspectingReportGenerator()
+
+        stage_mocks: dict[str, MagicMock] = {}
+        mock_gauge = MagicMock()
+
+        def _stage_factory2(**kw: str) -> MagicMock:
+            return stage_mocks.setdefault(kw["stage"], MagicMock())
+
+        mock_gauge.labels.side_effect = _stage_factory2
+
+        with patch(f"{_MOD}.report_leads_total", mock_gauge), \
+             patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            import weasyprint
+            with patch.object(weasyprint, "HTML") as mock_wp:
+                mock_wp.return_value.write_pdf.return_value = b"%PDF-fake"
+                result = await generator.generate_report(db)
+
+        # 3 total, 1 rendered => 2 skipped
+        stage_mocks["selected"].set.assert_called_with(3)
+        stage_mocks["skipped"].set.assert_called_with(2)
+        assert result is not None
+        assert result.lead_count == 1
