@@ -476,8 +476,9 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
         report_leads_total.labels(stage="rendered").set(result.lead_count)
         report_generation_total.labels(outcome="completed").inc()
         logger.warning(
-            "prospecting_report_no_recipients: lead_count=%d",
+            "prospecting_report_no_recipients: lead_count=%d run_id=%s",
             result.lead_count,
+            result.run_id,
         )
         return {
             "status": "skipped",
@@ -506,22 +507,25 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
         except Exception:
             logger.exception(
                 "report_delivery_error: plan_id=%s "
-                "email_attempt=%d/%d lead_count=%d artifact_uri=%s",
+                "email_attempt=%d/%d lead_count=%d artifact_uri=%s run_id=%s",
                 _CAL_PLAN_ID,
                 email_attempt,
                 _EMAIL_MAX_RETRIES,
                 result.lead_count,
                 result.artifact_uri,
+                result.run_id,
             )
             sent = False
 
         if sent:
             email_latency_ms = round((time.monotonic() - email_start) * 1000)
             logger.info(
-                "report_email_delivered: artifact_uri=%s recipient_count=%d latency_ms=%d",
+                "report_email_delivered: artifact_uri=%s recipient_count=%d "
+                "latency_ms=%d run_id=%s",
                 result.artifact_uri,
                 len(recipients),
                 email_latency_ms,
+                result.run_id,
             )
             break
 
@@ -529,26 +533,28 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
             backoff = _EMAIL_BACKOFF_BASE ** email_attempt
             logger.warning(
                 "report_delivery_retry: plan_id=%s email_attempt=%d/%d "
-                "backoff=%ds lead_count=%d artifact_uri=%s",
+                "backoff=%ds lead_count=%d artifact_uri=%s run_id=%s",
                 _CAL_PLAN_ID,
                 email_attempt,
                 _EMAIL_MAX_RETRIES,
                 backoff,
                 result.lead_count,
                 result.artifact_uri,
+                result.run_id,
             )
             await asyncio.sleep(backoff)
 
     if not sent:
         logger.error(
             "report_email_exhausted: plan_id=%s email_attempts=%d "
-            "lead_count=%d artifact_uri=%s recipients=%d task_attempt=%d",
+            "lead_count=%d artifact_uri=%s recipients=%d task_attempt=%d run_id=%s",
             _CAL_PLAN_ID,
             _EMAIL_MAX_RETRIES,
             result.lead_count,
             result.artifact_uri,
             len(recipients),
             attempt,
+            result.run_id,
         )
 
     # --- Emit Prometheus metrics ---
@@ -560,9 +566,9 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
 
     logger.info(
         "prospecting_report_complete: lead_count=%d artifact_uri=%s "
-        "email_sent=%s recipients=%d elapsed=%.2fs task_attempt=%d",
+        "email_sent=%s recipients=%d elapsed=%.2fs task_attempt=%d run_id=%s",
         result.lead_count, result.artifact_uri, sent,
-        len(recipients), elapsed, attempt,
+        len(recipients), elapsed, attempt, result.run_id,
     )
 
     return {

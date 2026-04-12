@@ -1412,13 +1412,15 @@ class TestStructuredLoggingContext:
              patch(f"{_MOD}.logger") as mock_logger:
             await generator.generate_report(db)
 
-        # Check that report_pipeline_progress was logged
+        # Check that report_pipeline_progress was logged at each stage
         progress_calls = [
             c for c in mock_logger.info.call_args_list
             if c.args and c.args[0] == "report_pipeline_progress"
         ]
-        assert len(progress_calls) == 1
-        kwargs = progress_calls[0].kwargs
-        assert "selected" in kwargs
-        assert "reportable" in kwargs
-        assert "rendered" in kwargs
+        assert len(progress_calls) == 3
+        assert progress_calls[0].kwargs["stage"] == "selected"
+        assert "selected" in progress_calls[0].kwargs
+        assert progress_calls[1].kwargs["stage"] == "reportable"
+        assert "reportable" in progress_calls[1].kwargs
+        assert progress_calls[2].kwargs["stage"] == "rendered"
+        assert "rendered" in progress_calls[2].kwargs
