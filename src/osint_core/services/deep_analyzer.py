@@ -66,7 +66,7 @@ def _is_redirect_target_safe(url: str) -> bool:
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         for _family, _type, _proto, _canonname, sockaddr in infos:
-            ip_str = sockaddr[0]
+            ip_str = str(sockaddr[0])
             if _is_ip_private(ip_str):
                 return False
     except socket.gaierror:
