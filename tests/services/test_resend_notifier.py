@@ -212,6 +212,57 @@ class TestResendNotifier:
         mock_logger.warning.assert_any_call("resend_invalid_email", email="missing-domain@")
         mock_logger.warning.assert_any_call("resend_no_valid_recipients")
 
+    @pytest.mark.asyncio()
+    async def test_subject_uses_passed_report_date(self, notifier):
+        """Email subject must use the report_date param, not a computed timestamp."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("osint_core.services.resend_notifier.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            await notifier.send_report(
+                b"pdf",
+                "summary",
+                ["a@b.com"],
+                report_date="April 11, 2026 — 03:00 PM CDT",
+            )
+
+        payload = mock_client.post.call_args.kwargs["json"]
+        assert payload["subject"] == "CAL Prospecting Report — April 11, 2026 — 03:00 PM CDT"
+
+    @pytest.mark.asyncio()
+    async def test_subject_no_hardcoded_cst(self, notifier):
+        """Subject must not contain a hardcoded 'CST' — timezone comes from report_date."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("osint_core.services.resend_notifier.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            await notifier.send_report(
+                b"pdf",
+                "summary",
+                ["a@b.com"],
+                report_date="March 01, 2026 — 10:00 AM CST",
+            )
+
+        payload = mock_client.post.call_args.kwargs["json"]
+        # The subject should end with the report_date, not append extra "CST"
+        assert payload["subject"] == "CAL Prospecting Report — March 01, 2026 — 10:00 AM CST"
+        # Ensure "CST" only appears as part of report_date, not hardcoded separately
+        assert payload["subject"].count("CST") == 1
+
 
 class TestValidateRecipients:
     def test_valid_emails_pass(self):

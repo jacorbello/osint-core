@@ -47,8 +47,15 @@ class ResendNotifier:
         pdf_bytes: bytes,
         executive_summary: str,
         recipients: list[str],
+        *,
+        report_date: str | None = None,
     ) -> bool:
         """Send a PDF report via Resend.
+
+        Args:
+            report_date: Pre-formatted date string from the PDF cover page
+                (e.g. "April 11, 2026 — 03:00 PM CDT"). When provided, the
+                email subject uses this directly so it matches the PDF.
 
         Returns True on success, False on failure (logged but never raises).
         """
@@ -65,13 +72,15 @@ class ResendNotifier:
             logger.warning("resend_no_valid_recipients")
             return False
 
-        now = datetime.now(UTC)
-        subject = (
-            f"CAL Prospecting Report — {now.strftime('%B %d, %Y %I:%M %p')} CST"
-        )
+        if report_date:
+            subject = f"CAL Prospecting Report — {report_date}"
+        else:
+            now = datetime.now(UTC)
+            subject = f"CAL Prospecting Report — {now.strftime('%B %d, %Y %I:%M %p')} UTC"
 
         html_body = _build_html_body(executive_summary)
 
+        now = datetime.now(UTC)
         payload = {
             "from": self.from_email,
             "to": recipients,

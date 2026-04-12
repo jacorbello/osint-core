@@ -489,6 +489,7 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
                 pdf_bytes=result.pdf_bytes,
                 executive_summary=executive_summary,
                 recipients=recipients,
+                report_date=result.report_date,
             )
         except Exception:
             logger.exception(
