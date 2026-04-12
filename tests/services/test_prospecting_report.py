@@ -1280,7 +1280,9 @@ class TestLeadSelectionMetrics:
         db = _mock_db([lead_a, lead_b])
         generator = ProspectingReportGenerator()
 
+        stage_mocks: dict[str, MagicMock] = {}
         mock_gauge = MagicMock()
+        mock_gauge.labels.side_effect = lambda **kw: stage_mocks.setdefault(kw["stage"], MagicMock())
 
         with patch(f"{_MOD}.report_leads_total", mock_gauge), \
              patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
@@ -1292,12 +1294,8 @@ class TestLeadSelectionMetrics:
                 await generator.generate_report(db)
 
         # Verify selected was set to total leads (2)
-        selected_calls = [
-            c for c in mock_gauge.labels.call_args_list
-            if c == ((), {"stage": "selected"})
-        ]
-        assert len(selected_calls) == 1
-        mock_gauge.labels(stage="selected").set.assert_called_with(2)
+        assert "selected" in stage_mocks
+        stage_mocks["selected"].set.assert_called_with(2)
 
     @pytest.mark.asyncio()
     async def test_skipped_gauge_reflects_unrendered_leads(self) -> None:
@@ -1321,7 +1319,9 @@ class TestLeadSelectionMetrics:
         db = _mock_db([rendered, skipped, non_actionable])
         generator = ProspectingReportGenerator()
 
+        stage_mocks: dict[str, MagicMock] = {}
         mock_gauge = MagicMock()
+        mock_gauge.labels.side_effect = lambda **kw: stage_mocks.setdefault(kw["stage"], MagicMock())
 
         with patch(f"{_MOD}.report_leads_total", mock_gauge), \
              patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
@@ -1333,7 +1333,7 @@ class TestLeadSelectionMetrics:
                 result = await generator.generate_report(db)
 
         # 3 total, 1 rendered => 2 skipped
-        mock_gauge.labels(stage="selected").set.assert_called_with(3)
-        mock_gauge.labels(stage="skipped").set.assert_called_with(2)
+        stage_mocks["selected"].set.assert_called_with(3)
+        stage_mocks["skipped"].set.assert_called_with(2)
         assert result is not None
         assert result.lead_count == 1
