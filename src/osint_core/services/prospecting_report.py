@@ -115,6 +115,7 @@ class ReportResult:
     lead_count: int
     artifact_uri: str
     report_date: str
+    run_id: str
 
 
 async def _select_reportable_leads(db: AsyncSession) -> list[Lead]:
@@ -353,11 +354,13 @@ class ProspectingReportGenerator:
         run_id = str(uuid_mod.uuid4())
         structlog.contextvars.bind_contextvars(run_id=run_id)
         try:
-            return await self._generate_report_inner(db)
+            return await self._generate_report_inner(db, run_id=run_id)
         finally:
             structlog.contextvars.unbind_contextvars("run_id")
 
-    async def _generate_report_inner(self, db: AsyncSession) -> ReportResult | None:
+    async def _generate_report_inner(
+        self, db: AsyncSession, *, run_id: str,
+    ) -> ReportResult | None:
         """Inner report generation logic with bound logging context."""
         all_leads = await _select_reportable_leads(db)
         if not all_leads:
@@ -374,6 +377,18 @@ class ProspectingReportGenerator:
 
         # Emit selected-leads metric (total leads queried from DB)
         report_leads_total.labels(stage="selected").set(len(all_leads))
+
+        logger.info(
+            "report_pipeline_progress",
+            stage="selected",
+            selected=len(all_leads),
+        )
+
+        logger.info(
+            "report_pipeline_progress",
+            stage="reportable",
+            reportable=len(leads),
+        )
 
         # Build lead contexts with narrative sections
         lead_contexts = []
@@ -500,8 +515,7 @@ class ProspectingReportGenerator:
 
         logger.info(
             "report_pipeline_progress",
-            selected=len(all_leads),
-            reportable=len(leads),
+            stage="rendered",
             rendered=len(lead_contexts),
         )
 
@@ -611,6 +625,7 @@ class ProspectingReportGenerator:
             lead_count=len(lead_contexts),
             artifact_uri=artifact_uri,
             report_date=report_date,
+            run_id=run_id,
         )
 
 
