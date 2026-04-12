@@ -463,18 +463,26 @@ class ProspectingReportGenerator:
 
             lead_contexts.append(lead_ctx)
 
-        # Build summary stats (based on reportable leads, not all_leads)
+        # Build summary stats from rendered leads only (lead_contexts),
+        # not from the pre-filter `leads` list, so cover page stats match
+        # the leads that actually appear in the PDF body.
         by_jurisdiction: dict[str, int] = {}
-        for lead in leads:
-            j = lead.jurisdiction or "Unknown"
+        for lctx in lead_contexts:
+            j = lctx.get("jurisdiction") or "Unknown"
             by_jurisdiction[j] = by_jurisdiction.get(j, 0) + 1
 
         summary: dict[str, Any] = {
-            "total_leads": len(leads),
-            "incidents": sum(1 for ld in leads if ld.lead_type == "incident"),
-            "policies": sum(1 for ld in leads if ld.lead_type == "policy"),
+            "total_leads": len(lead_contexts),
+            "incidents": sum(
+                1 for lctx in lead_contexts if lctx.get("lead_type") == "incident"
+            ),
+            "policies": sum(
+                1 for lctx in lead_contexts if lctx.get("lead_type") == "policy"
+            ),
             "high_priority_count": sum(
-                1 for ld in leads if ld.severity in ("high", "critical")
+                1
+                for lctx in lead_contexts
+                if lctx.get("severity") in ("high", "critical")
             ),
             "by_jurisdiction": by_jurisdiction,
         }

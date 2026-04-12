@@ -669,3 +669,188 @@ class TestReportFiltering:
         lead = _make_lead(analysis_status="no_content", citations=None)
         result = _group_skipped_leads([lead])
         assert result["no_content"][0]["source_url"] == ""
+
+
+class TestSummaryStatsMatchRenderedLeads:
+    """Summary stats must reflect only leads that appear in the rendered PDF body."""
+
+    @pytest.mark.asyncio()
+    async def test_summary_excludes_non_english_leads(self):
+        """Leads skipped by the non-English title check must not appear in summary stats."""
+        rendered_lead = _make_lead(
+            title="UC Free Speech Policy",
+            lead_type="policy",
+            severity="high",
+        )
+        non_english_lead = _make_lead(
+            title="Política de Libertad",
+            lead_type="policy",
+            severity="critical",
+        )
+        non_english_lead.jurisdiction = "TX"
+
+        db = _mock_db([rendered_lead, non_english_lead])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        summary = ctx["summary"]
+        assert summary["total_leads"] == 1
+        assert summary["policies"] == 1
+        assert summary["high_priority_count"] == 1
+        assert "TX" not in summary["by_jurisdiction"]
+
+    @pytest.mark.asyncio()
+    async def test_summary_excludes_non_actionable_deep_analysis(self):
+        """Leads marked non-actionable by deep analysis must not appear in summary."""
+        rendered_lead = _make_lead(
+            title="Actionable Incident",
+            lead_type="incident",
+            severity="critical",
+            analysis_status="completed",
+            deep_analysis={"actionable": True, "incident_summary": "Real incident"},
+            citations={"source_citations": [{"url": "https://example.com"}]},
+        )
+        non_actionable_lead = _make_lead(
+            title="Routine Policy",
+            lead_type="policy",
+            severity="high",
+            analysis_status="completed",
+            deep_analysis={"actionable": False, "document_summary": "Routine"},
+        )
+        non_actionable_lead.jurisdiction = "NY"
+
+        db = _mock_db([rendered_lead, non_actionable_lead])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        summary = ctx["summary"]
+        assert summary["total_leads"] == 1
+        assert summary["incidents"] == 1
+        assert summary["policies"] == 0
+        assert summary["high_priority_count"] == 1  # critical counts
+        assert "NY" not in summary["by_jurisdiction"]
+
+    @pytest.mark.asyncio()
+    async def test_summary_excludes_failed_deep_analysis(self):
+        """Leads whose deep analysis failed must not appear in summary."""
+        rendered_lead = _make_lead(
+            title="Good Lead",
+            lead_type="incident",
+            severity="medium",
+        )
+        failed_lead = _make_lead(
+            title="Failed Analysis Lead",
+            lead_type="incident",
+            severity="critical",
+            analysis_status="completed",
+            deep_analysis=None,
+        )
+        failed_lead.jurisdiction = "FL"
+
+        db = _mock_db([rendered_lead, failed_lead])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        summary = ctx["summary"]
+        assert summary["total_leads"] == 1
+        assert summary["high_priority_count"] == 0  # only medium rendered
+        assert "FL" not in summary["by_jurisdiction"]
+
+    @pytest.mark.asyncio()
+    async def test_by_jurisdiction_only_rendered_leads(self):
+        """by_jurisdiction dict must only contain jurisdictions from rendered leads."""
+        lead_ca = _make_lead(title="CA Lead", severity="high")
+        lead_ca.jurisdiction = "CA"
+        lead_ny = _make_lead(title="Política NY", severity="high")
+        lead_ny.jurisdiction = "NY"  # non-English, will be filtered
+        lead_tx = _make_lead(title="TX Lead", severity="low")
+        lead_tx.jurisdiction = "TX"
+
+        db = _mock_db([lead_ca, lead_ny, lead_tx])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        summary = ctx["summary"]
+        assert summary["by_jurisdiction"] == {"CA": 1, "TX": 1}
+        assert "NY" not in summary["by_jurisdiction"]
+
+    @pytest.mark.asyncio()
+    async def test_mixed_rendered_and_filtered_leads(self):
+        """Report with a mix of rendered and filtered leads: stats match body."""
+        # Rendered leads
+        good_incident = _make_lead(
+            title="Free Speech Violation",
+            lead_type="incident",
+            severity="critical",
+        )
+        good_incident.jurisdiction = "CA"
+        good_policy = _make_lead(
+            title="New Campus Policy",
+            lead_type="policy",
+            severity="medium",
+            analysis_status="completed",
+            deep_analysis={"actionable": True, "provisions": [{"text": "ok"}]},
+            citations={"source_citations": [{"url": "https://example.com"}]},
+        )
+        good_policy.jurisdiction = "NY"
+
+        # Filtered leads (should not appear in stats)
+        non_english = _make_lead(title="Pansamantalang Policy", severity="high")
+        non_english.jurisdiction = "IL"
+        non_actionable = _make_lead(
+            title="Routine Update",
+            lead_type="policy",
+            severity="high",
+            analysis_status="completed",
+            deep_analysis={"actionable": False},
+        )
+        non_actionable.jurisdiction = "TX"
+        failed_analysis = _make_lead(
+            title="Failed Lead",
+            severity="critical",
+            analysis_status="failed",
+            deep_analysis=None,
+        )
+        failed_analysis.jurisdiction = "OH"
+
+        db = _mock_db([good_incident, good_policy, non_english, non_actionable, failed_analysis])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        summary = ctx["summary"]
+        # Only 2 leads rendered
+        assert summary["total_leads"] == 2
+        assert summary["incidents"] == 1
+        assert summary["policies"] == 1
+        assert summary["high_priority_count"] == 1  # only the critical incident
+        assert summary["by_jurisdiction"] == {"CA": 1, "NY": 1}
