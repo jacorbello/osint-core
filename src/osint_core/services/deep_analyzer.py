@@ -14,10 +14,14 @@ Two-pass architecture for policy analysis:
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import json
 import logging
 import re
+import socket
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from minio import Minio
@@ -28,6 +32,94 @@ from osint_core.services.courtlistener import CourtListenerClient
 from osint_core.services.document_extractor import DocumentExtractor
 
 logger = logging.getLogger(__name__)
+
+_MAX_REDIRECTS = 5
+
+
+def _is_ip_private(hostname: str) -> bool:
+    """Return True if *hostname* is a private, loopback, reserved, or link-local IP."""
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local
+
+
+def _parse_and_validate_url(url: str) -> str | None:
+    """Parse *url* and return the lowercase hostname if scheme is http(s).
+
+    Returns ``None`` when the URL is structurally invalid, uses a
+    disallowed scheme, or has no hostname.  Shared by redirect
+    validation and ``DeepAnalyzer._is_url_allowed``.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return None
+
+    if parsed.scheme not in ("http", "https"):
+        return None
+
+    hostname = (parsed.hostname or "").lower()
+    return hostname or None
+
+
+async def _is_redirect_target_safe(url: str) -> bool:
+    """Validate that a redirect target uses http(s) and does not resolve to a private IP."""
+    hostname = _parse_and_validate_url(url)
+    if hostname is None:
+        return False
+
+    # Check IP-literal hostnames directly
+    if _is_ip_private(hostname):
+        return False
+
+    # Resolve hostname without blocking the event loop
+    try:
+        loop = asyncio.get_running_loop()
+        infos = await loop.getaddrinfo(
+            hostname, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM,
+        )
+        for _family, _type, _proto, _canonname, sockaddr in infos:
+            ip_str = str(sockaddr[0])
+            if _is_ip_private(ip_str):
+                return False
+    except socket.gaierror:
+        pass  # DNS failure is not an SSRF risk; let the HTTP client handle it
+
+    return True
+
+
+async def _safe_get_with_redirects(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    max_redirects: int = _MAX_REDIRECTS,
+) -> httpx.Response | None:
+    """GET with manual redirect following and SSRF validation at every hop."""
+    for _ in range(max_redirects + 1):
+        if not await _is_redirect_target_safe(url):
+            logger.warning(
+                "redirect_target_blocked",
+                extra={"url": url, "reason": "private/reserved IP or bad scheme"},
+            )
+            return None
+
+        resp = await client.get(url, follow_redirects=False)
+
+        if resp.is_redirect:
+            location = resp.headers.get("Location")
+            if not location:
+                return None
+            # Resolve relative redirects
+            url = str(resp.url.join(location))
+            continue
+
+        return resp
+
+    logger.warning("redirect_limit_exceeded", extra={"url": url})
+    return None
+
 
 _POLICY_ANALYSIS_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -786,28 +878,12 @@ class DeepAnalyzer:
     @staticmethod
     def _is_url_allowed(url: str) -> bool:
         """Validate that a URL targets an allowed domain and is not a private IP."""
-        import ipaddress
-        from urllib.parse import urlparse
-
-        try:
-            parsed = urlparse(url)
-        except Exception:
+        hostname = _parse_and_validate_url(url)
+        if hostname is None:
             return False
 
-        if parsed.scheme not in ("http", "https"):
+        if _is_ip_private(hostname):
             return False
-
-        hostname = (parsed.hostname or "").lower()
-        if not hostname:
-            return False
-
-        # Reject private/loopback IPs
-        try:
-            addr = ipaddress.ip_address(hostname)
-            if addr.is_private or addr.is_loopback or addr.is_reserved:
-                return False
-        except ValueError:
-            pass  # not an IP literal — check domain suffix
 
         return any(
             hostname.endswith(suffix)
@@ -866,7 +942,10 @@ class DeepAnalyzer:
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(url, follow_redirects=True)
+                resp = await _safe_get_with_redirects(client, url)
+                if resp is None:
+                    logger.warning("deep_analysis_fetch_blocked", extra={"url": url})
+                    return getattr(event, "nlp_summary", None) or getattr(event, "summary", None)
                 resp.raise_for_status()
                 return DocumentExtractor.extract_html(resp.text)
         except Exception as exc:

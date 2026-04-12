@@ -6,10 +6,13 @@ import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from osint_core.services.deep_analyzer import (
     DeepAnalyzer,
+    _is_ip_private,
+    _safe_get_with_redirects,
 )
 
 
@@ -736,3 +739,179 @@ class TestEndToEnd:
         )
         assert len(citations["source_citations"]) >= 1
         assert citations["source_citations"][0]["url"] == "https://policy.ucop.edu/doc/3000127"
+
+
+# ---------------------------------------------------------------
+# Redirect validation (SSRF protection)
+# ---------------------------------------------------------------
+
+
+class TestIsIpPrivate:
+    def test_loopback_ipv4(self) -> None:
+        assert _is_ip_private("127.0.0.1") is True
+
+    def test_loopback_ipv6(self) -> None:
+        assert _is_ip_private("::1") is True
+
+    def test_private_10(self) -> None:
+        assert _is_ip_private("10.0.0.1") is True
+
+    def test_private_172(self) -> None:
+        assert _is_ip_private("172.16.0.1") is True
+
+    def test_private_192(self) -> None:
+        assert _is_ip_private("192.168.1.1") is True
+
+    def test_link_local(self) -> None:
+        assert _is_ip_private("169.254.169.254") is True
+
+    def test_public_ip(self) -> None:
+        assert _is_ip_private("8.8.8.8") is False
+
+    def test_hostname_not_ip(self) -> None:
+        assert _is_ip_private("example.com") is False
+
+
+async def _fake_public_getaddrinfo(host, port, *, family=0, type=0, proto=0, flags=0):
+    """Return a deterministic public IP for any hostname, avoiding real DNS."""
+    return [(2, 1, 6, "", ("93.184.216.34", 0))]
+
+
+class TestSafeGetWithRedirects:
+    @pytest.fixture(autouse=True)
+    def _patch_dns(self, monkeypatch):
+        """Patch loop.getaddrinfo so tests never perform real DNS resolution."""
+        import asyncio
+
+        _orig_get_loop = asyncio.get_running_loop
+
+        def _patched_get_running_loop():
+            loop = _orig_get_loop()
+            loop.getaddrinfo = _fake_public_getaddrinfo
+            return loop
+
+        monkeypatch.setattr(asyncio, "get_running_loop", _patched_get_running_loop)
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_metadata_endpoint_blocked(self) -> None:
+        """SSRF: redirect to cloud metadata endpoint must be blocked."""
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(
+                302,
+                headers={"Location": "http://169.254.169.254/latest/meta-data"},
+            )
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://example.com/article"
+            )
+        assert resp is None
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_loopback_blocked(self) -> None:
+        """SSRF: redirect to 127.0.0.1 must be blocked."""
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(
+                301,
+                headers={"Location": "http://127.0.0.1:8080/admin"},
+            )
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://news.example.com/story"
+            )
+        assert resp is None
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_file_scheme_blocked(self) -> None:
+        """Non-http(s) scheme must be rejected."""
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(
+                302,
+                headers={"Location": "file:///etc/passwd"},
+            )
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://evil.com/redirect"
+            )
+        assert resp is None
+
+    @pytest.mark.asyncio
+    async def test_max_redirects_enforced(self) -> None:
+        """Chain of 6 redirects must be stopped at max depth (5)."""
+        call_count = 0
+
+        def redirect_chain(req: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return httpx.Response(
+                302,
+                headers={"Location": f"http://news.example.com/hop{call_count}"},
+            )
+
+        transport = httpx.MockTransport(redirect_chain)
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://news.example.com/start"
+            )
+        assert resp is None
+
+    @pytest.mark.asyncio
+    async def test_legitimate_redirect_followed(self) -> None:
+        """Normal redirect to a public news site must succeed."""
+        def handler(req: httpx.Request) -> httpx.Response:
+            if "original" in str(req.url):
+                return httpx.Response(
+                    301,
+                    headers={"Location": "http://news.example.com/final-article"},
+                )
+            return httpx.Response(200, text="<p>Article content</p>")
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://news.example.com/original"
+            )
+        assert resp is not None
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_no_redirect_returns_directly(self) -> None:
+        """Non-redirect response returned as-is."""
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(200, text="<p>Direct content</p>")
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://example.com/page"
+            )
+        assert resp is not None
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_private_10_network_blocked(self) -> None:
+        """Redirect to 10.x.x.x must be blocked."""
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(
+                302,
+                headers={"Location": "http://10.0.0.5/internal"},
+            )
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://example.com/redir"
+            )
+        assert resp is None
+
+    @pytest.mark.asyncio
+    async def test_initial_url_with_private_ip_blocked(self) -> None:
+        """Even the initial URL should be validated."""
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(200, text="should not reach")
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://192.168.1.1/admin"
+            )
+        assert resp is None
