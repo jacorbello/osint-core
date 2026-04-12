@@ -772,7 +772,26 @@ class TestIsIpPrivate:
         assert _is_ip_private("example.com") is False
 
 
+async def _fake_public_getaddrinfo(host, port, *, family=0, type=0, proto=0, flags=0):
+    """Return a deterministic public IP for any hostname, avoiding real DNS."""
+    return [(2, 1, 6, "", ("93.184.216.34", 0))]
+
+
 class TestSafeGetWithRedirects:
+    @pytest.fixture(autouse=True)
+    def _patch_dns(self, monkeypatch):
+        """Patch loop.getaddrinfo so tests never perform real DNS resolution."""
+        import asyncio
+
+        _orig_get_loop = asyncio.get_running_loop
+
+        def _patched_get_running_loop():
+            loop = _orig_get_loop()
+            loop.getaddrinfo = _fake_public_getaddrinfo
+            return loop
+
+        monkeypatch.setattr(asyncio, "get_running_loop", _patched_get_running_loop)
+
     @pytest.mark.asyncio
     async def test_redirect_to_metadata_endpoint_blocked(self) -> None:
         """SSRF: redirect to cloud metadata endpoint must be blocked."""
