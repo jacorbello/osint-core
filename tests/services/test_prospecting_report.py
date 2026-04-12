@@ -1282,7 +1282,10 @@ class TestLeadSelectionMetrics:
 
         stage_mocks: dict[str, MagicMock] = {}
         mock_gauge = MagicMock()
-        mock_gauge.labels.side_effect = lambda **kw: stage_mocks.setdefault(kw["stage"], MagicMock())
+        def _stage_factory(**kw: str) -> MagicMock:
+            return stage_mocks.setdefault(kw["stage"], MagicMock())
+
+        mock_gauge.labels.side_effect = _stage_factory
 
         with patch(f"{_MOD}.report_leads_total", mock_gauge), \
              patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
@@ -1321,7 +1324,11 @@ class TestLeadSelectionMetrics:
 
         stage_mocks: dict[str, MagicMock] = {}
         mock_gauge = MagicMock()
-        mock_gauge.labels.side_effect = lambda **kw: stage_mocks.setdefault(kw["stage"], MagicMock())
+
+        def _stage_factory2(**kw: str) -> MagicMock:
+            return stage_mocks.setdefault(kw["stage"], MagicMock())
+
+        mock_gauge.labels.side_effect = _stage_factory2
 
         with patch(f"{_MOD}.report_leads_total", mock_gauge), \
              patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
