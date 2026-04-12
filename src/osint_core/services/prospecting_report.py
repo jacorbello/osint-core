@@ -522,7 +522,7 @@ class ProspectingReportGenerator:
         report = Report(
             artifact_uri=artifact_uri,
             generated_at=now,
-            lead_count=len(all_leads),
+            lead_count=len(lead_contexts),
             plan_id=_CAL_PLAN_ID,
         )
         db.add(report)
@@ -538,13 +538,13 @@ class ProspectingReportGenerator:
 
         logger.info(
             "prospecting_report_generated",
-            lead_count=len(all_leads),
+            lead_count=len(lead_contexts),
             artifact_uri=artifact_uri,
         )
 
         return ReportResult(
             pdf_bytes=pdf_bytes,
-            lead_count=len(all_leads),
+            lead_count=len(lead_contexts),
             artifact_uri=artifact_uri,
             report_date=report_date,
         )
