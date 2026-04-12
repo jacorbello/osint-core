@@ -362,10 +362,8 @@ class ProspectingReportGenerator:
         skipped = _group_skipped_leads(all_leads)
         leads = _filter_reportable_leads(all_leads)
 
-        # Emit lead selection metrics
+        # Emit selected-leads metric (total leads queried from DB)
         report_leads_total.labels(stage="selected").set(len(all_leads))
-        skipped_count = sum(len(v) for v in skipped.values())
-        report_leads_total.labels(stage="skipped").set(skipped_count)
 
         # Build lead contexts with narrative sections
         lead_contexts = []
@@ -484,6 +482,11 @@ class ProspectingReportGenerator:
 
             lead_contexts.append(lead_ctx)
             rendered_lead_ids.add(lead.id)
+
+        # Emit skipped-leads metric: all leads not rendered (filtered + skipped)
+        report_leads_total.labels(stage="skipped").set(
+            len(all_leads) - len(rendered_lead_ids),
+        )
 
         # Build summary stats from rendered leads only (lead_contexts),
         # not from the pre-filter `leads` list, so cover page stats match

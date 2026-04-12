@@ -471,6 +471,10 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
     recipients = _resolve_recipients(plan_content)
 
     if not recipients:
+        elapsed = time.monotonic() - start
+        report_generation_duration_seconds.observe(elapsed)
+        report_leads_total.labels(stage="rendered").set(result.lead_count)
+        report_generation_total.labels(outcome="completed").inc()
         logger.warning(
             "prospecting_report_no_recipients: lead_count=%d",
             result.lead_count,
@@ -640,10 +644,13 @@ def generate_prospecting_report_task(self: Any) -> dict[str, Any]:
             _generate_report_async(attempt=self.request.retries),
         )
     except Exception as exc:
-        from osint_core.metrics import report_generation_total
-
-        report_generation_total.labels(outcome="failed").inc()
         logger.exception("Prospecting report generation failed")
+        # Only count as a final failure when all retries are exhausted
+        retries_used = self.request.retries - guard.deferrals
+        if retries_used >= 3:  # max_retries for generation (excluding guard deferrals)
+            from osint_core.metrics import report_generation_total
+
+            report_generation_total.labels(outcome="failed").inc()
         raise self.retry(
             exc=exc,
             countdown=min(2 ** self.request.retries * 60, 300),
