@@ -797,3 +797,90 @@ class TestEmailDeliveryLogging:
         assert mock_report_result.artifact_uri in call_str
         assert "recipient_count" in call_str
         assert "latency_ms" in call_str
+
+
+class TestReportDateForwarding:
+    """Tests that report_date from ReportResult is forwarded to the notifier."""
+
+    @pytest.mark.asyncio()
+    @patch("osint_core.workers.prospecting.async_session")
+    async def test_send_report_receives_report_date(
+        self,
+        mock_session: MagicMock,
+        mock_report_result: MagicMock,
+    ) -> None:
+        """notifier.send_report() receives report_date=result.report_date."""
+        mock_db = AsyncMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
+                autospec=True,
+            ) as mock_gen_cls,
+            patch(
+                "osint_core.services.resend_notifier.ResendNotifier",
+                autospec=True,
+            ) as mock_notifier_cls,
+            patch(
+                "osint_core.services.plan_store.PlanStore",
+                autospec=True,
+            ) as mock_store_cls,
+            patch("osint_core.config.settings") as mock_settings,
+        ):
+            mock_gen_cls.return_value.generate_report = AsyncMock(
+                return_value=mock_report_result,
+            )
+            mock_notifier_cls.return_value.send_report = AsyncMock(return_value=True)
+            mock_store_cls.return_value.get_active = AsyncMock(return_value=None)
+            mock_settings.resend_recipients = "test@example.com"
+
+            await _generate_report_async()
+
+        call_kwargs = mock_notifier_cls.return_value.send_report.call_args
+        assert call_kwargs.kwargs["report_date"] == mock_report_result.report_date
+
+
+class TestGenerationFailureMetrics:
+    """Tests that generation failure emits the correct Prometheus metric."""
+
+    @patch("osint_core.workers.prospecting._check_pipeline_guard")
+    def test_generation_failure_increments_failed_counter(
+        self,
+        mock_guard: MagicMock,
+    ) -> None:
+        """report_generation_total{outcome=failed} increments when generation
+        raises an exception and retries are exhausted."""
+        from celery.exceptions import Retry
+
+        from osint_core.workers.prospecting import generate_prospecting_report_task
+
+        mock_guard.return_value = MagicMock(
+            should_defer=False, deferrals=0,
+        )
+
+        before = metrics.report_generation_total.labels(outcome="failed")._value.get()
+
+        with (
+            patch(
+                "osint_core.workers.prospecting.asyncio.new_event_loop",
+            ) as mock_loop_factory,
+            patch.object(
+                generate_prospecting_report_task, "retry", side_effect=Retry(),
+            ),
+        ):
+            loop = MagicMock()
+            loop.run_until_complete.side_effect = RuntimeError("generation boom")
+            mock_loop_factory.return_value = loop
+
+            # Push a fake request context with retries=3 so retries_used >= 3
+            generate_prospecting_report_task.push_request(retries=3)
+            try:
+                with pytest.raises(Retry):
+                    generate_prospecting_report_task()
+            finally:
+                generate_prospecting_report_task.pop_request()
+
+        after = metrics.report_generation_total.labels(outcome="failed")._value.get()
+        assert after == before + 1
