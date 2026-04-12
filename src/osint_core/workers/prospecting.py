@@ -494,6 +494,7 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
     )
 
     sent = False
+    email_start = time.monotonic()
     for email_attempt in range(1, _EMAIL_MAX_RETRIES + 1):
         try:
             sent = await notifier.send_report(
@@ -515,6 +516,13 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
             sent = False
 
         if sent:
+            email_latency_ms = round((time.monotonic() - email_start) * 1000)
+            logger.info(
+                "report_email_delivered",
+                report_id=result.artifact_uri,
+                recipient_count=len(recipients),
+                latency_ms=email_latency_ms,
+            )
             break
 
         if email_attempt < _EMAIL_MAX_RETRIES:
