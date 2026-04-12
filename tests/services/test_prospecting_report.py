@@ -48,6 +48,7 @@ def _make_lead(
     lead.event_ids = [uuid.uuid4()]
     lead.citations = citations if citations is not None else {"sources": ["https://example.com/article"]}
     lead.reported_at = reported_at
+    lead.report_id = None
     lead.last_updated_at = last_updated_at or datetime.now(UTC)
     lead.analysis_status = analysis_status
     lead.deep_analysis = deep_analysis
@@ -574,6 +575,119 @@ class TestLeadCountAccuracy:
             if type(call.args[0]).__name__ == "Report"
         ]
         assert report_adds[0].lead_count == 1
+
+
+class TestOnlyRenderedLeadsMarked:
+    """Only leads that appear in lead_contexts should be marked as reported (#294)."""
+
+    @pytest.fixture()
+    def generator(self):
+        return ProspectingReportGenerator()
+
+    @pytest.mark.asyncio()
+    async def test_filtered_leads_not_marked_reported(self, generator):
+        """Leads filtered out (non-actionable) should NOT get reported_at set."""
+        rendered_lead = _make_lead(status="new", title="Good Lead")
+        filtered_lead = _make_lead(
+            status="new",
+            title="Filtered Lead",
+            analysis_status="completed",
+            deep_analysis={"actionable": False},
+        )
+        db = _mock_db([rendered_lead, filtered_lead])
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            await generator.generate_report(db)
+
+        assert rendered_lead.reported_at is not None
+        assert filtered_lead.reported_at is None
+
+    @pytest.mark.asyncio()
+    async def test_filtered_leads_not_linked_to_report(self, generator):
+        """Leads filtered out should NOT get report_id set."""
+        rendered_lead = _make_lead(status="new", title="Good Lead")
+        filtered_lead = _make_lead(
+            status="new",
+            title="Filtered Lead",
+            analysis_status="completed",
+            deep_analysis={"actionable": False},
+        )
+        db = _mock_db([rendered_lead, filtered_lead])
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            await generator.generate_report(db)
+
+        assert rendered_lead.report_id is not None
+        assert filtered_lead.report_id is None
+
+    @pytest.mark.asyncio()
+    async def test_filtered_leads_retain_new_status(self, generator):
+        """Leads filtered out with status='new' should NOT transition to 'reviewing'."""
+        rendered_lead = _make_lead(status="new", title="Good Lead")
+        filtered_lead = _make_lead(
+            status="new",
+            title="Filtered Lead",
+            analysis_status="completed",
+            deep_analysis={"actionable": False},
+        )
+        db = _mock_db([rendered_lead, filtered_lead])
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            await generator.generate_report(db)
+
+        assert rendered_lead.status == "reviewing"
+        assert filtered_lead.status == "new"
+
+    @pytest.mark.asyncio()
+    async def test_non_english_leads_not_marked_reported(self, generator):
+        """Non-English leads (CJK title) should NOT get reported_at set."""
+        rendered_lead = _make_lead(status="new", title="Good Lead")
+        cjk_lead = _make_lead(status="new", title="\u5927\u5b66\u653f\u7b56")
+        db = _mock_db([rendered_lead, cjk_lead])
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            await generator.generate_report(db)
+
+        assert rendered_lead.reported_at is not None
+        assert cjk_lead.reported_at is None
+
+    @pytest.mark.asyncio()
+    async def test_mix_of_rendered_and_skipped_leads(self, generator):
+        """With 5 leads where 2 are filtered, only 3 should be marked reported."""
+        good1 = _make_lead(status="new", title="Lead A")
+        good2 = _make_lead(status="new", title="Lead B")
+        good3 = _make_lead(status="reviewing", title="Lead C")
+        bad1 = _make_lead(
+            status="new",
+            title="Non-actionable",
+            analysis_status="completed",
+            deep_analysis={"actionable": False},
+        )
+        bad2 = _make_lead(status="new", title="\u653f\u7b56\u6587\u4ef6")
+        db = _mock_db([good1, good2, good3, bad1, bad2])
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            await generator.generate_report(db)
+
+        # 3 rendered leads should be marked
+        marked = [ld for ld in [good1, good2, good3, bad1, bad2] if ld.reported_at is not None]
+        assert len(marked) == 3
+        # 2 filtered leads should NOT be marked
+        assert bad1.reported_at is None
+        assert bad2.reported_at is None
+        # Filtered leads retain original status
+        assert bad1.status == "new"
+        assert bad2.status == "new"
 
 
 class TestArchivePdf:

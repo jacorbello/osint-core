@@ -363,6 +363,7 @@ class ProspectingReportGenerator:
 
         # Build lead contexts with narrative sections
         lead_contexts = []
+        rendered_lead_ids: set[Any] = set()
         all_source_citations: list[str] = []
         all_legal_citations: list[dict[str, Any]] = []
 
@@ -462,6 +463,7 @@ class ProspectingReportGenerator:
                 }
 
             lead_contexts.append(lead_ctx)
+            rendered_lead_ids.add(lead.id)
 
         # Build summary stats from rendered leads only (lead_contexts),
         # not from the pre-filter `leads` list, so cover page stats match
@@ -536,8 +538,10 @@ class ProspectingReportGenerator:
         db.add(report)
         await db.flush()
 
-        # Update lead statuses and link to report (all leads, including skipped)
+        # Update lead statuses and link to report (only rendered leads)
         for lead in all_leads:
+            if lead.id not in rendered_lead_ids:
+                continue
             lead.reported_at = now
             lead.report_id = report.id
             if lead.status == "new":
