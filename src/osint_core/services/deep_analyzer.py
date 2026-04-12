@@ -455,7 +455,7 @@ class DeepAnalyzer:
             "lead_title": screening.get("lead_title", ""),
             "relevant": True,
             "actionable": len(unique) > 0,
-            "analysis_status": "complete" if unique else "not_actionable",
+            "analysis_status": "completed" if unique else "not_actionable",
         }
 
         # Step 7: Attach precedent
