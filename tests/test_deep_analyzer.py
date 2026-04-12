@@ -167,6 +167,45 @@ class TestAnalyzePolicy:
         assert result["provisions"][1]["section_reference"] == "§ 5.1"
 
     @pytest.mark.asyncio
+    async def test_actionable_policy_has_completed_status(self) -> None:
+        """JSONB analysis_status must be 'completed' (not 'complete')."""
+        analyzer = DeepAnalyzer(precedent_map={})
+        lead = _make_lead(lead_type="policy")
+        event = _make_event()
+
+        with (
+            patch.object(
+                analyzer,
+                "_retrieve_document",
+                new_callable=AsyncMock,
+                return_value=b"<p>Policy text with enough content to pass gates</p>" * 5,
+            ),
+            patch.object(analyzer, "_get_document_type", return_value="html"),
+            patch.object(
+                analyzer,
+                "_screen_document",
+                new_callable=AsyncMock,
+                return_value=SAMPLE_SCREENING_RELEVANT,
+            ),
+            patch.object(
+                analyzer,
+                "_analyze_provision",
+                new_callable=AsyncMock,
+                side_effect=[SAMPLE_PROVISION_RESULT_1, SAMPLE_PROVISION_RESULT_2],
+            ),
+            patch.object(
+                analyzer,
+                "_attach_precedent",
+                new_callable=AsyncMock,
+                side_effect=lambda a: a,
+            ),
+        ):
+            result = await analyzer.analyze_lead(lead, event)
+
+        assert result is not None
+        assert result["analysis_status"] == "completed"
+
+    @pytest.mark.asyncio
     async def test_non_actionable_policy(self) -> None:
         """Irrelevant document returns not_actionable via screening."""
         analyzer = DeepAnalyzer(precedent_map={})
