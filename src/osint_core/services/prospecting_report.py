@@ -408,10 +408,14 @@ class ProspectingReportGenerator:
                 # Source citations from lead metadata
                 shallow_cites: list[str] = []
                 if lead.citations:
-                    shallow_cites = lead.citations.get(
-                        "source_citations",
-                        lead.citations.get("sources", []),
-                    )
+                    raw = lead.citations.get("source_citations") or lead.citations.get("sources", [])
+                    for item in raw:
+                        if isinstance(item, dict):
+                            url = item.get("url", "")
+                            if url:
+                                shallow_cites.append(url)
+                        elif item:
+                            shallow_cites.append(item)
                     all_source_citations.extend(shallow_cites)
 
                 # Verify legal citations via CourtListener

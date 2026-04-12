@@ -1081,7 +1081,7 @@ class TestShallowCitationKeyNormalization:
             await generator.generate_report(db)
 
         ctx = mock_render.call_args[0][0]
-        assert ctx["all_source_citations"] == [{"url": "https://canonical.example.com"}]
+        assert ctx["all_source_citations"] == ["https://canonical.example.com"]
 
     @pytest.mark.asyncio()
     async def test_legacy_sources_key_fallback(self):
