@@ -1059,3 +1059,62 @@ class TestSummaryStatsMatchRenderedLeads:
         assert summary["policies"] == 1
         assert summary["high_priority_count"] == 1  # only the critical incident
         assert summary["by_jurisdiction"] == {"CA": 1, "NY": 1}
+
+
+class TestShallowCitationKeyNormalization:
+    """Shallow path must read citations under 'source_citations' (canonical)
+    and fall back to legacy 'sources' key."""
+
+    @pytest.mark.asyncio()
+    async def test_source_citations_key_used(self):
+        """Citations stored under canonical 'source_citations' are picked up."""
+        lead = _make_lead(
+            analysis_status="pending",
+            citations={"source_citations": [{"url": "https://canonical.example.com"}]},
+        )
+        db = _mock_db([lead])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        assert ctx["all_source_citations"] == [{"url": "https://canonical.example.com"}]
+
+    @pytest.mark.asyncio()
+    async def test_legacy_sources_key_fallback(self):
+        """Citations stored under legacy 'sources' key are still found."""
+        lead = _make_lead(
+            analysis_status="pending",
+            citations={"sources": ["https://legacy.example.com"]},
+        )
+        db = _mock_db([lead])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        assert ctx["all_source_citations"] == ["https://legacy.example.com"]
+
+    @pytest.mark.asyncio()
+    async def test_empty_citations_no_error(self):
+        """Empty citations dict produces no citations, no error."""
+        lead = _make_lead(
+            analysis_status="pending",
+            citations={},
+        )
+        db = _mock_db([lead])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        assert ctx["all_source_citations"] is None
