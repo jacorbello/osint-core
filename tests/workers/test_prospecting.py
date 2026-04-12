@@ -501,6 +501,50 @@ async def test_successful_report_delivery():
     assert result["artifact_uri"] == report_result.artifact_uri
 
 
+@pytest.mark.asyncio
+async def test_email_summary_uses_accurate_lead_count():
+    """Executive summary in the email reflects the accurate rendered lead count (#293)."""
+    report_result = _make_report_result(lead_count=6)
+
+    mock_generator = MagicMock()
+    mock_generator.generate_report = AsyncMock(return_value=report_result)
+
+    mock_notifier = MagicMock()
+    mock_notifier.send_report = AsyncMock(return_value=True)
+
+    mock_settings = MagicMock()
+    mock_settings.resend_recipients = "ops@example.com"
+
+    mock_session_ctx = AsyncMock()
+    mock_db = AsyncMock()
+    mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    mock_store = MagicMock()
+    mock_store.get_active = AsyncMock(return_value=None)
+
+    with patch(
+        "osint_core.workers.prospecting.async_session",
+        return_value=mock_session_ctx,
+    ), patch(
+        "osint_core.services.prospecting_report.ProspectingReportGenerator",
+        return_value=mock_generator,
+    ), patch(
+        "osint_core.services.resend_notifier.ResendNotifier",
+        return_value=mock_notifier,
+    ), patch(
+        "osint_core.services.plan_store.PlanStore",
+        return_value=mock_store,
+    ), patch(
+        "osint_core.config.settings", mock_settings,
+    ):
+        await _generate_report_async()
+
+    # Verify the executive_summary passed to send_report contains "6 leads"
+    call_kwargs = mock_notifier.send_report.call_args.kwargs
+    assert "6 leads" in call_kwargs["executive_summary"]
+
+
 def test_generate_report_task_max_retries():
     """Task max_retries includes guard deferrals plus generation retries."""
     from osint_core.workers.prospecting import generate_prospecting_report_task

@@ -485,6 +485,97 @@ class TestProspectingReportGenerator:
         assert lead1.report_id is not None
 
 
+class TestLeadCountAccuracy:
+    """lead_count reflects only rendered leads, not all selected leads (#293)."""
+
+    @pytest.fixture()
+    def generator(self):
+        return ProspectingReportGenerator()
+
+    @pytest.mark.asyncio()
+    async def test_lead_count_excludes_non_english_leads(self, generator):
+        """Non-English leads are filtered out; lead_count should match rendered count."""
+        english_lead = _make_lead(title="UC Berkeley Policy Update")
+        non_english_lead = _make_lead(title="Política de Privacidad")
+        db = _mock_db([english_lead, non_english_lead])
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+
+            result = await generator.generate_report(db)
+
+        assert result is not None
+        assert result.lead_count == 1, (
+            "lead_count should only count rendered leads, not filtered non-English ones"
+        )
+
+        # Verify the Report record also has the correct count
+        report_adds = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if type(call.args[0]).__name__ == "Report"
+        ]
+        assert len(report_adds) == 1
+        assert report_adds[0].lead_count == 1
+
+    @pytest.mark.asyncio()
+    async def test_lead_count_excludes_non_actionable_leads(self, generator):
+        """Deep-analysis non-actionable leads are excluded from lead_count."""
+        actionable_lead = _make_lead(
+            analysis_status="completed",
+            deep_analysis={
+                "actionable": True,
+                "executive_summary": "S",
+                "constitutional_analysis": "A",
+                "recommendation": "R",
+            },
+        )
+        non_actionable_lead = _make_lead(
+            analysis_status="completed",
+            deep_analysis={"actionable": False, "executive_summary": "S"},
+        )
+        db = _mock_db([actionable_lead, non_actionable_lead])
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+
+            result = await generator.generate_report(db)
+
+        assert result is not None
+        assert result.lead_count == 1, (
+            "lead_count should exclude non-actionable leads"
+        )
+
+    @pytest.mark.asyncio()
+    async def test_report_result_and_record_lead_count_match(self, generator):
+        """ReportResult.lead_count and Report.lead_count both equal rendered count."""
+        rendered = _make_lead(title="Valid Lead A")
+        filtered_cjk = _make_lead(title="\u6d4b\u8bd5\u653f\u7b56")  # CJK title
+        filtered_non_actionable = _make_lead(
+            analysis_status="completed",
+            deep_analysis={"actionable": False},
+        )
+        db = _mock_db([rendered, filtered_cjk, filtered_non_actionable])
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+
+            result = await generator.generate_report(db)
+
+        assert result is not None
+        assert result.lead_count == 1
+
+        report_adds = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if type(call.args[0]).__name__ == "Report"
+        ]
+        assert report_adds[0].lead_count == 1
+
+
 class TestArchivePdf:
     """Tests for the _archive_pdf helper."""
 
