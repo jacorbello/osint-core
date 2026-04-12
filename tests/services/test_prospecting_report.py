@@ -1374,6 +1374,7 @@ class TestStructuredLoggingContext:
         with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
              patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
              patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"), \
+             patch(f"{_MOD}.structlog.contextvars.bind_contextvars"), \
              patch(f"{_MOD}.structlog.contextvars.unbind_contextvars") as mock_unbind:
             await generator.generate_report(db)
 

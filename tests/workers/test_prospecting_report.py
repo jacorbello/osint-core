@@ -756,7 +756,7 @@ class TestEmailDeliveryLogging:
         mock_sleep: AsyncMock,
         mock_report_result: MagicMock,
     ) -> None:
-        """Email delivery completion log includes report_id, recipient_count, latency_ms."""
+        """Email delivery completion log includes artifact_uri, recipient_count, latency_ms."""
         mock_db = AsyncMock()
         mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
         mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -793,5 +793,7 @@ class TestEmailDeliveryLogging:
         ]
         assert len(delivery_calls) == 1
         call_str = str(delivery_calls[0])
+        assert "artifact_uri" in call_str
+        assert mock_report_result.artifact_uri in call_str
         assert "recipient_count" in call_str
         assert "latency_ms" in call_str
