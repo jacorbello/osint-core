@@ -393,6 +393,11 @@ class ProspectingReportGenerator:
                 lead_ctx["source_url"] = source_cites[0].get("url", "") if source_cites else ""
                 legal_cites = citations_data.get("legal_citations", [])
                 lead_ctx["legal_citations"] = legal_cites
+                # Accumulate into global citation lists for the appendix
+                all_source_citations.extend(
+                    c.get("url", "") for c in source_cites if c.get("url")
+                )
+                all_legal_citations.extend(legal_cites)
             elif analysis_status in ("completed", "no_source_material", "failed"):
                 # Deep analysis ran but produced nothing useful — skip
                 continue
@@ -403,10 +408,16 @@ class ProspectingReportGenerator:
                 # Source citations from lead metadata
                 shallow_cites: list[str] = []
                 if lead.citations:
-                    shallow_cites = lead.citations.get(
-                        "source_citations",
-                        lead.citations.get("sources", []),
+                    raw = lead.citations.get("source_citations") or lead.citations.get(
+                        "sources", [],
                     )
+                    for item in raw:
+                        if isinstance(item, dict):
+                            url = item.get("url", "")
+                            if url:
+                                shallow_cites.append(url)
+                        elif item:
+                            shallow_cites.append(item)
                     all_source_citations.extend(shallow_cites)
 
                 # Verify legal citations via CourtListener
@@ -491,6 +502,18 @@ class ProspectingReportGenerator:
             ),
             "by_jurisdiction": by_jurisdiction,
         }
+
+        # Deduplicate citations
+        all_source_citations = list(dict.fromkeys(all_source_citations))
+        seen_legal: set[str] = set()
+        deduped_legal: list[dict[str, Any]] = []
+        for lc in all_legal_citations:
+            key = (lc.get("case_name", ""), lc.get("citation", ""))
+            key_str = f"{key[0]}|{key[1]}"
+            if key_str not in seen_legal:
+                seen_legal.add(key_str)
+                deduped_legal.append(lc)
+        all_legal_citations = deduped_legal
 
         # Render HTML
         context = {

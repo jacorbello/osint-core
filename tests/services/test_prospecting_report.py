@@ -1081,7 +1081,7 @@ class TestShallowCitationKeyNormalization:
             await generator.generate_report(db)
 
         ctx = mock_render.call_args[0][0]
-        assert ctx["all_source_citations"] == [{"url": "https://canonical.example.com"}]
+        assert ctx["all_source_citations"] == ["https://canonical.example.com"]
 
     @pytest.mark.asyncio()
     async def test_legacy_sources_key_fallback(self):
@@ -1118,3 +1118,152 @@ class TestShallowCitationKeyNormalization:
 
         ctx = mock_render.call_args[0][0]
         assert ctx["all_source_citations"] is None
+
+
+class TestCitationsAppendixAccumulation:
+    """Citations appendix should include citations from both deep and shallow leads."""
+
+    @pytest.mark.asyncio()
+    async def test_deep_analysis_leads_contribute_source_citations(self):
+        """Deep analysis leads should add their source_citations to all_source_citations."""
+        deep_lead = _make_lead(
+            analysis_status="completed",
+            deep_analysis={
+                "actionable": True,
+                "incident_summary": "Real incident",
+            },
+            citations={
+                "source_citations": [
+                    {"url": "https://deep-source.example.com", "title": "Deep Source"},
+                ],
+                "legal_citations": [],
+            },
+        )
+        db = _mock_db([deep_lead])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        source_cites = ctx.get("all_source_citations") or []
+        assert len(source_cites) >= 1
+        assert "https://deep-source.example.com" in source_cites
+
+    @pytest.mark.asyncio()
+    async def test_deep_analysis_leads_contribute_legal_citations(self):
+        """Deep analysis leads should add their legal_citations to all_legal_citations."""
+        deep_lead = _make_lead(
+            analysis_status="completed",
+            deep_analysis={
+                "actionable": True,
+                "incident_summary": "Real incident",
+            },
+            citations={
+                "source_citations": [],
+                "legal_citations": [
+                    {
+                        "case_name": "Tinker v. Des Moines",
+                        "citation": "393 U.S. 503",
+                        "url": "https://court.example.com/tinker",
+                    },
+                ],
+            },
+        )
+        db = _mock_db([deep_lead])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        legal_cites = ctx.get("all_legal_citations") or []
+        assert len(legal_cites) == 1
+        assert legal_cites[0]["case_name"] == "Tinker v. Des Moines"
+
+    @pytest.mark.asyncio()
+    async def test_mixed_deep_and_shallow_leads_accumulate_citations(self):
+        """Both deep and shallow leads should contribute to the citations appendix."""
+        deep_lead = _make_lead(
+            title="Deep Lead",
+            analysis_status="completed",
+            deep_analysis={
+                "actionable": True,
+                "incident_summary": "Deep incident",
+            },
+            citations={
+                "source_citations": [
+                    {"url": "https://deep.example.com", "title": "Deep"},
+                ],
+                "legal_citations": [
+                    {"case_name": "Deep Case", "citation": "100 U.S. 1"},
+                ],
+            },
+        )
+        shallow_lead = _make_lead(
+            title="Shallow Lead",
+            analysis_status="pending",
+            citations={
+                "sources": ["https://shallow.example.com"],
+                "source_citations": [],
+            },
+        )
+        db = _mock_db([deep_lead, shallow_lead])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        source_cites = ctx.get("all_source_citations") or []
+        legal_cites = ctx.get("all_legal_citations") or []
+        assert "https://deep.example.com" in source_cites
+        assert "https://shallow.example.com" in source_cites
+        assert any(c["case_name"] == "Deep Case" for c in legal_cites)
+
+    @pytest.mark.asyncio()
+    async def test_duplicate_citations_are_deduplicated(self):
+        """Duplicate citations across leads should appear only once in the appendix."""
+        shared_citations = {
+            "source_citations": [
+                {"url": "https://same-source.example.com", "title": "Same"},
+            ],
+            "legal_citations": [
+                {"case_name": "Same Case", "citation": "200 U.S. 2"},
+            ],
+        }
+        lead_a = _make_lead(
+            title="Lead A",
+            analysis_status="completed",
+            deep_analysis={"actionable": True, "incident_summary": "A"},
+            citations=shared_citations,
+        )
+        lead_b = _make_lead(
+            title="Lead B",
+            analysis_status="completed",
+            deep_analysis={"actionable": True, "incident_summary": "B"},
+            citations=shared_citations,
+        )
+        db = _mock_db([lead_a, lead_b])
+        generator = ProspectingReportGenerator()
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>") as mock_render:
+
+            await generator.generate_report(db)
+
+        ctx = mock_render.call_args[0][0]
+        source_cites = ctx.get("all_source_citations") or []
+        legal_cites = ctx.get("all_legal_citations") or []
+        assert source_cites.count("https://same-source.example.com") == 1
+        assert sum(1 for c in legal_cites if c["case_name"] == "Same Case") == 1
