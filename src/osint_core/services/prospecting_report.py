@@ -7,6 +7,7 @@ import asyncio
 import importlib.resources
 import json
 import re
+import uuid as uuid_mod
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -349,6 +350,15 @@ class ProspectingReportGenerator:
 
         Returns None if no reportable leads exist.
         """
+        run_id = str(uuid_mod.uuid4())
+        structlog.contextvars.bind_contextvars(run_id=run_id)
+        try:
+            return await self._generate_report_inner(db)
+        finally:
+            structlog.contextvars.unbind_contextvars("run_id")
+
+    async def _generate_report_inner(self, db: AsyncSession) -> ReportResult | None:
+        """Inner report generation logic with bound logging context."""
         all_leads = await _select_reportable_leads(db)
         if not all_leads:
             logger.info("prospecting_report_no_leads")
@@ -486,6 +496,13 @@ class ProspectingReportGenerator:
         # Emit skipped-leads metric: all leads not rendered (filtered + skipped)
         report_leads_total.labels(stage="skipped").set(
             len(all_leads) - len(rendered_lead_ids),
+        )
+
+        logger.info(
+            "report_pipeline_progress",
+            selected=len(all_leads),
+            reportable=len(leads),
+            rendered=len(lead_contexts),
         )
 
         # Build summary stats from rendered leads only (lead_contexts),

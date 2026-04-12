@@ -742,3 +742,58 @@ class TestReportMetricsEmission:
 
         rendered = metrics.report_leads_total.labels(stage="rendered")._value.get()
         assert rendered == 5
+
+
+class TestEmailDeliveryLogging:
+    """Tests for structured email delivery logging."""
+
+    @pytest.mark.asyncio()
+    @patch("osint_core.workers.prospecting.asyncio.sleep", new_callable=AsyncMock)
+    @patch("osint_core.workers.prospecting.async_session")
+    async def test_email_delivery_log_includes_structured_fields(
+        self,
+        mock_session: MagicMock,
+        mock_sleep: AsyncMock,
+        mock_report_result: MagicMock,
+    ) -> None:
+        """Email delivery completion log includes artifact_uri, recipient_count, latency_ms."""
+        mock_db = AsyncMock()
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "osint_core.services.prospecting_report.ProspectingReportGenerator",
+                autospec=True,
+            ) as mock_gen_cls,
+            patch(
+                "osint_core.services.resend_notifier.ResendNotifier",
+                autospec=True,
+            ) as mock_notifier_cls,
+            patch(
+                "osint_core.services.plan_store.PlanStore",
+                autospec=True,
+            ) as mock_store_cls,
+            patch("osint_core.config.settings") as mock_settings,
+            patch("osint_core.workers.prospecting.logger") as mock_logger,
+        ):
+            mock_gen_cls.return_value.generate_report = AsyncMock(
+                return_value=mock_report_result,
+            )
+            mock_notifier_cls.return_value.send_report = AsyncMock(return_value=True)
+            mock_store_cls.return_value.get_active = AsyncMock(return_value=None)
+            mock_settings.resend_recipients = "a@example.com,b@example.com"
+
+            await _generate_report_async()
+
+        # Find the report_email_delivered log call
+        delivery_calls = [
+            c for c in mock_logger.info.call_args_list
+            if "report_email_delivered" in str(c)
+        ]
+        assert len(delivery_calls) == 1
+        call_str = str(delivery_calls[0])
+        assert "artifact_uri" in call_str
+        assert mock_report_result.artifact_uri in call_str
+        assert "recipient_count" in call_str
+        assert "latency_ms" in call_str

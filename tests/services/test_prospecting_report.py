@@ -1344,3 +1344,81 @@ class TestLeadSelectionMetrics:
         stage_mocks["skipped"].set.assert_called_with(2)
         assert result is not None
         assert result.lead_count == 1
+
+
+class TestStructuredLoggingContext:
+    """Tests for structured logging context binding in report pipeline."""
+
+    @pytest.mark.asyncio()
+    async def test_bind_contextvars_called_with_run_id(self) -> None:
+        lead = _make_lead()
+        db = _mock_db([lead])
+
+        generator = ProspectingReportGenerator()
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"), \
+             patch(f"{_MOD}.structlog.contextvars.bind_contextvars") as mock_bind:
+            await generator.generate_report(db)
+
+        mock_bind.assert_called_once()
+        call_kwargs = mock_bind.call_args[1]
+        assert "run_id" in call_kwargs
+
+    @pytest.mark.asyncio()
+    async def test_unbind_contextvars_called_on_success(self) -> None:
+        lead = _make_lead()
+        db = _mock_db([lead])
+
+        generator = ProspectingReportGenerator()
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"), \
+             patch(f"{_MOD}.structlog.contextvars.bind_contextvars"), \
+             patch(f"{_MOD}.structlog.contextvars.unbind_contextvars") as mock_unbind:
+            await generator.generate_report(db)
+
+        mock_unbind.assert_called_once_with("run_id")
+
+    @pytest.mark.asyncio()
+    async def test_unbind_contextvars_called_on_failure(self) -> None:
+        lead = _make_lead()
+        db = _mock_db([lead])
+
+        generator = ProspectingReportGenerator()
+        with (
+            patch(
+                f"{_MOD}._select_reportable_leads",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("db error"),
+            ),
+            patch(f"{_MOD}.structlog.contextvars.bind_contextvars"),
+            patch(f"{_MOD}.structlog.contextvars.unbind_contextvars") as mock_unbind,
+            pytest.raises(RuntimeError, match="db error"),
+        ):
+            await generator.generate_report(db)
+
+        mock_unbind.assert_called_once_with("run_id")
+
+    @pytest.mark.asyncio()
+    async def test_pipeline_progress_logged(self) -> None:
+        lead = _make_lead()
+        db = _mock_db([lead])
+
+        generator = ProspectingReportGenerator()
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"), \
+             patch(f"{_MOD}.logger") as mock_logger:
+            await generator.generate_report(db)
+
+        # Check that report_pipeline_progress was logged
+        progress_calls = [
+            c for c in mock_logger.info.call_args_list
+            if c.args and c.args[0] == "report_pipeline_progress"
+        ]
+        assert len(progress_calls) == 1
+        kwargs = progress_calls[0].kwargs
+        assert "selected" in kwargs
+        assert "reportable" in kwargs
+        assert "rendered" in kwargs
