@@ -389,6 +389,7 @@ class ProspectingReportGenerator:
             stage="reportable",
             reportable=len(leads),
         )
+        report_leads_total.labels(stage="reportable").set(len(leads))
 
         # Build lead contexts with narrative sections
         lead_contexts = []
