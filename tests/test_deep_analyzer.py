@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from osint_core.services.deep_analyzer import (
+    _MAX_RESPONSE_BYTES,
     DeepAnalyzer,
     _is_ip_private,
     _safe_get_with_redirects,
@@ -945,3 +946,128 @@ class TestFetchUrlContentAllowlist:
             result = await analyzer._fetch_url_content("https://example.gov/doc.pdf")
 
         assert result == b"policy document bytes"
+
+
+# ---------------------------------------------------------------
+# Response size limit tests
+# ---------------------------------------------------------------
+
+
+class TestResponseSizeLimit:
+    def test_default_limit_is_10mb(self) -> None:
+        assert _MAX_RESPONSE_BYTES == 10 * 1024 * 1024
+
+    @pytest.mark.asyncio
+    async def test_fetch_url_content_rejects_oversized_content_length(self) -> None:
+        """Content-Length exceeding limit causes immediate abort (no body download)."""
+        from osint_core.services.deep_analyzer import _check_content_length
+
+        oversized = str(_MAX_RESPONSE_BYTES + 1)
+        resp = httpx.Response(
+            200,
+            headers={"Content-Length": oversized},
+            content=b"should not be read",
+        )
+        # Verify the Content-Length check rejects this
+        assert _check_content_length(resp.headers, "https://example.edu/big.pdf") is True
+
+    @pytest.mark.asyncio
+    async def test_fetch_url_content_allows_normal_sized_response(self) -> None:
+        """Response within limit returns body via _read_body_with_limit."""
+        from osint_core.services.deep_analyzer import _check_content_length, _read_body_with_limit
+
+        body = b"<p>Normal policy document</p>"
+        resp = httpx.Response(
+            200,
+            headers={"Content-Length": str(len(body))},
+            content=body,
+        )
+        assert _check_content_length(resp.headers, "https://example.edu/policy.html") is False
+        result = await _read_body_with_limit(resp, "https://example.edu/policy.html")
+        assert result == body
+
+    @pytest.mark.asyncio
+    async def test_streaming_abort_when_no_content_length(self) -> None:
+        """Streaming body exceeding limit is aborted when Content-Length is absent."""
+        from osint_core.services.deep_analyzer import _read_body_with_limit
+
+        chunk_size = 1024 * 1024  # 1 MB chunks
+        num_chunks = 11  # 11 MB total > 10 MB limit
+
+        async def _fake_aiter_bytes():
+            for _ in range(num_chunks):
+                yield b"x" * chunk_size
+
+        resp = MagicMock()
+        resp.headers = httpx.Headers({})  # No Content-Length
+        resp.aiter_bytes = _fake_aiter_bytes
+        resp.aclose = AsyncMock()
+
+        result = await _read_body_with_limit(resp, "https://example.edu/huge.pdf")
+        assert result is None
+        resp.aclose.assert_awaited_once()
+
+    @pytest.fixture(autouse=True)
+    def _patch_dns(self, monkeypatch):
+        """Patch loop.getaddrinfo so tests never perform real DNS resolution."""
+        import asyncio
+
+        _orig_get_loop = asyncio.get_running_loop
+
+        def _patched_get_running_loop():
+            loop = _orig_get_loop()
+            loop.getaddrinfo = _fake_public_getaddrinfo
+            return loop
+
+        monkeypatch.setattr(asyncio, "get_running_loop", _patched_get_running_loop)
+
+    @pytest.mark.asyncio
+    async def test_safe_get_rejects_oversized_content_length(self) -> None:
+        """_safe_get_with_redirects rejects responses exceeding size limit."""
+        oversized = str(_MAX_RESPONSE_BYTES + 1)
+
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(
+                200,
+                headers={"Content-Length": oversized},
+                content=b"should not be read",
+            )
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://news.example.com/article"
+            )
+        assert resp is None
+
+    @pytest.mark.asyncio
+    async def test_safe_get_allows_normal_response(self) -> None:
+        """_safe_get_with_redirects returns normal-sized responses."""
+        body = b"<p>Article content</p>"
+
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(
+                200,
+                headers={"Content-Length": str(len(body))},
+                content=body,
+            )
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://news.example.com/article"
+            )
+        assert resp is not None
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_safe_get_streaming_abort_over_limit(self) -> None:
+        """_safe_get_with_redirects aborts chunked responses exceeding limit."""
+        body = b"x" * (_MAX_RESPONSE_BYTES + 1024)
+
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(200, content=body)
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://news.example.com/big-article"
+            )
+        assert resp is None
