@@ -1345,6 +1345,37 @@ class TestLeadSelectionMetrics:
         assert result is not None
         assert result.lead_count == 1
 
+    @pytest.mark.asyncio()
+    async def test_reportable_gauge_set_after_filtering(self) -> None:
+        """report_leads_total{stage=reportable} is set to post-filter count."""
+        reportable = _make_lead(title="Reportable", analysis_status="pending")
+        filtered_out = _make_lead(
+            title="Filtered", analysis_status="extraction_failed"
+        )
+        db = _mock_db([reportable, filtered_out])
+        generator = ProspectingReportGenerator()
+
+        stage_mocks: dict[str, MagicMock] = {}
+        mock_gauge = MagicMock()
+
+        def _stage_factory(**kw: str) -> MagicMock:
+            return stage_mocks.setdefault(kw["stage"], MagicMock())
+
+        mock_gauge.labels.side_effect = _stage_factory
+
+        with patch(f"{_MOD}.report_leads_total", mock_gauge), \
+             patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"):
+            import weasyprint
+            with patch.object(weasyprint, "HTML") as mock_wp:
+                mock_wp.return_value.write_pdf.return_value = b"%PDF-fake"
+                await generator.generate_report(db)
+
+        # 2 total, 1 reportable after filtering (extraction_failed removed)
+        assert "reportable" in stage_mocks
+        stage_mocks["reportable"].set.assert_called_with(1)
+
 
 class TestStructuredLoggingContext:
     """Tests for structured logging context binding in report pipeline."""
