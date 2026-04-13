@@ -13,6 +13,7 @@ from osint_core.services.deep_analyzer import (
     _MAX_RESPONSE_BYTES,
     DeepAnalyzer,
     _is_ip_private,
+    _resolve_and_validate,
     _safe_get_with_redirects,
 )
 
@@ -53,7 +54,7 @@ def _make_event(
 SAMPLE_POLICY_ANALYSIS = {
     "provisions": [
         {
-            "section_reference": "§ 4.2",
+            "section_reference": "\u00a7 4.2",
             "quoted_language": "Students must use preferred pronouns.",
             "constitutional_issue": "Compelled speech",
             "constitutional_basis": "1A-free-speech",
@@ -83,7 +84,7 @@ SAMPLE_SCREENING_RELEVANT = {
     "lead_title": "UC Berkeley Speech Policy",
     "document_summary": "Policy regulating campus speech.",
     "overall_assessment": "Contains provisions restricting free speech.",
-    "flagged_sections": ["§ 4.2 - Pronoun Requirements", "§ 5.1 - Protest Zones"],
+    "flagged_sections": ["\u00a7 4.2 - Pronoun Requirements", "\u00a7 5.1 - Protest Zones"],
 }
 
 SAMPLE_SCREENING_IRRELEVANT = {
@@ -98,14 +99,14 @@ SAMPLE_SCREENING_IRRELEVANT = {
 SAMPLE_SCREENING_NON_ENGLISH = {
     "relevant": True,
     "language": "es",
-    "lead_title": "Política Universitaria",
+    "lead_title": "Pol\u00edtica Universitaria",
     "document_summary": "Spanish language policy.",
-    "overall_assessment": "Cannot assess — non-English.",
+    "overall_assessment": "Cannot assess \u2014 non-English.",
     "flagged_sections": [],
 }
 
 SAMPLE_PROVISION_RESULT_1 = {
-    "section_reference": "§ 4.2",
+    "section_reference": "\u00a7 4.2",
     "quoted_language": "Students must use preferred pronouns.",
     "constitutional_issue": "Compelled speech under First Amendment",
     "constitutional_basis": "1A-free-speech",
@@ -116,7 +117,7 @@ SAMPLE_PROVISION_RESULT_1 = {
 }
 
 SAMPLE_PROVISION_RESULT_2 = {
-    "section_reference": "§ 5.1",
+    "section_reference": "\u00a7 5.1",
     "quoted_language": "All protests must occur in designated zones.",
     "constitutional_issue": "Restriction on assembly in public forum",
     "constitutional_basis": "1A-assembly",
@@ -167,8 +168,8 @@ class TestAnalyzePolicy:
         assert result is not None
         assert result["actionable"] is True
         assert len(result["provisions"]) == 2  # two flagged sections
-        assert result["provisions"][0]["section_reference"] == "§ 4.2"
-        assert result["provisions"][1]["section_reference"] == "§ 5.1"
+        assert result["provisions"][0]["section_reference"] == "\u00a7 4.2"
+        assert result["provisions"][1]["section_reference"] == "\u00a7 5.1"
 
     @pytest.mark.asyncio
     async def test_actionable_policy_has_completed_status(self) -> None:
@@ -345,13 +346,13 @@ class TestPass2ProvisionAnalysis:
         ):
             result = await analyzer._analyze_provision(
                 lead, event,
-                full_doc="Full doc text with § 4.2 Students must use preferred pronouns.",
-                flagged_section="§ 4.2 - Pronoun Requirements",
+                full_doc="Full doc text with \u00a7 4.2 Students must use preferred pronouns.",
+                flagged_section="\u00a7 4.2 - Pronoun Requirements",
                 corroborating_events=[],
             )
 
         assert result is not None
-        assert result["section_reference"] == "§ 4.2"
+        assert result["section_reference"] == "\u00a7 4.2"
         assert result["constitutional_basis"] == "1A-free-speech"
         assert "sources_cited" in result
 
@@ -359,12 +360,12 @@ class TestPass2ProvisionAnalysis:
         analyzer = DeepAnalyzer(precedent_map={})
         full_text = (
             "Preamble text.\n\n"
-            "§ 4.2 Pronoun Requirements\n"
+            "\u00a7 4.2 Pronoun Requirements\n"
             "Students must use preferred pronouns in all communications.\n\n"
-            "§ 5.1 Protest Zones\n"
+            "\u00a7 5.1 Protest Zones\n"
             "All protests must occur in designated zones."
         )
-        result = analyzer._extract_section_text(full_text, "§ 4.2 - Pronoun Requirements")
+        result = analyzer._extract_section_text(full_text, "\u00a7 4.2 - Pronoun Requirements")
         assert "Students must use preferred pronouns" in result
 
     def test_extract_section_text_fuzzy_match(self) -> None:
@@ -464,7 +465,7 @@ class TestTwoPassFlow:
         lead = _make_lead()
         event = _make_event()
 
-        # Garbled bytes — lots of replacement chars
+        # Garbled bytes -- lots of replacement chars
         garbled = ("\ufffd" * 100).encode("utf-8")
 
         with (
@@ -487,8 +488,8 @@ class TestTwoPassFlow:
 
         # Text that passes encoding but is non-English
         spanish_text = (
-            "Esta es una política universitaria sobre los"
-            " procedimientos administrativos y la gestión"
+            "Esta es una pol\u00edtica universitaria sobre los"
+            " procedimientos administrativos y la gesti\u00f3n"
             " de recursos humanos en la universidad. "
         ) * 5
         doc_bytes = f"<p>{spanish_text}</p>".encode()
@@ -550,14 +551,14 @@ class TestCitationsAndSeverity:
     def test_build_citations_from_provisions(self) -> None:
         provisions = [
             {
-                "section_reference": "§ 4.2",
+                "section_reference": "\u00a7 4.2",
                 "quoted_language": "Students must use preferred pronouns.",
                 "constitutional_basis": "1A-free-speech",
                 "severity": "high",
                 "sources_cited": ["Janus v. AFSCME"],
             },
             {
-                "section_reference": "§ 5.1",
+                "section_reference": "\u00a7 5.1",
                 "quoted_language": "All protests must occur in designated zones.",
                 "constitutional_basis": "1A-assembly",
                 "severity": "medium",
@@ -602,7 +603,7 @@ class TestCitationsAndSeverity:
         src = result["source_citations"][0]
         assert src["type"] == "policy_document"
         assert src["title"] == "UC Berkeley Speech Policy"
-        assert src["section"] == "§ 4.2"
+        assert src["section"] == "\u00a7 4.2"
         assert src["archived_artifact_id"] == "minio://osint-artifacts/policy.html"
 
         # Check legal citation fields
@@ -614,9 +615,9 @@ class TestCitationsAndSeverity:
 
     def test_build_citations_deduplicates_by_section(self) -> None:
         provisions = [
-            {"section_reference": "§ 4.2", "severity": "high"},
-            {"section_reference": "§ 4.2", "severity": "medium"},
-            {"section_reference": "§ 5.1", "severity": "low"},
+            {"section_reference": "\u00a7 4.2", "severity": "high"},
+            {"section_reference": "\u00a7 4.2", "severity": "medium"},
+            {"section_reference": "\u00a7 5.1", "severity": "low"},
         ]
         result = DeepAnalyzer.build_citations(
             provisions, [],
@@ -625,7 +626,7 @@ class TestCitationsAndSeverity:
         )
         assert len(result["source_citations"]) == 2
         sections = [c["section"] for c in result["source_citations"]]
-        assert sections == ["§ 4.2", "§ 5.1"]
+        assert sections == ["\u00a7 4.2", "\u00a7 5.1"]
 
     def test_compute_max_severity(self) -> None:
         assert DeepAnalyzer.compute_max_severity(
@@ -685,7 +686,7 @@ class TestEndToEnd:
 
         screening = {
             "relevant": True, "language": "en",
-            "lead_title": "UC Political Activities — Facial 1A Speech Restrictions",
+            "lead_title": "UC Political Activities \u2014 Facial 1A Speech Restrictions",
             "document_summary": "Policy restricts political activities on campus.",
             "overall_assessment": "Likely unconstitutional facial restriction.",
             "flagged_sections": [
@@ -693,7 +694,7 @@ class TestEndToEnd:
             ],
         }
         provision = {
-            "section_reference": "§ 4.2",
+            "section_reference": "\u00a7 4.2",
             "quoted_language": "No University facility shall be used for political activities.",
             "constitutional_issue": "Content-based restriction on political speech",
             "constitutional_basis": "1A-free-speech",
@@ -704,7 +705,7 @@ class TestEndToEnd:
                 {
                     "type": "policy_document",
                     "url": "https://policy.ucop.edu/doc/3000127",
-                    "section": "§ 4.2",
+                    "section": "\u00a7 4.2",
                 },
             ],
         }
@@ -723,7 +724,8 @@ class TestEndToEnd:
         assert result is not None
         assert result["relevant"] is True
         assert result["actionable"] is True
-        assert result["lead_title"] == "UC Political Activities — Facial 1A Speech Restrictions"
+        expected_title = "UC Political Activities \u2014 Facial 1A Speech Restrictions"
+        assert result["lead_title"] == expected_title
         assert len(result["provisions"]) == 1
         assert result["provisions"][0]["severity"] == "high"
         assert result["provisions"][0]["quoted_language"] != ""
@@ -939,8 +941,15 @@ class TestFetchUrlContentAllowlist:
         """.gov URL passes allowlist and returns fetched content."""
         import respx
 
-        with respx.mock:
-            respx.get("https://example.gov/doc.pdf").mock(
+        with (
+            respx.mock,
+            patch(
+                "osint_core.services.deep_analyzer._resolve_and_validate",
+                new_callable=AsyncMock,
+                return_value="93.184.216.34",
+            ),
+        ):
+            respx.get("https://93.184.216.34/doc.pdf").mock(
                 return_value=httpx.Response(200, content=b"policy document bytes")
             )
             result = await analyzer._fetch_url_content("https://example.gov/doc.pdf")
@@ -1071,3 +1080,193 @@ class TestResponseSizeLimit:
                 client, "http://news.example.com/big-article"
             )
         assert resp is None
+
+
+# ---------------------------------------------------------------
+# DNS rebinding TOCTOU mitigation
+# ---------------------------------------------------------------
+
+
+class TestResolveAndValidate:
+    """Unit tests for _resolve_and_validate helper."""
+
+    @pytest.mark.asyncio
+    async def test_returns_resolved_ip_for_public_hostname(self) -> None:
+        """Public hostname resolution returns the IP string."""
+        import asyncio
+
+        async def _fake_resolve(host, port, *, family=0, type=0, proto=0, flags=0):
+            return [(2, 1, 6, "", ("93.184.216.34", 0))]
+
+        loop = asyncio.get_running_loop()
+        loop.getaddrinfo = _fake_resolve
+
+        result = await _resolve_and_validate("http://example.com/page")
+        assert result == "93.184.216.34"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_for_private_ip_literal(self) -> None:
+        result = await _resolve_and_validate("http://192.168.1.1/admin")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_dns_resolves_to_private(self) -> None:
+        import asyncio
+
+        async def _resolve_private(host, port, *, family=0, type=0, proto=0, flags=0):
+            return [(2, 1, 6, "", ("10.0.0.5", 0))]
+
+        loop = asyncio.get_running_loop()
+        loop.getaddrinfo = _resolve_private
+
+        result = await _resolve_and_validate("http://evil.com/payload")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_for_bad_scheme(self) -> None:
+        result = await _resolve_and_validate("ftp://example.com/file")
+        assert result is None
+
+
+class TestDnsRebindingMitigation:
+    """Verify that HTTP requests use the pre-validated IP, not a re-resolved one."""
+
+    @pytest.mark.asyncio
+    async def test_safe_get_uses_pinned_ip(self) -> None:
+        """DNS rebinding: second resolution returns private IP, but request
+        must use the first (public) IP captured during validation."""
+        import asyncio
+
+        call_count = 0
+
+        async def _rebinding_dns(host, port, *, family=0, type=0, proto=0, flags=0):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call (validation): return public IP
+                return [(2, 1, 6, "", ("93.184.216.34", 0))]
+            # Subsequent calls: attacker rebinds to private IP
+            return [(2, 1, 6, "", ("10.0.0.5", 0))]
+
+        loop = asyncio.get_running_loop()
+        loop.getaddrinfo = _rebinding_dns
+
+        # Track which Host header the request carries
+        captured_host = None
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            nonlocal captured_host
+            captured_host = req.headers.get("host")
+            return httpx.Response(200, text="<p>OK</p>")
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://example.com/article"
+            )
+
+        # Request must succeed (the validated IP was public)
+        assert resp is not None
+        assert resp.status_code == 200
+        # Host header must be the original hostname for virtual hosting
+        assert captured_host == "example.com"
+        # DNS should only be called once (during validation); the pinned IP
+        # is used for the actual request without re-resolving
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_fetch_url_content_uses_pinned_ip(self) -> None:
+        """_fetch_url_content must connect to the pre-validated IP."""
+        import asyncio
+
+        call_count = 0
+
+        async def _rebinding_dns(host, port, *, family=0, type=0, proto=0, flags=0):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return [(2, 1, 6, "", ("93.184.216.34", 0))]
+            return [(2, 1, 6, "", ("10.0.0.5", 0))]
+
+        loop = asyncio.get_running_loop()
+        loop.getaddrinfo = _rebinding_dns
+
+        analyzer = DeepAnalyzer(precedent_map={})
+
+        with patch(
+            "osint_core.services.deep_analyzer.httpx.AsyncClient",
+        ) as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.content = b"<p>Document</p>"
+            mock_resp.raise_for_status = MagicMock()
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            result = await analyzer._fetch_url_content("https://example.edu/policy.pdf")
+
+        assert result is not None
+        # Verify DNS was called exactly once (during validation)
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_safe_get_redirect_validates_each_hop(self) -> None:
+        """Each redirect hop must resolve and validate its target IP."""
+        import asyncio
+
+        resolved_hosts: list[str] = []
+
+        async def _tracking_dns(host, port, *, family=0, type=0, proto=0, flags=0):
+            resolved_hosts.append(host)
+            return [(2, 1, 6, "", ("93.184.216.34", 0))]
+
+        loop = asyncio.get_running_loop()
+        loop.getaddrinfo = _tracking_dns
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            if "start" in str(req.url):
+                return httpx.Response(
+                    301, headers={"Location": "http://news.example.com/final"}
+                )
+            return httpx.Response(200, text="<p>Final</p>")
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "http://example.com/start"
+            )
+
+        assert resp is not None
+        assert resp.status_code == 200
+        # Both hops should have been validated via DNS
+        assert len(resolved_hosts) == 2
+
+    @pytest.mark.asyncio
+    async def test_tls_sni_uses_original_hostname(self) -> None:
+        """TLS SNI/certificate validation must check the original hostname."""
+        import asyncio
+
+        async def _fake_resolve(host, port, *, family=0, type=0, proto=0, flags=0):
+            return [(2, 1, 6, "", ("93.184.216.34", 0))]
+
+        loop = asyncio.get_running_loop()
+        loop.getaddrinfo = _fake_resolve
+
+        captured_host = None
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            nonlocal captured_host
+            captured_host = req.headers.get("host")
+            return httpx.Response(200, text="<p>Secure</p>")
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            resp = await _safe_get_with_redirects(
+                client, "https://secure.example.com/page"
+            )
+
+        assert resp is not None
+        # Host header preserves original hostname for TLS SNI
+        assert captured_host == "secure.example.com"

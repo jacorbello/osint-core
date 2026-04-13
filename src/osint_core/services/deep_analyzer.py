@@ -65,15 +65,28 @@ def _parse_and_validate_url(url: str) -> str | None:
     return hostname or None
 
 
-async def _is_redirect_target_safe(url: str) -> bool:
-    """Validate that a redirect target uses http(s) and does not resolve to a private IP."""
+async def _resolve_and_validate(url: str) -> str | None:
+    """Resolve *url*'s hostname and validate that no address is private.
+
+    Returns the first resolved public IP as a string, or ``None`` when
+    the URL is invalid, uses a disallowed scheme, or resolves to a
+    private/reserved address.  The caller should connect to the returned
+    IP directly (with the original ``Host`` header) to prevent DNS
+    rebinding TOCTOU attacks.
+    """
     hostname = _parse_and_validate_url(url)
     if hostname is None:
-        return False
+        return None
 
-    # Check IP-literal hostnames directly
+    # IP-literal hostnames -- validate directly
     if _is_ip_private(hostname):
-        return False
+        return None
+    try:
+        ipaddress.ip_address(hostname)
+        # hostname is already a valid public IP literal
+        return hostname
+    except ValueError:
+        pass  # not an IP literal, resolve via DNS
 
     # Resolve hostname without blocking the event loop
     try:
@@ -81,14 +94,52 @@ async def _is_redirect_target_safe(url: str) -> bool:
         infos = await loop.getaddrinfo(
             hostname, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM,
         )
-        for _family, _type, _proto, _canonname, sockaddr in infos:
-            ip_str = str(sockaddr[0])
-            if _is_ip_private(ip_str):
-                return False
     except socket.gaierror:
-        pass  # DNS failure is not an SSRF risk; let the HTTP client handle it
+        return None  # DNS failure -- cannot validate
 
-    return True
+    if not infos:
+        return None
+
+    # Validate ALL resolved addresses; reject if any is private
+    for _family, _type, _proto, _canonname, sockaddr in infos:
+        ip_str = str(sockaddr[0])
+        if _is_ip_private(ip_str):
+            return None
+
+    # All addresses are public; use the first one
+    return str(infos[0][4][0])
+
+
+async def _is_redirect_target_safe(url: str) -> bool:
+    """Validate that a redirect target uses http(s) and does not resolve to a private IP."""
+    return (await _resolve_and_validate(url)) is not None
+
+
+def _pin_url_to_ip(url: str, ip: str) -> tuple[str, dict[str, str]]:
+    """Rewrite *url* to connect to *ip* directly, preserving the original Host header.
+
+    Returns ``(rewritten_url, headers_dict)`` where ``headers_dict``
+    contains the ``Host`` header set to the original hostname (and port,
+    if non-default).  The rewritten URL uses the IP in place of the
+    hostname so that ``httpx`` connects without a second DNS lookup.
+    """
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    port = parsed.port
+
+    # Build Host header (include port only when non-default)
+    if port and not (parsed.scheme == "http" and port == 80) and not (
+        parsed.scheme == "https" and port == 443
+    ):
+        host_header = f"{hostname}:{port}"
+    else:
+        host_header = hostname
+
+    # Rebuild netloc with IP (preserve port if present)
+    new_netloc = f"{ip}:{port}" if port else ip
+    pinned_url = parsed._replace(netloc=new_netloc).geturl()
+
+    return pinned_url, {"Host": host_header}
 
 
 def _check_content_length(headers: httpx.Headers, url: str) -> bool:
@@ -151,23 +202,34 @@ async def _safe_get_with_redirects(
     *,
     max_redirects: int = _MAX_REDIRECTS,
 ) -> httpx.Response | None:
-    """GET with manual redirect following, SSRF validation, and size limits."""
+    """GET with manual redirect following, SSRF validation, size limits, and DNS pinning.
+
+    At each hop the hostname is resolved and validated *once*; the HTTP
+    request is then sent to the validated IP directly (with the original
+    ``Host`` header) so that a DNS rebinding attack between validation
+    and connection is impossible.
+    """
     for _ in range(max_redirects + 1):
-        if not await _is_redirect_target_safe(url):
+        validated_ip = await _resolve_and_validate(url)
+        if validated_ip is None:
             logger.warning(
                 "redirect_target_blocked",
                 extra={"url": url, "reason": "private/reserved IP or bad scheme"},
             )
             return None
 
-        resp = await client.get(url, follow_redirects=False)
+        pinned_url, extra_headers = _pin_url_to_ip(url, validated_ip)
+        resp = await client.get(
+            pinned_url, headers=extra_headers, follow_redirects=False,
+        )
 
         if resp.is_redirect:
             location = resp.headers.get("Location")
             if not location:
                 return None
-            # Resolve relative redirects
-            url = str(resp.url.join(location))
+            # Resolve relative redirects against the *original* URL
+            # (not the IP-rewritten one) so relative paths work correctly
+            url = str(httpx.URL(url).join(location))
             continue
 
         # Check Content-Length before reading body
@@ -320,15 +382,15 @@ _SCREENING_SYSTEM_PROMPT = (
     "and generate a clean descriptive title.\n\n"
     "If the document is purely administrative (compensation, IT policies, procurement, "
     "facilities management), set relevant to false.\n\n"
-    "For each relevant section, provide a short reference string (e.g. '§ 4.2 - "
+    "For each relevant section, provide a short reference string (e.g. '\u00a7 4.2 - "
     "Pronoun Requirements') that identifies where in the document the issue appears.\n\n"
     "Respond with JSON:\n"
     '{"relevant": true, "language": "en", "lead_title": "Descriptive Title", '
     '"document_summary": "...", "overall_assessment": "...", '
-    '"flagged_sections": [{"section_reference": "§ 4.2 - Pronoun Requirements", '
+    '"flagged_sections": [{"section_reference": "\u00a7 4.2 - Pronoun Requirements", '
     '"reason": "Compelled speech concern", '
     '"constitutional_basis": "1A-free-speech"}, '
-    '{"section_reference": "§ 5.1 - Protest Zones", '
+    '{"section_reference": "\u00a7 5.1 - Protest Zones", '
     '"reason": "Assembly restriction", '
     '"constitutional_basis": "1A-assembly"}]}\n\n'
     "language: ISO 639-1 code (en, es, tl, etc.)\n"
@@ -341,10 +403,10 @@ _SCREENING_SYSTEM_PROMPT = (
 _PROVISION_SYSTEM_PROMPT = (
     "You are a constitutional law clerk for The Center For American Liberty "
     "performing detailed analysis of a specific policy section.\n\n"
-    "You MUST quote the EXACT language from the document — do not fabricate "
+    "You MUST quote the EXACT language from the document \u2014 do not fabricate "
     "or paraphrase. If you cannot find exact text to quote, say so.\n\n"
     "Respond with JSON:\n"
-    '{"section_reference": "§ X.Y", "quoted_language": "exact text from document", '
+    '{"section_reference": "\u00a7 X.Y", "quoted_language": "exact text from document", '
     '"constitutional_issue": "description of the issue", '
     '"constitutional_basis": "1A-free-speech", "severity": "high", '
     '"affected_population": "who is affected", '
@@ -360,7 +422,7 @@ _PROVISION_SYSTEM_PROMPT = (
 # Regex for extracting section numbers from references
 _SECTION_NUM_RE = re.compile(r"\d+(?:\.\d+)*")
 _SECTION_MARKER_RE = re.compile(
-    r"(?:§|Section|Article|Rule|PART)\s*(\d+(?:\.\d+)*)",
+    r"(?:\u00a7|Section|Article|Rule|PART)\s*(\d+(?:\.\d+)*)",
     re.IGNORECASE,
 )
 
@@ -406,7 +468,7 @@ class DeepAnalyzer:
         """
         ref_id = 1
 
-        # Source citations — deduplicated by section_reference
+        # Source citations -- deduplicated by section_reference
         seen_sections: set[str] = set()
         source_citations: list[dict[str, Any]] = []
         for prov in provisions:
@@ -483,7 +545,7 @@ class DeepAnalyzer:
         return await self._analyze_incident(lead, event)
 
     # ------------------------------------------------------------------
-    # Policy analysis — two-pass architecture
+    # Policy analysis -- two-pass architecture
     # ------------------------------------------------------------------
 
     async def _analyze_policy(
@@ -551,7 +613,7 @@ class DeepAnalyzer:
                 "provisions": [],
             }
 
-        # Step 4: Pass 1 — Screening
+        # Step 4: Pass 1 -- Screening
         screening = await self._screen_document(lead, event, text)
         if screening is None:
             logger.warning("deep_analysis_screening_failed", extra={"lead_id": str(lead.id)})
@@ -583,7 +645,7 @@ class DeepAnalyzer:
         # Step 5: Gather corroborating events (prefer caller-provided over stub)
         corroborating = corroborating_events or self._gather_corroborating_events(lead, event)
 
-        # Step 6: Pass 2 — Targeted provision analysis
+        # Step 6: Pass 2 -- Targeted provision analysis
         provisions: list[dict[str, Any]] = []
         for section_entry in flagged:
             # flagged_sections may be structured dicts or plain strings
@@ -695,7 +757,7 @@ class DeepAnalyzer:
         if nums:
             for num in nums:
                 pattern = re.compile(
-                    rf"(?:§|Section|Article|Rule|PART)\s*{re.escape(num)}",
+                    rf"(?:\u00a7|Section|Article|Rule|PART)\s*{re.escape(num)}",
                     re.IGNORECASE,
                 )
                 match = pattern.search(full_text)
@@ -704,7 +766,7 @@ class DeepAnalyzer:
                     end = min(len(full_text), match.start() + context_chars)
                     return full_text[start:end]
 
-        # Strategy 3: Fuzzy — search for significant words from section_ref
+        # Strategy 3: Fuzzy -- search for significant words from section_ref
         stop_words = {"the", "a", "an", "of", "in", "for", "and", "or", "to", "is", "at", "by"}
         words = [
             w for w in re.findall(r"[a-zA-Z]+", section_ref)
@@ -720,7 +782,7 @@ class DeepAnalyzer:
                     end = min(len(full_text), match.start() + context_chars)
                     return full_text[start:end]
 
-        # Strategy 4: Fallback — return start of document
+        # Strategy 4: Fallback -- return start of document
         return full_text[:context_chars]
 
     # ------------------------------------------------------------------
@@ -966,8 +1028,8 @@ class DeepAnalyzer:
         """Fetch document content from a URL as fallback when MinIO fails.
 
         Only allows .edu and .gov domains. Rejects private IPs,
-        disables redirect following to prevent SSRF, and enforces a
-        response size limit of ``_MAX_RESPONSE_BYTES``.
+        connects to the pre-validated IP to prevent DNS rebinding, and
+        enforces a response size limit of ``_MAX_RESPONSE_BYTES``.
         """
         if not self._is_url_allowed(url):
             logger.warning(
@@ -976,9 +1038,20 @@ class DeepAnalyzer:
             )
             return None
 
+        validated_ip = await _resolve_and_validate(url)
+        if validated_ip is None:
+            logger.warning(
+                "deep_analysis_url_blocked",
+                extra={"url": url, "reason": "DNS validation failed"},
+            )
+            return None
+
+        pinned_url, extra_headers = _pin_url_to_ip(url, validated_ip)
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(url, follow_redirects=False)
+                resp = await client.get(
+                    pinned_url, headers=extra_headers, follow_redirects=False,
+                )
                 resp.raise_for_status()
 
                 # Check Content-Length before reading body
