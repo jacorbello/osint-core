@@ -403,6 +403,68 @@ class TestProspectingReportGenerator:
                 await generator.generate_report(db)
 
     @pytest.mark.asyncio()
+    async def test_weasyprint_receives_custom_url_fetcher(self, generator):
+        """weasyprint.HTML must be called with a url_fetcher kwarg."""
+        leads = [_make_lead()]
+        db = _mock_db(leads)
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch("weasyprint.HTML") as mock_html:
+
+            mock_html.return_value.write_pdf.return_value = b"%PDF-1.4"
+            await generator.generate_report(db)
+
+        mock_html.assert_called_once()
+        call_kwargs = mock_html.call_args[1]
+        assert "url_fetcher" in call_kwargs
+        assert callable(call_kwargs["url_fetcher"])
+
+    @pytest.mark.asyncio()
+    async def test_blocked_url_fetcher_returns_empty_content(self, generator):
+        """The custom url_fetcher returns empty safe content for any URL."""
+        leads = [_make_lead()]
+        db = _mock_db(leads)
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch("weasyprint.HTML") as mock_html:
+
+            mock_html.return_value.write_pdf.return_value = b"%PDF-1.4"
+            await generator.generate_report(db)
+
+        fetcher = mock_html.call_args[1]["url_fetcher"]
+        for url in [
+            "https://evil.com/payload",
+            "http://169.254.169.254/metadata",
+            "file:///etc/passwd",
+        ]:
+            result = fetcher(url)
+            assert result["string"] == ""
+            assert result["mime_type"] == "text/plain"
+
+    @pytest.mark.asyncio()
+    async def test_blocked_url_fetcher_prevents_external_requests(self, generator):
+        """No real HTTP requests are made during PDF rendering."""
+        leads = [_make_lead()]
+        db = _mock_db(leads)
+
+        with patch(f"{_MOD}.llm_chat_completion", new_callable=AsyncMock, return_value="{}"), \
+             patch(f"{_MOD}._render_pdf_html", return_value="<html></html>"), \
+             patch(f"{_MOD}._archive_pdf", return_value="minio://ok"), \
+             patch("weasyprint.HTML") as mock_html, \
+             patch("urllib.request.urlopen") as mock_urlopen, \
+             patch("http.client.HTTPConnection") as mock_http:
+
+            mock_html.return_value.write_pdf.return_value = b"%PDF-1.4"
+            await generator.generate_report(db)
+
+        mock_urlopen.assert_not_called()
+        mock_http.assert_not_called()
+
+    @pytest.mark.asyncio()
     async def test_unverified_citations_flagged(self):
         leads = [_make_lead()]
         db = _mock_db(leads)
