@@ -34,6 +34,7 @@ from osint_core.services.document_extractor import DocumentExtractor
 logger = logging.getLogger(__name__)
 
 _MAX_REDIRECTS = 5
+_MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 def _is_ip_private(hostname: str) -> bool:
@@ -90,13 +91,67 @@ async def _is_redirect_target_safe(url: str) -> bool:
     return True
 
 
+def _check_content_length(headers: httpx.Headers, url: str) -> bool:
+    """Return True if Content-Length is present and exceeds the size limit."""
+    cl = headers.get("Content-Length")
+    if cl is not None:
+        try:
+            if int(cl) > _MAX_RESPONSE_BYTES:
+                logger.warning(
+                    "response_size_rejected",
+                    extra={
+                        "url": url,
+                        "content_length": cl,
+                        "max_bytes": _MAX_RESPONSE_BYTES,
+                        "reason": "Content-Length exceeds limit",
+                    },
+                )
+                return True
+        except ValueError:
+            pass
+    return False
+
+
+async def _read_body_with_limit(resp: httpx.Response, url: str) -> bytes | None:
+    """Read response body, aborting if it exceeds the size limit.
+
+    When Content-Length is absent, streams the body and aborts once
+    the cumulative size exceeds ``_MAX_RESPONSE_BYTES``.
+    Returns ``None`` if the limit is exceeded.
+    """
+    cl = resp.headers.get("Content-Length")
+    if cl is not None:
+        # Already validated by _check_content_length; safe to read fully
+        return resp.content
+
+    # No Content-Length — stream and enforce limit
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in resp.aiter_bytes():
+        total += len(chunk)
+        if total > _MAX_RESPONSE_BYTES:
+            logger.warning(
+                "response_size_rejected",
+                extra={
+                    "url": url,
+                    "bytes_read": total,
+                    "max_bytes": _MAX_RESPONSE_BYTES,
+                    "reason": "streaming body exceeds limit",
+                },
+            )
+            await resp.aclose()
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 async def _safe_get_with_redirects(
     client: httpx.AsyncClient,
     url: str,
     *,
     max_redirects: int = _MAX_REDIRECTS,
 ) -> httpx.Response | None:
-    """GET with manual redirect following and SSRF validation at every hop."""
+    """GET with manual redirect following, SSRF validation, and size limits."""
     for _ in range(max_redirects + 1):
         if not await _is_redirect_target_safe(url):
             logger.warning(
@@ -114,6 +169,23 @@ async def _safe_get_with_redirects(
             # Resolve relative redirects
             url = str(resp.url.join(location))
             continue
+
+        # Check Content-Length before reading body
+        if _check_content_length(resp.headers, url):
+            return None
+
+        # For responses without Content-Length, verify via streaming
+        cl = resp.headers.get("Content-Length")
+        if cl is None:
+            body = await _read_body_with_limit(resp, url)
+            if body is None:
+                return None
+            # Return a new response with the read body
+            return httpx.Response(
+                status_code=resp.status_code,
+                headers=resp.headers,
+                content=body,
+            )
 
         return resp
 
@@ -893,8 +965,9 @@ class DeepAnalyzer:
     async def _fetch_url_content(self, url: str) -> bytes | None:
         """Fetch document content from a URL as fallback when MinIO fails.
 
-        Only allows .edu and .gov domains. Rejects private IPs and
-        disables redirect following to prevent SSRF.
+        Only allows .edu and .gov domains. Rejects private IPs,
+        disables redirect following to prevent SSRF, and enforces a
+        response size limit of ``_MAX_RESPONSE_BYTES``.
         """
         if not self._is_url_allowed(url):
             logger.warning(
@@ -907,7 +980,14 @@ class DeepAnalyzer:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(url, follow_redirects=False)
                 resp.raise_for_status()
-                return resp.content
+
+                # Check Content-Length before reading body
+                if _check_content_length(resp.headers, url):
+                    return None
+
+                # Stream body if no Content-Length to enforce limit
+                body = await _read_body_with_limit(resp, url)
+                return body
         except Exception as exc:
             logger.warning(
                 "deep_analysis_url_fetch_failed",
