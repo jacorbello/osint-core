@@ -365,6 +365,7 @@ class ProspectingReportGenerator:
         all_leads = await _select_reportable_leads(db)
         if not all_leads:
             logger.info("prospecting_report_no_leads")
+            report_generation_total.labels(outcome="skipped").inc()
             return None
 
         now = datetime.now(UTC)
