@@ -77,6 +77,7 @@ def _build_db_mock(
 
     db.execute = AsyncMock(side_effect=execute_side_effect)
     db.add = MagicMock()
+    db.rollback = AsyncMock()
 
     if commit_error:
         db.commit = AsyncMock(side_effect=commit_error)
@@ -115,6 +116,7 @@ class TestAnalyzeLeadsCommitFailure:
         """db.commit() is called once at the end, so failure rolls back all updates."""
         pv = _make_plan_version()
         lead = _make_lead()
+        initial_status = lead.analysis_status
         event = _make_event()
         ctx, db = _build_db_mock(pv, [lead], event, commit_error=SQLAlchemyError("oops"))
 
@@ -131,6 +133,12 @@ class TestAnalyzeLeadsCommitFailure:
                 await _analyze_leads_async("plan-1")
 
         db.commit.assert_called_once()
+        # Verify analysis_status was mutated in memory (would be rolled back by
+        # the real async session context manager on commit failure).
+        assert initial_status == "pending"
+        assert lead.analysis_status != initial_status, (
+            "analysis_status should have been mutated in-memory before the failed commit"
+        )
 
     @pytest.mark.asyncio
     async def test_commit_failure_multiple_leads(self) -> None:
@@ -153,3 +161,9 @@ class TestAnalyzeLeadsCommitFailure:
                 await _analyze_leads_async("plan-1")
 
         db.commit.assert_called_once()
+        # Every lead should have been mutated in-memory before the failed commit;
+        # none should still be in the initial "pending" state.
+        for lead in leads:
+            assert lead.analysis_status != "pending", (
+                f"Lead {lead.id} analysis_status should have been mutated before commit"
+            )
