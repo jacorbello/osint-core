@@ -19,7 +19,7 @@ from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osint_core.llm import llm_chat_completion
-from osint_core.metrics import report_leads_total
+from osint_core.metrics import report_generation_total, report_leads_total
 from osint_core.models.lead import Lead
 from osint_core.models.report import Report
 from osint_core.services.courtlistener import CourtListenerClient
@@ -518,6 +518,16 @@ class ProspectingReportGenerator:
             stage="rendered",
             rendered=len(lead_contexts),
         )
+
+        # Guard: all selected leads were filtered out — skip report generation
+        if not lead_contexts:
+            logger.info(
+                "report_skipped_no_rendered_leads",
+                selected=len(all_leads),
+                filtered=len(all_leads) - len(rendered_lead_ids),
+            )
+            report_generation_total.labels(outcome="skipped").inc()
+            return None
 
         # Build summary stats from rendered leads only (lead_contexts),
         # not from the pre-filter `leads` list, so cover page stats match

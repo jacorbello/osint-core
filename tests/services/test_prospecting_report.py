@@ -1424,3 +1424,78 @@ class TestStructuredLoggingContext:
         assert "reportable" in progress_calls[1].kwargs
         assert progress_calls[2].kwargs["stage"] == "rendered"
         assert "rendered" in progress_calls[2].kwargs
+
+
+class TestZeroLeadGuard:
+    """When all selected leads are filtered out, no report should be generated."""
+
+    @pytest.fixture()
+    def generator(self):
+        return ProspectingReportGenerator()
+
+    @pytest.mark.asyncio()
+    async def test_returns_none_when_all_leads_filtered(self, generator):
+        """generate_report returns None when lead_contexts is empty after filtering."""
+        lead1 = _make_lead(title="\u4e2d\u6587\u6807\u9898")
+        lead2 = _make_lead(title="\u65e5\u672c\u8a9e\u30bf\u30a4\u30c8\u30eb")
+        db = _mock_db([lead1, lead2])
+
+        result = await generator.generate_report(db)
+
+        assert result is None
+
+    @pytest.mark.asyncio()
+    async def test_no_report_record_created(self, generator):
+        """No Report record is added to the session when all leads are filtered."""
+        lead = _make_lead(title="\u4e2d\u6587\u6807\u9898")
+        db = _mock_db([lead])
+
+        await generator.generate_report(db)
+
+        db.add.assert_not_called()
+        db.commit.assert_not_called()
+
+    @pytest.mark.asyncio()
+    async def test_skipped_metric_incremented(self, generator):
+        """report_generation_total{outcome=skipped} increments when all leads filtered."""
+        from osint_core import metrics
+
+        lead = _make_lead(title="\u4e2d\u6587\u6807\u9898")
+        db = _mock_db([lead])
+
+        before = metrics.report_generation_total.labels(outcome="skipped")._value.get()
+
+        await generator.generate_report(db)
+
+        after = metrics.report_generation_total.labels(outcome="skipped")._value.get()
+        assert after == before + 1
+
+    @pytest.mark.asyncio()
+    async def test_structured_log_emitted(self, generator):
+        """A report_skipped_no_rendered_leads log event is emitted."""
+        lead = _make_lead(title="\u4e2d\u6587\u6807\u9898")
+        db = _mock_db([lead])
+
+        with patch(f"{_MOD}.logger") as mock_logger:
+            await generator.generate_report(db)
+
+        skip_calls = [
+            c for c in mock_logger.info.call_args_list
+            if c.args and c.args[0] == "report_skipped_no_rendered_leads"
+        ]
+        assert len(skip_calls) == 1
+        assert "selected" in skip_calls[0].kwargs
+        assert "filtered" in skip_calls[0].kwargs
+
+    @pytest.mark.asyncio()
+    async def test_no_pdf_rendered_or_archived(self, generator):
+        """No PDF rendering or MinIO upload occurs when all leads are filtered."""
+        lead = _make_lead(title="\u4e2d\u6587\u6807\u9898")
+        db = _mock_db([lead])
+
+        with patch(f"{_MOD}._render_pdf_html") as mock_render, \
+             patch(f"{_MOD}._archive_pdf") as mock_archive:
+            await generator.generate_report(db)
+
+        mock_render.assert_not_called()
+        mock_archive.assert_not_called()
