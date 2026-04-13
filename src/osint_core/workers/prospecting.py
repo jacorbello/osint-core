@@ -458,7 +458,6 @@ async def _generate_report_async(attempt: int = 0) -> dict[str, Any]:
 
         if result is None:
             logger.info("prospecting_report_skipped: no new leads")
-            report_generation_total.labels(outcome="skipped").inc()
             return {"status": "skipped", "reason": "no_new_leads"}
 
         # Load plan content for per-plan recipients

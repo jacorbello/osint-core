@@ -541,10 +541,10 @@ class TestReportMetricsEmission:
 
     @pytest.mark.asyncio()
     @patch("osint_core.workers.prospecting.async_session")
-    async def test_skipped_report_increments_generation_total(
+    async def test_skipped_report_does_not_double_increment_generation_total(
         self, mock_session: MagicMock,
     ) -> None:
-        """When no leads exist, report_generation_total{outcome=skipped} increments."""
+        """Worker must not increment skipped counter; service layer owns it."""
         mock_db = AsyncMock()
         mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
         mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -566,7 +566,7 @@ class TestReportMetricsEmission:
             await _generate_report_async()
 
         after = metrics.report_generation_total.labels(outcome="skipped")._value.get()
-        assert after == before + 1
+        assert after == before
 
     @pytest.mark.asyncio()
     @patch("osint_core.workers.prospecting.async_session")

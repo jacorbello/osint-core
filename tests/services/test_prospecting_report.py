@@ -1592,3 +1592,17 @@ class TestZeroLeadGuard:
 
         mock_render.assert_not_called()
         mock_archive.assert_not_called()
+
+    @pytest.mark.asyncio()
+    async def test_no_leads_selected_skipped_metric_incremented(self, generator):
+        """report_generation_total{outcome=skipped} increments when no leads selected."""
+        from osint_core import metrics
+
+        db = _mock_db([])
+
+        before = metrics.report_generation_total.labels(outcome="skipped")._value.get()
+
+        await generator.generate_report(db)
+
+        after = metrics.report_generation_total.labels(outcome="skipped")._value.get()
+        assert after == before + 1
