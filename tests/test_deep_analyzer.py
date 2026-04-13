@@ -915,3 +915,33 @@ class TestSafeGetWithRedirects:
                 client, "http://192.168.1.1/admin"
             )
         assert resp is None
+
+
+class TestFetchUrlContentAllowlist:
+    """Tests for _fetch_url_content domain allowlist enforcement."""
+
+    @pytest.fixture()
+    def analyzer(self) -> DeepAnalyzer:
+        return DeepAnalyzer(precedent_map={})
+
+    @pytest.mark.asyncio
+    async def test_blocked_domain_returns_none(self, analyzer: DeepAnalyzer) -> None:
+        """A .com URL is rejected without making any HTTP request."""
+        with patch("osint_core.services.deep_analyzer.httpx.AsyncClient") as mock_client:
+            result = await analyzer._fetch_url_content("https://evil.com/payload")
+
+        assert result is None
+        mock_client.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_allowed_gov_domain_returns_content(self, analyzer: DeepAnalyzer) -> None:
+        """.gov URL passes allowlist and returns fetched content."""
+        import respx
+
+        with respx.mock:
+            respx.get("https://example.gov/doc.pdf").mock(
+                return_value=httpx.Response(200, content=b"policy document bytes")
+            )
+            result = await analyzer._fetch_url_content("https://example.gov/doc.pdf")
+
+        assert result == b"policy document bytes"
