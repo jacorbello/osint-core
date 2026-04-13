@@ -851,13 +851,136 @@ class TestGenerationFailureMetrics:
         mock_guard: MagicMock,
     ) -> None:
         """report_generation_total{outcome=failed} increments when generation
-        raises an exception and retries are exhausted."""
-        from celery.exceptions import Retry
-
+        raises an exception and retries are exhausted (0 deferrals)."""
         from osint_core.workers.prospecting import generate_prospecting_report_task
 
         mock_guard.return_value = MagicMock(
             should_defer=False, deferrals=0,
+        )
+
+        before = metrics.report_generation_total.labels(outcome="failed")._value.get()
+
+        with (
+            patch(
+                "osint_core.workers.prospecting.asyncio.new_event_loop",
+            ) as mock_loop_factory,
+            patch.object(
+                generate_prospecting_report_task, "retry",
+            ) as mock_retry,
+        ):
+            loop = MagicMock()
+            loop.run_until_complete.side_effect = RuntimeError("generation boom")
+            mock_loop_factory.return_value = loop
+
+            # retries=3 with 0 deferrals => 3 genuine retries exhausted
+            generate_prospecting_report_task.push_request(retries=3)
+            try:
+                with pytest.raises(RuntimeError, match="generation boom"):
+                    generate_prospecting_report_task()
+            finally:
+                generate_prospecting_report_task.pop_request()
+
+            # retry must NOT be called when generation retries are exhausted
+            mock_retry.assert_not_called()
+
+        after = metrics.report_generation_total.labels(outcome="failed")._value.get()
+        assert after == before + 1
+
+    @patch("osint_core.workers.prospecting._check_pipeline_guard")
+    def test_deferral_then_failure_fires_failed_metric(
+        self,
+        mock_guard: MagicMock,
+    ) -> None:
+        """Task defers 2 times then exhausts 3 generation retries: failed
+        metric fires exactly once and task does not retry further."""
+        from osint_core.workers.prospecting import generate_prospecting_report_task
+
+        deferrals = 2
+        mock_guard.return_value = MagicMock(
+            should_defer=False, deferrals=deferrals,
+        )
+
+        before = metrics.report_generation_total.labels(outcome="failed")._value.get()
+
+        with (
+            patch(
+                "osint_core.workers.prospecting.asyncio.new_event_loop",
+            ) as mock_loop_factory,
+            patch.object(
+                generate_prospecting_report_task, "retry",
+            ) as mock_retry,
+        ):
+            loop = MagicMock()
+            loop.run_until_complete.side_effect = RuntimeError("generation boom")
+            mock_loop_factory.return_value = loop
+
+            # retries=deferrals+3 means 3 genuine retries exhausted
+            generate_prospecting_report_task.push_request(
+                retries=deferrals + 3,
+            )
+            try:
+                with pytest.raises(RuntimeError, match="generation boom"):
+                    generate_prospecting_report_task()
+            finally:
+                generate_prospecting_report_task.pop_request()
+
+            mock_retry.assert_not_called()
+
+        after = metrics.report_generation_total.labels(outcome="failed")._value.get()
+        assert after == before + 1
+
+    @patch("osint_core.workers.prospecting._check_pipeline_guard")
+    def test_zero_deferrals_failure_fires_failed_metric(
+        self,
+        mock_guard: MagicMock,
+    ) -> None:
+        """Task fails 3 times with 0 deferrals: failed metric fires on final failure."""
+        from osint_core.workers.prospecting import generate_prospecting_report_task
+
+        mock_guard.return_value = MagicMock(
+            should_defer=False, deferrals=0,
+        )
+
+        before = metrics.report_generation_total.labels(outcome="failed")._value.get()
+
+        with (
+            patch(
+                "osint_core.workers.prospecting.asyncio.new_event_loop",
+            ) as mock_loop_factory,
+            patch.object(
+                generate_prospecting_report_task, "retry",
+            ) as mock_retry,
+        ):
+            loop = MagicMock()
+            loop.run_until_complete.side_effect = RuntimeError("generation boom")
+            mock_loop_factory.return_value = loop
+
+            # retries=3 with 0 deferrals means 3 genuine retries exhausted
+            generate_prospecting_report_task.push_request(retries=3)
+            try:
+                with pytest.raises(RuntimeError, match="generation boom"):
+                    generate_prospecting_report_task()
+            finally:
+                generate_prospecting_report_task.pop_request()
+
+            mock_retry.assert_not_called()
+
+        after = metrics.report_generation_total.labels(outcome="failed")._value.get()
+        assert after == before + 1
+
+    @patch("osint_core.workers.prospecting._check_pipeline_guard")
+    def test_failed_metric_does_not_fire_before_retries_exhausted(
+        self,
+        mock_guard: MagicMock,
+    ) -> None:
+        """Metric does not fire when genuine retries are not yet exhausted."""
+        from celery.exceptions import Retry
+
+        from osint_core.workers.prospecting import generate_prospecting_report_task
+
+        deferrals = 2
+        mock_guard.return_value = MagicMock(
+            should_defer=False, deferrals=deferrals,
         )
 
         before = metrics.report_generation_total.labels(outcome="failed")._value.get()
@@ -874,8 +997,10 @@ class TestGenerationFailureMetrics:
             loop.run_until_complete.side_effect = RuntimeError("generation boom")
             mock_loop_factory.return_value = loop
 
-            # Push a fake request context with retries=3 so retries_used >= 3
-            generate_prospecting_report_task.push_request(retries=3)
+            # retries=deferrals+1 means only 1 genuine failure so far
+            generate_prospecting_report_task.push_request(
+                retries=deferrals + 1,
+            )
             try:
                 with pytest.raises(Retry):
                     generate_prospecting_report_task()
@@ -883,4 +1008,4 @@ class TestGenerationFailureMetrics:
                 generate_prospecting_report_task.pop_request()
 
         after = metrics.report_generation_total.labels(outcome="failed")._value.get()
-        assert after == before + 1
+        assert after == before
