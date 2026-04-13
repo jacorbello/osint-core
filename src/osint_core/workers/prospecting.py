@@ -32,6 +32,7 @@ _MATCH_LEADS_TASK_NAME = "osint.match_leads"
 _ANALYSIS_TASK_NAME = "osint.analyze_leads"
 _GUARD_MAX_DEFERRALS = 5
 _GUARD_BACKOFF_BASE = 120  # seconds; delay = base * (attempt + 1), capped at 600
+_GENERATION_MAX_RETRIES = 3
 
 
 def _source_type_label(source_id: str) -> str:
@@ -628,7 +629,7 @@ def _check_pipeline_guard(headers: dict[str, Any] | None) -> PipelineGuardResult
 @celery_app.task(  # type: ignore[untyped-decorator]
     bind=True,
     name="osint.generate_prospecting_report",
-    max_retries=3 + _GUARD_MAX_DEFERRALS,
+    max_retries=_GENERATION_MAX_RETRIES + _GUARD_MAX_DEFERRALS,
 )
 def generate_prospecting_report_task(self: Any) -> dict[str, Any]:
     """Generate a prospecting report and email it via Resend.
@@ -658,12 +659,12 @@ def generate_prospecting_report_task(self: Any) -> dict[str, Any]:
         )
     except Exception as exc:
         logger.exception("Prospecting report generation failed")
-        # Only count as a final failure when all retries are exhausted
         retries_used = self.request.retries - guard.deferrals
-        if retries_used >= 3:  # max_retries for generation (excluding guard deferrals)
+        if retries_used >= _GENERATION_MAX_RETRIES:
             from osint_core.metrics import report_generation_total
 
             report_generation_total.labels(outcome="failed").inc()
+            raise
         raise self.retry(
             exc=exc,
             countdown=min(2 ** self.request.retries * 60, 300),
